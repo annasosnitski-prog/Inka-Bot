@@ -2,6 +2,13 @@ const AIRTABLE_TOKEN = process.env.AIRTABLE_TOKEN!;
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID!;
 const AIRTABLE_TABLE_ID = process.env.AIRTABLE_TABLE_ID!;
 
+console.log('AIRTABLE env check:', {
+  tokenPresent: !!AIRTABLE_TOKEN,
+  tokenLength: AIRTABLE_TOKEN ? AIRTABLE_TOKEN.length : 0,
+  baseId: AIRTABLE_BASE_ID,
+  tableId: AIRTABLE_TABLE_ID,
+});
+
 const AIRTABLE_API_URL = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_ID}`;
 
 export interface ClientRecord {
