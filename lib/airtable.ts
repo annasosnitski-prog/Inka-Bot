@@ -12,7 +12,7 @@ export interface ClientRecord {
 export async function findClientByTelegramId(
   telegramId: number | string
 ): Promise<ClientRecord | null> {
-  const formula = encodeURIComponent(`{telegram_id} = '${telegramId}'`);
+  const formula = encodeURIComponent(`{telegram_id} = ${Number(telegramId)}`);
   const url = `${AIRTABLE_API_URL}?filterByFormula=${formula}&maxRecords=1`;
 
   const res = await fetch(url, {
@@ -37,7 +37,7 @@ export async function createClient(fields: Record<string, any>): Promise<ClientR
       Authorization: `Bearer ${AIRTABLE_TOKEN}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ fields }),
+    body: JSON.stringify({ fields, typecast: true }),
   });
 
   if (!res.ok) {
@@ -58,7 +58,7 @@ export async function updateClient(
       Authorization: `Bearer ${AIRTABLE_TOKEN}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ fields }),
+    body: JSON.stringify({ fields, typecast: true }),
   });
 
   if (!res.ok) {
@@ -81,7 +81,7 @@ export async function upsertClient(
   }
 
   const created = await createClient({
-    telegram_id: String(telegramId),
+    telegram_id: Number(telegramId),
     ...commonFields,
     ...createOnlyFields,
   });
