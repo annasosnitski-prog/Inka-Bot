@@ -2,8 +2,10 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { upsertClient, findClientByTelegramId } from '../../lib/airtable';
 import { runExtractor } from '../../lib/extractor';
 import { getNextStep, getCardPatchForStep } from '../../lib/stateMachine';
-import type { ClientCard, MessageSignals } from '../../lib/stateMachine';
+import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
+import { getAvailableSlots, bookSlot } from '../../lib/calendar';
+import type { SlotType } from '../../lib/calendar';
 
 // Master's own Telegram ID — admin/test mode detection.
 // ЗАГЛУШКА на шаге 3-4: admin_mode сейчас просто отвечает заглушкой,
@@ -43,26 +45,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const firstName = message.from?.first_name ?? '';
   const hasPhoto = !!message.photo;
   const photoCaption: string | null = message.caption ?? null;
-  // Текст для Extractor: обычный текст сообщения, или подпись к фото,
-  // или null если это фото без подписи.
   const messageText: string | null = message.text ?? message.caption ?? null;
-  // То, что попадёт в last_message в Airtable (для истории/дебага) —
-  // всегда что-то читаемое, даже если это просто фото без подписи.
   const lastMessageForRecord =
     messageText ?? '[клиент прислал фото без подписи]';
 
   const isAdminSender = telegramId === MASTER_TELEGRAM_ID;
+  const clientLabel = firstName || username || String(telegramId);
 
   try {
-    // 1. Найти текущую карточку клиента (если есть) — нужна КАК ЕСТЬ
-    // для Extractor (он сам решает, что менять, а что оставить).
+    // 1. Найти текущую карточку клиента (если есть).
     const existing = await findClientByTelegramId(telegramId);
     const currentCard = recordToClientCard(telegramId, existing?.fields ?? {});
 
     // 2. EXTRACTOR — разобрать сообщение клиента на поля.
-    // Admin-сообщения тоже прогоняем через Extractor (он не должен
-    // ставить injection/out_of_scope для админа — это в его промпте),
-    // но в норме для админа большинство полей не имеют значения.
     const extracted = await runExtractor({
       currentCard,
       messageText,
@@ -71,16 +66,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       isAdminSender,
     });
 
-    // 3. Слить новую карточку: то, что Extractor вернул, перекрывает
-    // старое значение, ЕСЛИ это не null (Extractor обязан возвращать
-    // старое значение, если ничего не поменялось — но на всякий
-    // случай не затираем непустые поля пустыми).
+    // 3. Слить новую карточку.
     const mergedCard: ClientCard = mergeCard(currentCard, extracted, {
       hasPhotoThisMessage: hasPhoto,
       photoHasCaption: hasPhoto && !!photoCaption,
     });
 
-    // 4. STATE MACHINE — чистый код решает NEXT_STEP.
     const signals: MessageSignals = {
       is_admin_sender: isAdminSender,
       is_prompt_injection: extracted.is_prompt_injection,
@@ -90,15 +81,69 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       client_asks_for_more_slots: extracted.client_asks_for_more_slots,
       client_wants_to_reschedule: extracted.client_wants_to_reschedule,
     };
-    const nextStep = getNextStep(mergedCard, signals);
-    const patch = getCardPatchForStep(nextStep, mergedCard);
 
-    // 5. Финальная карточка для сохранения = слитая карточка + патч
-    // от state machine (статусы/спам-счётчик/сброс слота).
-    const finalCard: ClientCard = { ...mergedCard, ...patch };
+    // 4. STATE MACHINE — первый проход с тем, что уже знаем
+    // (slot_options из Airtable могут быть устаревшими — сейчас
+    // только определяем, в какую сторону движется диалог).
+    let nextStep = getNextStep(mergedCard, signals);
 
-    // 6. Сохранить в Airtable. last_message и photos_count обновляем
-    // тут же, отдельно от Extractor-полей.
+    // 5. CALENDAR — если следующий шаг требует показать слоты, или
+    // мы уже на этапе "слоты показаны" (клиент выбирает/уточняет) —
+    // подгружаем АКТУАЛЬНЫЙ список из календаря и пересчитываем шаг
+    // ещё раз с реальными данными. Это не дублирует логику state
+    // machine — просто даёт ей правильный вход.
+    let liveCard = mergedCard;
+
+    const needsFreshSlots =
+      nextStep === 'show_tattoo_slots' ||
+      nextStep === 'show_consultation_slots' ||
+      mergedCard.lead_status === 'slots_shown';
+
+    if (needsFreshSlots) {
+      const slotType: SlotType = mergedCard.direct_tattoo_allowed === 'yes' ? 'tattoo' : 'consultation';
+      try {
+        const slots = await getAvailableSlots(slotType);
+        liveCard = { ...mergedCard, slot_options: slots.map((s) => s.id) };
+        nextStep = getNextStep(liveCard, signals);
+      } catch (calErr) {
+        console.error('Calendar lookup failed, falling back to no slots:', calErr);
+        liveCard = { ...mergedCard, slot_options: null };
+        nextStep = getNextStep(liveCard, signals);
+      }
+    }
+
+    // 6. БРОНИРОВАНИЕ — если шаг подтверждает запись, реально
+    // переименовываем событие в календаре. Если бронирование не
+    // удалось (слот увели секунду назад) — откатываем на повторный
+    // выбор, не притворяясь, что всё прошло гладко.
+    if (
+      (nextStep === 'confirm_slot_awaiting_payment' || nextStep === 'confirm_consultation_booked') &&
+      signals.client_picked_slot_id
+    ) {
+      const slotType: SlotType = nextStep === 'confirm_slot_awaiting_payment' ? 'tattoo' : 'consultation';
+      const result = await bookSlot(signals.client_picked_slot_id, slotType, clientLabel);
+
+      if (!result.success) {
+        console.log('Booking failed, refetching slots:', result.error);
+        // Слот увели — подгружаем свежий список и просим выбрать снова.
+        const freshSlots = await getAvailableSlots(slotType).catch(() => []);
+        liveCard = {
+          ...liveCard,
+          chosen_slot_id: null,
+          slot_options: freshSlots.map((s) => s.id),
+        };
+        nextStep = 'slot_taken_pick_again';
+      } else {
+        liveCard = { ...liveCard, chosen_slot_id: signals.client_picked_slot_id };
+      }
+    }
+
+    // 7. Патч от state machine (статусы/спам-счётчик/сброс слота) —
+    // считаем по финальному nextStep, не по первому черновому.
+    const patch = getCardPatchForStep(nextStep, liveCard);
+    const finalCard: ClientCard = { ...liveCard, ...patch };
+
+    // 8. Сохранить в Airtable.
     const photosCountIncrement = hasPhoto ? 1 : 0;
     const fieldsToSave = clientCardToAirtableFields(finalCard, {
       username,
@@ -115,21 +160,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     console.log('Airtable saved:', { recordId: record.id, nextStep });
 
-    // 7. RESPONDER — написать живой ответ клиенту (или '' для silence).
+    // 9. RESPONDER — написать живой ответ клиенту.
     const replyText = await runResponder({
       nextStep,
       clientCard: finalCard,
       lastClientMessage: messageText,
-      manualMode: false, // ручной режим Ани — отдельная функция, не этот webhook
+      manualMode: false,
     });
 
-    // 8. Отправить ответ, если он не пустой (silence_blocked → '').
+    // 10. Отправить ответ, если он не пустой.
     if (chatId && replyText) {
       await sendTelegramMessage(chatId, replyText);
     }
   } catch (err) {
     console.error('INKA-BOT pipeline error:', err);
-    // Не роняем webhook — Telegram будет ретраить иначе.
   }
 
   return res.status(200).json({ ok: true });
@@ -167,7 +211,7 @@ function recordToClientCard(
     chosen_slot_id: fields.chosen_slot_id ?? null,
     slot_options: parseSlotOptions(fields.slot_options),
     photos_count: fields.photos_count ?? 0,
-    has_photo_this_message: false, // выставляется заново на каждое сообщение
+    has_photo_this_message: false,
     photo_has_caption: false,
   };
 }
@@ -175,18 +219,12 @@ function recordToClientCard(
 function parseSlotOptions(raw: any): string[] | null {
   if (!raw) return null;
   if (Array.isArray(raw)) return raw;
-  // Airtable может хранить slot_options как строку с разделителями —
-  // на будущее, когда подключим Calendar (шаг 5), уточним точный формат.
   if (typeof raw === 'string' && raw.trim().length > 0) {
     return raw.split(',').map((s) => s.trim());
   }
   return null;
 }
 
-// Сливает текущую карточку с тем, что вернул Extractor. Extractor
-// обязан возвращать старое значение если ничего не изменилось — но
-// здесь дополнительная защита: null от Extractor не затирает
-// непустое существующее значение.
 function mergeCard(
   current: ClientCard,
   extracted: {
@@ -265,6 +303,7 @@ function clientCardToAirtableFields(
     skin_notes: card.skin_notes,
     spam_count: card.spam_count,
     chosen_slot_id: card.chosen_slot_id,
+    slot_options: card.slot_options ? card.slot_options.join(',') : '',
     photos_count: extra.photos_count,
   };
 }
