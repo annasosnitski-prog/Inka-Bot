@@ -125,17 +125,15 @@ export async function getAvailableSlots(type: SlotType, maxResults = 3): Promise
   const token = await getAccessToken();
   const tag = SLOT_TAG[type];
 
-  // Ищем события начиная с текущего момента — прошедшие слоты не
-  // интересны. q= ищет по тексту события (название), Google Calendar
-  // API делает это как полнотекстовый поиск, дальше дофильтровываем
-  // точным совпадением тега в начале названия и отсутствием маркеров
-  // занятости — сам API может зацепить лишнее по нечёткому совпадению.
+  // НЕ используем q= — полнотекстовый поиск Google Calendar API
+  // ненадёжно работает с квадратными скобками [ТАТУ]/[КОНС] (это
+  // спецсимволы для их поискового движка). Берём ВСЕ будущие события
+  // и фильтруем по точному совпадению тега кодом — надёжнее.
   const params = new URLSearchParams({
     timeMin: new Date().toISOString(),
     singleEvents: 'true',
     orderBy: 'startTime',
-    q: tag,
-    maxResults: '50', // берём с запасом, точная фильтрация — ниже кодом
+    maxResults: '100', // с запасом, точная фильтрация — ниже кодом
   });
 
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
@@ -153,6 +151,13 @@ export async function getAvailableSlots(type: SlotType, maxResults = 3): Promise
 
   const data = await response.json();
   const items: any[] = data.items ?? [];
+
+  // Диагностика: логируем что реально вернул календарь, чтобы видеть
+  // в Vercel Logs точные названия событий при отладке несовпадений.
+  console.log(
+    'Calendar events.list raw summaries:',
+    items.map((e) => e.summary)
+  );
 
   const freeSlots: AvailableSlot[] = items
     .filter((event) => {
