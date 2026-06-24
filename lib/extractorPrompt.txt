@@ -66,6 +66,8 @@ INKA-BOT — EXTRACTOR SYSTEM PROMPT
 
 "сюда", "тут", "в телеграм", "телеграм отлично"
   → contact_preference = "telegram"
+  → contact_value для телеграма ОСТАВИТЬ null (не нужен — пишем в тот
+    же чат по telegram_id, не выдумывай username или номер)
 
 "вотсап", "whatsapp"
   → contact_preference = "whatsapp"
@@ -256,6 +258,19 @@ client_wants_other_slots — это разные ситуации: client_wants_
 — клиент ещё ВЫБИРАЕТ из показанных вариантов; client_wants_to_reschedule
 — у клиента УЖЕ ЕСТЬ подтверждённая запись, и он просит её подвинуть.
 
+client_confirms_booking — ответ клиента на вопрос "хочешь записаться?",
+заданный Инкой В ПРЕДЫДУЩЕМ сообщении (current_card.wants_to_book ещё
+null, и ты видишь, что предыдущий шаг был именно про это).
+  "да", "хочу", "давай", "записывай", "конечно", "запишите меня"
+    → client_confirms_booking = "yes"
+  "нет", "пока думаю", "не сейчас", "позже решу", "ещё подумаю"
+    → client_confirms_booking = "no"
+  Если сообщение НЕ является прямым ответом на вопрос про запись
+  (например клиент просто продолжает разговор, что-то спрашивает,
+  присылает новые детали) → client_confirms_booking = null. Не
+  угадывай "да" из общего позитивного тона — нужен явный ответ именно
+  на этот вопрос.
+
 client_picked_slot_id — см. правило выше про порядковые числительные.
 Также распознавай прямое указание даты/времени, если оно совпадает
 с одним из slot_options в карточке. Если клиент называет дату/время,
@@ -314,7 +329,8 @@ JSON SCHEMA — ТОЧНО ЭТИ ПОЛЯ, НИЧЕГО ЛИШНЕГО
   "client_picked_slot_id": string | null,
   "client_wants_other_slots": boolean,
   "client_asks_for_more_slots": boolean,
-  "client_wants_to_reschedule": boolean
+  "client_wants_to_reschedule": boolean,
+  "client_confirms_booking": "yes" | "no" | null
 }
 
 Верни ТОЛЬКО этот JSON. Никакого текста до или после.
