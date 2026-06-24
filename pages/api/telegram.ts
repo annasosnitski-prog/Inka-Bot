@@ -88,17 +88,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // только определяем, в какую сторону движется диалог).
     let nextStep = getNextStep(mergedCard, signals);
 
-    // 5. CALENDAR — если следующий шаг требует показать слоты, или
-    // мы уже на этапе "слоты показаны" (клиент выбирает/уточняет) —
-    // подгружаем АКТУАЛЬНЫЙ список из календаря и пересчитываем шаг
-    // ещё раз с реальными данными. Это не дублирует логику state
-    // machine — просто даёт ей правильный вход.
+    // 5. CALENDAR — подгружаем АКТУАЛЬНЫЙ список слотов из календаря,
+    // если карточка УЖЕ дошла до точки, где слоты в принципе нужны:
+    // направление выбрано (direct_tattoo_allowed ИЛИ consultation_needed
+    // = "yes") И контакт уже известен. Это шире, чем просто проверка
+    // nextStep === 'show_*' — потому что если контакт стал известен
+    // ИМЕННО в этом сообщении (клиент только что ответил "в телеграм"),
+    // первый проход getNextStep() ещё видит старые пустые slot_options
+    // из Airtable и сразу решает "слотов нет" (no_more_slots_waiting),
+    // не успев их подгрузить. Проверяем по структуре карточки, а не по
+    // конкретному значению nextStep — иначе теряем именно тот момент,
+    // когда слоты нужны СРАЗУ на этом же сообщении.
     let liveCard = mergedCard;
 
-    const needsFreshSlots =
-      nextStep === 'show_tattoo_slots' ||
-      nextStep === 'show_consultation_slots' ||
-      mergedCard.lead_status === 'slots_shown';
+    const hasContact =
+      mergedCard.contact_preference === 'telegram' ||
+      (mergedCard.contact_preference === 'whatsapp' && !!mergedCard.contact_value);
+    const routeChosen =
+      mergedCard.direct_tattoo_allowed === 'yes' || mergedCard.consultation_needed === 'yes';
+    const needsFreshSlots = routeChosen && hasContact;
 
     if (needsFreshSlots) {
       const slotType: SlotType = mergedCard.direct_tattoo_allowed === 'yes' ? 'tattoo' : 'consultation';
