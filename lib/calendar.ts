@@ -42,6 +42,34 @@ export interface AvailableSlot {
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
+// Нормализует приватный ключ из env var, устойчиво к типичным
+// проблемам копирования через веб-интерфейс Vercel:
+// - буквальные "\n" вместо настоящих переводов строки;
+// - случайные обёрточные кавычки по краям ("..." или '...');
+// - лишние пробелы/переводы строк по краям;
+// - Windows-стиль \r\n вместо \n.
+function normalizePrivateKey(raw: string): string {
+  let key = raw.trim();
+
+  // Убрать обёрточные кавычки, если есть (иногда остаются при
+  // копировании из JSON-файла целиком).
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1);
+  }
+
+  // Буквальные "\n" (два символа: обратный слеш + n) → настоящий
+  // перевод строки.
+  key = key.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n');
+
+  // Настоящие \r\n (Windows) → \n.
+  key = key.replace(/\r\n/g, '\n');
+
+  return key.trim() + '\n';
+}
+
 async function getAccessToken(): Promise<string> {
   // Кэшируем токен на время жизни serverless-инстанса — Google токены
   // живут 1 час, нет смысла запрашивать новый на каждый вызов.
@@ -56,9 +84,18 @@ async function getAccessToken(): Promise<string> {
     throw new Error('GOOGLE_SERVICE_ACCOUNT_EMAIL or GOOGLE_PRIVATE_KEY not set');
   }
 
-  // В Vercel env vars ключ хранится с буквальными "\n" внутри строки —
-  // превращаем их в настоящие переводы строки для подписи JWT.
-  const privateKey = rawKey.replace(/\\n/g, '\n');
+  const privateKey = normalizePrivateKey(rawKey);
+
+  // Безопасная диагностика — НЕ печатаем сам ключ, только его форму,
+  // чтобы видеть в Vercel Logs, правильно ли он распознан, без утечки
+  // секрета.
+  console.log('GOOGLE_PRIVATE_KEY diagnostics:', {
+    rawLength: rawKey.length,
+    normalizedLength: privateKey.length,
+    startsWithHeader: privateKey.startsWith('-----BEGIN PRIVATE KEY-----'),
+    endsWithFooter: privateKey.trim().endsWith('-----END PRIVATE KEY-----'),
+    lineCount: privateKey.split('\n').length,
+  });
 
   const jwt = await buildSignedJwt(email, privateKey);
 
