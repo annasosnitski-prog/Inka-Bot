@@ -262,7 +262,13 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     if (card.first_tattoo === null) {
       return 'ask_first_tattoo';
     }
-    if (!card.contact_value) {
+    // Контакт считается известным, если выбран telegram (тогда отдельное
+    // значение не нужно — пишем в тот же чат по telegram_id) ИЛИ если
+    // выбран whatsapp И дано конкретное значение (номер).
+    const hasContact =
+      card.contact_preference === 'telegram' ||
+      (card.contact_preference === 'whatsapp' && !!card.contact_value);
+    if (!hasContact) {
       return 'ask_contact';
     }
     if (card.slot_options && card.slot_options.length > 0) {
@@ -273,7 +279,10 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
 
   // 11b. КОНСУЛЬТАЦИОННЫЙ ПУТЬ
   if (card.consultation_needed === 'yes') {
-    if (!card.contact_value) {
+    const hasContact =
+      card.contact_preference === 'telegram' ||
+      (card.contact_preference === 'whatsapp' && !!card.contact_value);
+    if (!hasContact) {
       return 'ask_contact';
     }
     if (card.slot_options && card.slot_options.length > 0) {
