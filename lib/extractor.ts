@@ -60,6 +60,7 @@ export interface ExtractorOutput {
   client_wants_other_slots: boolean;
   client_asks_for_more_slots: boolean;
   client_wants_to_reschedule: boolean;
+  client_confirms_booking: 'yes' | 'no' | null;
 }
 
 // ----------------------------------------------------------
@@ -136,13 +137,6 @@ export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutp
 // ----------------------------------------------------------
 function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput {
   const normalized = { ...raw };
-
-  // Admin не может одновременно быть injection/out_of_scope —
-  // это страховка на случай если модель ошиблась, реальную проверку
-  // is_admin_sender делает код раньше, в telegram.ts.
-  // (Сюда мы admin-флаг не пробрасываем обратно, он не часть этого
-  // вывода — но если модель сама что-то решила про injection при
-  // явном админе, лучше перестраховаться выше, на уровне вызова.)
 
   // category "large" | "body_fit" | "project" обязаны давать
   // consultation_needed = "yes" — досчитываем кодом, не доверяя
