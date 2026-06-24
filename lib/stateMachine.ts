@@ -76,6 +76,7 @@ export interface ClientCard {
   active_work_time_estimate: string | null; // "<=3h" | ">3h" | "unknown" | null
   price_quoted: string | null;
   price_explained: YesNo;
+  wants_to_book: YesNo; // явное подтверждение клиента "да, хочу записаться" после цены
   contact_preference: ContactPreference;
   contact_value: string | null;
   payment_status: PaymentStatus;
@@ -99,6 +100,7 @@ export interface MessageSignals {
   client_wants_other_slots: boolean; // "ничего не подходит", "другое время"
   client_asks_for_more_slots: boolean; // "а есть ещё?"
   client_wants_to_reschedule: boolean; // клиент с УЖЕ подтверждённой записью просит перенести
+  client_confirms_booking: YesNo; // ответ клиента на "хочешь записаться?" — yes/no/null если не отвечал на этот вопрос сейчас
 }
 
 export type NextStep =
@@ -115,6 +117,7 @@ export type NextStep =
   | 'ask_existing_tattoo_or_skin'
   | 'ask_skin_notes_detail'
   | 'quote_price'
+  | 'ask_wants_to_book'
   | 'ask_first_tattoo'
   | 'ask_contact'
   | 'show_tattoo_slots'
@@ -253,6 +256,20 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     return 'quote_price';
   }
 
+  // 10b. ПОДТВЕРЖДЕНИЕ НАМЕРЕНИЯ ЗАПИСАТЬСЯ.
+  // Клиент мог спрашивать цену просто из интереса, без намерения
+  // записываться прямо сейчас. Не тянем контакт/слоты без явного "да" —
+  // спрашиваем отдельно и ждём подтверждения. effectiveWantsToBook
+  // приоритизирует свежий сигнал из ТЕКУЩЕГО сообщения (signals) над
+  // тем, что уже сохранено в карточке — клиент мог передумать.
+  const effectiveWantsToBook = signals.client_confirms_booking ?? card.wants_to_book;
+  if (effectiveWantsToBook === null) {
+    return 'ask_wants_to_book';
+  }
+  if (effectiveWantsToBook === 'no') {
+    return 'all_done';
+  }
+
   // 11a. ПРЯМОЙ ПУТЬ НА ТАТУ
   if (card.direct_tattoo_allowed === 'yes') {
     // price_explained недостаточно для тату-слотов — нужен именно price_quoted.
@@ -308,29 +325,42 @@ export interface CardPatch {
   lead_status?: LeadStatus;
   spam_count?: 0 | 1 | 2 | 3;
   chosen_slot_id?: string | null;
+  wants_to_book?: YesNo;
 }
 
-export function getCardPatchForStep(step: NextStep, card: ClientCard): CardPatch {
+export function getCardPatchForStep(
+  step: NextStep,
+  card: ClientCard,
+  signals: MessageSignals
+): CardPatch {
+  // wants_to_book сохраняется в карточку НАВСЕГДА, в отличие от
+  // большинства signals полей — это не разовый сигнал сообщения, а
+  // факт про клиента, который должен помниться на следующих шагах.
+  const patch: CardPatch = {};
+  if (signals.client_confirms_booking !== null) {
+    patch.wants_to_book = signals.client_confirms_booking;
+  }
+
   switch (step) {
     case 'handle_out_of_scope_warning_1':
-      return { spam_count: 1 };
+      return { ...patch, spam_count: 1 };
     case 'handle_out_of_scope_warning_2':
-      return { spam_count: 2 };
+      return { ...patch, spam_count: 2 };
     case 'handle_out_of_scope_block':
-      return { spam_count: 3, lead_status: 'blocked' };
+      return { ...patch, spam_count: 3, lead_status: 'blocked' };
     case 'reschedule_requested_ping_master':
-      return { lead_status: 'waiting_slots_pinged' };
+      return { ...patch, lead_status: 'waiting_slots_pinged' };
     case 'slot_change_requested_waiting':
     case 'no_more_slots_waiting':
-      return { chosen_slot_id: null, lead_status: 'waiting_slots' };
+      return { ...patch, chosen_slot_id: null, lead_status: 'waiting_slots' };
     case 'show_tattoo_slots':
     case 'show_consultation_slots':
-      return { lead_status: 'slots_shown' };
+      return { ...patch, lead_status: 'slots_shown' };
     case 'confirm_slot_awaiting_payment':
-      return { lead_status: 'tattoo_booked_waiting_payment' };
+      return { ...patch, lead_status: 'tattoo_booked_waiting_payment' };
     case 'confirm_consultation_booked':
-      return { lead_status: 'consultation_booked' };
+      return { ...patch, lead_status: 'consultation_booked' };
     default:
-      return {};
+      return patch;
   }
 }
