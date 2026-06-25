@@ -42,17 +42,15 @@ export interface AvailableSlot {
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
-// Нормализует приватный ключ из env var, устойчиво к типичным
-// проблемам копирования через веб-интерфейс Vercel:
-// - буквальные "\n" вместо настоящих переводов строки;
-// - случайные обёрточные кавычки по краям ("..." или '...');
-// - лишние пробелы/переводы строк по краям;
-// - Windows-стиль \r\n вместо \n.
+// Нормализует приватный ключ из env var — ПУЛЕНЕПРОБИВАЕМАЯ версия.
+// Вместо попытки "почистить" разные варианты повреждения — извлекает
+// чистый base64-контент из любого формата (с \n, без \n, с кавычками,
+// с пробелами, с Windows-переводами строк) и пересобирает валидный
+// PEM с нуля. Работает при ЛЮБОМ способе хранения ключа в Vercel.
 function normalizePrivateKey(raw: string): string {
   let key = raw.trim();
 
-  // Убрать обёрточные кавычки, если есть (иногда остаются при
-  // копировании из JSON-файла целиком).
+  // Убрать обёрточные кавычки, если есть.
   if (
     (key.startsWith('"') && key.endsWith('"')) ||
     (key.startsWith("'") && key.endsWith("'"))
@@ -60,14 +58,33 @@ function normalizePrivateKey(raw: string): string {
     key = key.slice(1, -1);
   }
 
-  // Буквальные "\n" (два символа: обратный слеш + n) → настоящий
-  // перевод строки.
-  key = key.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n');
+  // Убрать все варианты переводов строк и escape-последовательностей,
+  // чтобы получить одну сплошную строку.
+  key = key.replace(/\\r\\n/g, ' ').replace(/\\n/g, ' ').replace(/\r\n/g, ' ').replace(/\n/g, ' ');
 
-  // Настоящие \r\n (Windows) → \n.
-  key = key.replace(/\r\n/g, '\n');
+  // Извлечь чистый base64-контент между BEGIN и END маркерами.
+  const match = key.match(
+    /-----BEGIN (?:RSA )?PRIVATE KEY-----\s*(.+?)\s*-----END (?:RSA )?PRIVATE KEY-----/
+  );
 
-  return key.trim() + '\n';
+  if (!match || !match[1]) {
+    // Если не нашли маркеры — вернуть как есть, пусть ошибка будет
+    // информативной (вместо молчаливого повреждения).
+    console.error('normalizePrivateKey: could not find PEM markers in key');
+    return raw;
+  }
+
+  // Убрать все пробелы из base64 — получаем чистый контент.
+  const base64Content = match[1].replace(/\s+/g, '');
+
+  // Пересобрать валидный PEM: разбить base64 на строки по 64 символа
+  // (стандарт PEM) и обернуть маркерами.
+  const lines: string[] = [];
+  for (let i = 0; i < base64Content.length; i += 64) {
+    lines.push(base64Content.substring(i, i + 64));
+  }
+
+  return `-----BEGIN PRIVATE KEY-----\n${lines.join('\n')}\n-----END PRIVATE KEY-----\n`;
 }
 
 async function getAccessToken(): Promise<string> {
