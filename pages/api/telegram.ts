@@ -52,6 +52,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const isAdminSender = telegramId === MASTER_TELEGRAM_ID;
   const clientLabel = firstName || username || String(telegramId);
 
+  // РЕЖИМ-ПЕРЕКЛЮЧАТЕЛЬ: команды /client и /admin.
+  // Перехватываются ЗДЕСЬ, до Extractor и до основного пайплайна —
+  // это не сообщение клиента, это управляющая команда. Работает
+  // ТОЛЬКО для isAdminSender (привязано к telegram_id, не к тексту
+  // команды) — с другого аккаунта эти слова ничего не делают и уйдут
+  // в обычный Extractor как непонятный текст.
+  if (isAdminSender && (messageText === '/client' || messageText === '/admin')) {
+    const newMode = messageText === '/client' ? 'yes' : null;
+    try {
+      await upsertClient(telegramId, { force_client_mode: newMode });
+      const confirmText =
+        newMode === 'yes'
+          ? 'окей, теперь отвечаю тебе как обычному клиенту. /admin — вернуть обратно.'
+          : 'вернула админ-режим.';
+      if (chatId) {
+        await sendTelegramMessage(chatId, confirmText);
+      }
+    } catch (modeErr) {
+      console.error('Mode switch failed:', modeErr);
+      if (chatId) {
+        await sendTelegramMessage(chatId, 'не получилось переключить режим, глянь логи.');
+      }
+    }
+    return res.status(200).json({ ok: true });
+  }
+
   try {
     // 1. Найти текущую карточку клиента (если есть).
     const existing = await findClientByTelegramId(telegramId);
@@ -223,6 +249,7 @@ function recordToClientCard(
     photos_count: fields.photos_count ?? 0,
     has_photo_this_message: false,
     photo_has_caption: false,
+    force_client_mode: fields.force_client_mode ?? null,
   };
 }
 
@@ -316,6 +343,7 @@ function clientCardToAirtableFields(
     chosen_slot_id: card.chosen_slot_id,
     slot_options: card.slot_options ? card.slot_options.join(',') : '',
     photos_count: extra.photos_count,
+    force_client_mode: card.force_client_mode,
   };
 }
 
