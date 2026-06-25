@@ -88,6 +88,7 @@ export interface ClientCard {
   photos_count: number;
   has_photo_this_message: boolean;
   photo_has_caption: boolean;
+  force_client_mode: YesNo; // переключатель /client и /admin — см. telegram.ts
 }
 
 // Что Extractor дополнительно сообщает о ТЕКУЩЕМ сообщении —
@@ -145,7 +146,13 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   // модуль lib/admin.ts, строится на ШАГЕ 7, после Calendar/booking.
   // До шага 7 telegram.ts должен просто ответить чем-то заглушечным
   // на admin_mode (например "admin-режим пока в разработке").
-  if (signals.is_admin_sender) {
+  //
+  // force_client_mode — переключатель командами /client и /admin в
+  // telegram.ts (перехватываются раньше Extractor-а). Когда мастер сама
+  // тестирует клиентский путь, force_client_mode = 'yes' и admin_mode
+  // не срабатывает, несмотря на is_admin_sender = true. Команды читают
+  // telegram_id, а не текст — подмена с другого аккаунта невозможна.
+  if (signals.is_admin_sender && card.force_client_mode !== 'yes') {
     return 'admin_mode';
   }
 
