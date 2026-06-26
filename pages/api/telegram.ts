@@ -92,6 +92,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       isAdminSender,
     });
 
+    console.log('DEBUG extractor:', {
+      messageText,
+      current_wants_to_book: currentCard.wants_to_book,
+      extracted_client_confirms_booking: extracted.client_confirms_booking,
+    });
+
     // 3. Слить новую карточку.
     const mergedCard: ClientCard = mergeCard(currentCard, extracted, {
       hasPhotoThisMessage: hasPhoto,
