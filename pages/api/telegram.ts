@@ -4,7 +4,7 @@ import { runExtractor } from '../../lib/extractor';
 import { getNextStep, getCardPatchForStep } from '../../lib/stateMachine';
 import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
-import { getAvailableSlots, bookSlot } from '../../lib/calendar';
+import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { SlotType } from '../../lib/calendar';
 
 // Master's own Telegram ID — admin/test mode detection.
@@ -169,6 +169,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // конкретному значению nextStep — иначе теряем именно тот момент,
     // когда слоты нужны СРАЗУ на этом же сообщении.
     let liveCard = mergedCard;
+    // Человекочитаемые версии slot_options для показа клиенту через
+    // Responder (Extractor и bookSlot продолжают работать с чистыми
+    // event.id в slot_options — эта строка только для текста ответа).
+    let slotsDisplay: string[] | null = null;
 
     const hasContact =
       mergedCard.contact_preference === 'telegram' ||
@@ -182,6 +186,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       try {
         const slots = await getAvailableSlots(slotType);
         liveCard = { ...mergedCard, slot_options: slots.map((s) => s.id) };
+        slotsDisplay = slots.map(formatSlotForDisplay);
         nextStep = getNextStep(liveCard, signals);
       } catch (calErr) {
         console.error('Calendar lookup failed, falling back to no slots:', calErr);
@@ -210,6 +215,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           chosen_slot_id: null,
           slot_options: freshSlots.map((s) => s.id),
         };
+        slotsDisplay = freshSlots.map(formatSlotForDisplay);
         nextStep = 'slot_taken_pick_again';
       } else {
         liveCard = { ...liveCard, chosen_slot_id: signals.client_picked_slot_id };
@@ -244,6 +250,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       clientCard: finalCard,
       lastClientMessage: messageText,
       manualMode: false,
+      slotsDisplay,
     });
 
     // 10. Отправить ответ, если он не пустой.
