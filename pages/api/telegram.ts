@@ -92,12 +92,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       isAdminSender,
     });
 
-    console.log('DEBUG extractor:', {
-      messageText,
-      current_wants_to_book: currentCard.wants_to_book,
-      extracted_client_confirms_booking: extracted.client_confirms_booking,
-    });
-
     // 3. Слить новую карточку.
     const mergedCard: ClientCard = mergeCard(currentCard, extracted, {
       hasPhotoThisMessage: hasPhoto,
@@ -114,6 +108,49 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       client_wants_to_reschedule: extracted.client_wants_to_reschedule,
       client_confirms_booking: extracted.client_confirms_booking,
     };
+
+    // ФИКС: Extractor не знает, какой шаг был предыдущим (он не получает
+    // previous_step и не видит ответ бота). Поэтому он не может надёжно
+    // распознать "записаться" / "да" / "хочу" как ответ на вопрос
+    // "хочешь записаться?". Детерминированный перехват: если карточка
+    // стоит на ask_wants_to_book (wants_to_book ещё null, цена дана)
+    // и Extractor вернул client_confirms_booking = null — проверяем
+    // текст сообщения на явные маркеры согласия/отказа КОДОМ.
+    const stuckOnWantsToBook =
+      signals.client_confirms_booking === null &&
+      currentCard.wants_to_book === null &&
+      (!!currentCard.price_quoted || currentCard.price_explained === 'yes');
+
+    if (stuckOnWantsToBook && messageText) {
+      const lower = messageText.toLowerCase().trim();
+      const yesPatterns = [
+        'да', 'ага', 'хочу', 'давай', 'конечно', 'запиши', 'записывай',
+        'записаться', 'хочу записаться', 'запишите', 'запишите меня',
+        'можно записаться', 'хочу забронировать', 'бронируй', 'го',
+        'ок', 'окей', 'ok', 'yes', 'yep', 'sure', 'lets go',
+      ];
+      const noPatterns = [
+        'нет', 'не', 'пока нет', 'не сейчас', 'подумаю', 'позже',
+        'ещё подумаю', 'еще подумаю', 'потом', 'не надо', 'не хочу',
+        'пока думаю', 'не уверен', 'пока не знаю',
+      ];
+
+      // Проверяем: точное совпадение ИЛИ текст начинается с паттерна
+      const matchesYes = yesPatterns.some(
+        (p) => lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ',') || lower.startsWith(p + '!')
+      );
+      const matchesNo = noPatterns.some(
+        (p) => lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ',')
+      );
+
+      if (matchesYes && !matchesNo) {
+        signals.client_confirms_booking = 'yes';
+        console.log('CODE OVERRIDE: client_confirms_booking = yes (pattern match)');
+      } else if (matchesNo && !matchesYes) {
+        signals.client_confirms_booking = 'no';
+        console.log('CODE OVERRIDE: client_confirms_booking = no (pattern match)');
+      }
+    }
 
     // 4. STATE MACHINE — первый проход с тем, что уже знаем
     // (slot_options из Airtable могут быть устаревшими — сейчас
