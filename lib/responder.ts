@@ -24,6 +24,7 @@ export interface ResponderInput {
   clientCard: ClientCard;
   lastClientMessage: string | null;
   manualMode: boolean; // true = Аня сама пишет от первого лица
+  slotsDisplay: string[] | null; // человекочитаемые версии slot_options (дата+время), для показа клиенту
 }
 
 export async function runResponder(input: ResponderInput): Promise<string> {
@@ -41,6 +42,7 @@ export async function runResponder(input: ResponderInput): Promise<string> {
       client_card: input.clientCard,
       last_client_message: input.lastClientMessage,
       manual_mode: input.manualMode,
+      slots_display: input.slotsDisplay,
     },
     null,
     2
