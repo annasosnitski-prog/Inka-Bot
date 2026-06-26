@@ -36,6 +36,30 @@ export interface AvailableSlot {
   end: string; // ISO datetime
 }
 
+// Превращает ISO datetime слота в человекочитаемую русскую строку для
+// показа клиенту (например "вторник, 2 июля, 15:00"). Таймзона Israel,
+// т.к. мастер и большинство клиентов в Хайфе/Израиле. Используется
+// ТОЛЬКО для отображения — bookSlot() и матчинг "первый/второй" в
+// Extractor-е продолжают работать с чистым event.id, не с этой строкой.
+export function formatSlotForDisplay(slot: AvailableSlot): string {
+  const date = new Date(slot.start);
+  const dayName = date.toLocaleDateString('ru-RU', {
+    weekday: 'long',
+    timeZone: 'Asia/Jerusalem',
+  });
+  const dayMonth = date.toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    timeZone: 'Asia/Jerusalem',
+  });
+  const time = date.toLocaleTimeString('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Jerusalem',
+  });
+  return `${dayName}, ${dayMonth}, ${time}`;
+}
+
 // ----------------------------------------------------------
 // АУТЕНТИФИКАЦИЯ — JWT service account, получаем access_token
 // ----------------------------------------------------------
