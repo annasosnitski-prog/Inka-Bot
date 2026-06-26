@@ -87,6 +87,59 @@ function normalizePrivateKey(raw: string): string {
   return `-----BEGIN PRIVATE KEY-----\n${lines.join('\n')}\n-----END PRIVATE KEY-----\n`;
 }
 
+// Извлекает email и private key сервисного аккаунта из env vars.
+// ПРИОРИТЕТ: GOOGLE_SERVICE_ACCOUNT_JSON (весь JSON-файл целиком —
+// самый надёжный путь, т.к. JSON.parse корректно обрабатывает \n
+// внутри строки и ничего не теряется при копировании в Vercel).
+// FALLBACK: отдельные GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY
+// (может ломаться из-за искажения переносов строк Vercel-ом).
+function getServiceAccountCredentials(): { email: string; privateKey: string } {
+  const jsonRaw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+
+  if (jsonRaw) {
+    try {
+      const parsed = JSON.parse(jsonRaw);
+      const email = parsed.client_email;
+      const privateKey = parsed.private_key;
+      if (!email || !privateKey) {
+        throw new Error('JSON parsed but client_email or private_key missing');
+      }
+      console.log('Service account loaded from GOOGLE_SERVICE_ACCOUNT_JSON:', {
+        email,
+        keyLength: privateKey.length,
+        keyStart: privateKey.substring(0, 27),
+      });
+      return { email, privateKey };
+    } catch (err) {
+      console.error('Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON:', err);
+      // Не падаем — попробуем fallback ниже.
+    }
+  }
+
+  // Fallback: отдельные env vars.
+  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const rawKey = process.env.GOOGLE_PRIVATE_KEY;
+
+  if (!email || !rawKey) {
+    throw new Error(
+      'Google credentials not found. Set GOOGLE_SERVICE_ACCOUNT_JSON (recommended) ' +
+      'or GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY.'
+    );
+  }
+
+  const privateKey = normalizePrivateKey(rawKey);
+
+  console.log('GOOGLE_PRIVATE_KEY diagnostics (fallback):', {
+    rawLength: rawKey.length,
+    normalizedLength: privateKey.length,
+    startsWithHeader: privateKey.startsWith('-----BEGIN PRIVATE KEY-----'),
+    endsWithFooter: privateKey.trim().endsWith('-----END PRIVATE KEY-----'),
+    lineCount: privateKey.split('\n').length,
+  });
+
+  return { email, privateKey };
+}
+
 async function getAccessToken(): Promise<string> {
   // Кэшируем токен на время жизни serverless-инстанса — Google токены
   // живут 1 час, нет смысла запрашивать новый на каждый вызов.
@@ -94,25 +147,7 @@ async function getAccessToken(): Promise<string> {
     return cachedToken.token;
   }
 
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const rawKey = process.env.GOOGLE_PRIVATE_KEY;
-
-  if (!email || !rawKey) {
-    throw new Error('GOOGLE_SERVICE_ACCOUNT_EMAIL or GOOGLE_PRIVATE_KEY not set');
-  }
-
-  const privateKey = normalizePrivateKey(rawKey);
-
-  // Безопасная диагностика — НЕ печатаем сам ключ, только его форму,
-  // чтобы видеть в Vercel Logs, правильно ли он распознан, без утечки
-  // секрета.
-  console.log('GOOGLE_PRIVATE_KEY diagnostics:', {
-    rawLength: rawKey.length,
-    normalizedLength: privateKey.length,
-    startsWithHeader: privateKey.startsWith('-----BEGIN PRIVATE KEY-----'),
-    endsWithFooter: privateKey.trim().endsWith('-----END PRIVATE KEY-----'),
-    lineCount: privateKey.split('\n').length,
-  });
+  const { email, privateKey } = getServiceAccountCredentials();
 
   const jwt = await buildSignedJwt(email, privateKey);
 
