@@ -124,11 +124,13 @@ export type NextStep =
   | 'show_tattoo_slots'
   | 'show_consultation_slots'
   | 'slot_taken_pick_again'
+  | 'unclear_slot_choice'
   | 'slot_change_requested_waiting'
   | 'no_more_slots_waiting'
   | 'reschedule_requested_ping_master'
   | 'confirm_slot_awaiting_payment'
   | 'confirm_consultation_booked'
+  | 'booked_followup_chat'
   | 'all_done';
 
 // ----------------------------------------------------------
@@ -181,17 +183,23 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     return 'handle_photo_no_caption';
   }
 
-  // 6. ПЕРЕНОС УЖЕ ПОДТВЕРЖДЁННОЙ ЗАПИСИ.
+  // 6. УЖЕ ПОДТВЕРЖДЁННАЯ ЗАПИСЬ — разговор после брони.
   // Инка САМА НЕ переносит встречи — она только спокойно фиксирует
-  // запрос и явно пингует мастера. Проверяем раньше блока "слоты
-  // показаны", потому что это другая ситуация: запись уже состоялась,
-  // а не на стадии выбора варианта.
-  if (
-    signals.client_wants_to_reschedule &&
-    (card.lead_status === 'tattoo_booked_waiting_payment' ||
-      card.lead_status === 'consultation_booked')
-  ) {
-    return 'reschedule_requested_ping_master';
+  // запрос на перенос и явно пингует мастера. Для всех ОСТАЛЬНЫХ тем
+  // (вопросы про процесс/боль/подготовку/что угодно ещё) — отдельный
+  // нейтральный шаг booked_followup_chat, который просто отвечает по
+  // теме без попытки заново предлагать слоты или считать цену. Без
+  // этого блока любой вопрос после брони мог уйти в общую логику ниже
+  // (direct_tattoo_allowed === 'yes' всё ещё true) и повторно показать
+  // слоты или спросить контакт — это уже случалось как баг.
+  const isAlreadyBooked =
+    card.lead_status === 'tattoo_booked_waiting_payment' ||
+    card.lead_status === 'consultation_booked';
+  if (isAlreadyBooked) {
+    if (signals.client_wants_to_reschedule) {
+      return 'reschedule_requested_ping_master';
+    }
+    return 'booked_followup_chat';
   }
 
   // 7. СЛОТЫ УЖЕ ПОКАЗАНЫ — обрабатываем раньше, чем заново считать цену.
@@ -230,9 +238,12 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
       }
       return 'no_more_slots_waiting'; // chosen_slot_id=null, lead_status=waiting_slots
     }
-    // Клиент написал что-то непонятное при показанных слотах — просим
-    // выбрать явно один из списка.
-    return 'slot_taken_pick_again';
+    // Клиент написал что-то непонятное при показанных слотах (например
+    // назвал день недели вместо номера, или Extractor не смог распознать
+    // выбор) — это НЕ "слот занят" (тот шаг — только когда выбор валиден
+    // по индексу, но конкретно этот id уже не в списке). Просим явно
+    // назвать номер, без слова "занято" — иначе вводим в заблуждение.
+    return 'unclear_slot_choice';
   }
 
   // 8. СБОР ДАННЫХ ДЛЯ ЦЕНЫ — idea → placement → size → existing_tattoo.
@@ -333,6 +344,7 @@ export interface CardPatch {
   spam_count?: 0 | 1 | 2 | 3;
   chosen_slot_id?: string | null;
   wants_to_book?: YesNo;
+  slot_options?: string[] | null;
 }
 
 export function getCardPatchForStep(
@@ -364,9 +376,9 @@ export function getCardPatchForStep(
     case 'show_consultation_slots':
       return { ...patch, lead_status: 'slots_shown' };
     case 'confirm_slot_awaiting_payment':
-      return { ...patch, lead_status: 'tattoo_booked_waiting_payment' };
+      return { ...patch, lead_status: 'tattoo_booked_waiting_payment', slot_options: null };
     case 'confirm_consultation_booked':
-      return { ...patch, lead_status: 'consultation_booked' };
+      return { ...patch, lead_status: 'consultation_booked', slot_options: null };
     default:
       return patch;
   }
