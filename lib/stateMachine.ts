@@ -50,7 +50,16 @@ export type Category =
 export type YesNo = 'yes' | 'no' | null;
 export type ExistingTattoo = 'no' | 'cover' | 'modification' | 'scar_work' | null;
 export type ContactPreference = 'telegram' | 'whatsapp' | null;
-export type PaymentStatus = 'none' | 'waiting_prepayment' | 'paid' | null;
+// waiting_prepayment — слот закреплён, ждём скрин оплаты от клиента.
+// waiting_confirmation — клиент прислал скрин, ждём, что мастер сверит
+//   сумму и подтвердит (бот НЕ подтверждает оплату сам — не может
+//   проверить сумму по картинке). paid проставляет мастер.
+export type PaymentStatus =
+  | 'none'
+  | 'waiting_prepayment'
+  | 'waiting_confirmation'
+  | 'paid'
+  | null;
 export type ClientType =
   | '1_undefined'
   | '2_reference'
@@ -130,6 +139,7 @@ export type NextStep =
   | 'reschedule_requested_ping_master'
   | 'confirm_slot_awaiting_payment'
   | 'confirm_consultation_booked'
+  | 'payment_screenshot_received'
   | 'booked_followup_chat'
   | 'all_done';
 
@@ -198,6 +208,21 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   if (isAlreadyBooked) {
     if (signals.client_wants_to_reschedule) {
       return 'reschedule_requested_ping_master';
+    }
+    // СКРИН ПРЕДОПЛАТЫ. Тату забронировано, оплата ещё не подтверждена, и
+    // клиент прислал фото — трактуем это как скрин предоплаты. Инка НЕ
+    // подтверждает оплату сама (не может сверить сумму по картинке) —
+    // фиксирует payment_status=waiting_confirmation и пингует мастера
+    // (пинг и пересылку скрина делает telegram.ts, здесь только шаг).
+    // Guard по payment_status, чтобы повторный скрин не пинговал мастера
+    // второй раз — тогда это уже обычный booked_followup_chat.
+    if (
+      card.lead_status === 'tattoo_booked_waiting_payment' &&
+      card.has_photo_this_message &&
+      card.payment_status !== 'waiting_confirmation' &&
+      card.payment_status !== 'paid'
+    ) {
+      return 'payment_screenshot_received';
     }
     return 'booked_followup_chat';
   }
@@ -345,6 +370,7 @@ export interface CardPatch {
   chosen_slot_id?: string | null;
   wants_to_book?: YesNo;
   slot_options?: string[] | null;
+  payment_status?: PaymentStatus;
 }
 
 export function getCardPatchForStep(
@@ -376,9 +402,18 @@ export function getCardPatchForStep(
     case 'show_consultation_slots':
       return { ...patch, lead_status: 'slots_shown' };
     case 'confirm_slot_awaiting_payment':
-      return { ...patch, lead_status: 'tattoo_booked_waiting_payment', slot_options: null };
+      return {
+        ...patch,
+        lead_status: 'tattoo_booked_waiting_payment',
+        slot_options: null,
+        payment_status: 'waiting_prepayment',
+      };
     case 'confirm_consultation_booked':
       return { ...patch, lead_status: 'consultation_booked', slot_options: null };
+    case 'payment_screenshot_received':
+      // lead_status НЕ трогаем — запись остаётся tattoo_booked_waiting_payment
+      // до тех пор, пока мастер не подтвердит оплату (payment_status=paid).
+      return { ...patch, payment_status: 'waiting_confirmation' };
     default:
       return patch;
   }

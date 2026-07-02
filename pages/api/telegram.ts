@@ -257,6 +257,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (chatId && replyText) {
       await sendTelegramMessage(chatId, replyText);
     }
+
+    // 11. ПИНГ МАСТЕРУ. Некоторые шаги обещают клиенту "передала мастеру"
+    // или требуют действия Ани (подтвердить оплату, назначить перенос,
+    // подобрать слот). Раньше эти обещания уходили в пустоту — здесь
+    // реально уведомляем мастера в её личный чат. Не пингуем, когда сама
+    // Аня тестирует клиентский путь (isAdminSender) — иначе спам себе же.
+    // Обёрнуто в свой try/catch: сбой пинга не должен ломать ответ клиенту.
+    if (!isAdminSender) {
+      try {
+        const masterNote = buildMasterNotification(nextStep, clientLabel, username);
+        if (masterNote) {
+          await sendTelegramMessage(MASTER_TELEGRAM_ID, masterNote);
+          // Скрин оплаты пересылаем Ане целиком — ей нужно видеть саму
+          // картинку, чтобы сверить сумму и подтвердить.
+          if (
+            nextStep === 'payment_screenshot_received' &&
+            chatId &&
+            message.message_id
+          ) {
+            await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
+          }
+        }
+      } catch (notifyErr) {
+        console.error('Master notification failed:', notifyErr);
+      }
+    }
   } catch (err) {
     console.error('INKA-BOT pipeline error:', err);
   }
@@ -388,6 +414,7 @@ function clientCardToAirtableFields(
     wants_to_book: card.wants_to_book,
     contact_preference: card.contact_preference,
     contact_value: card.contact_value,
+    payment_status: card.payment_status,
     skin_notes: card.skin_notes,
     spam_count: card.spam_count,
     chosen_slot_id: card.chosen_slot_id,
@@ -395,6 +422,54 @@ function clientCardToAirtableFields(
     photos_count: extra.photos_count,
     force_client_mode: card.force_client_mode,
   };
+}
+
+// Текст уведомления мастеру для тех шагов, где Ане нужно что-то узнать
+// или сделать. Возвращает null для шагов, не требующих её внимания —
+// тогда пинг не отправляется вовсе.
+function buildMasterNotification(
+  step: NextStep,
+  clientLabel: string,
+  username: string
+): string | null {
+  const who = username ? `${clientLabel} (@${username})` : clientLabel;
+  switch (step) {
+    case 'confirm_slot_awaiting_payment':
+      return `🎨 Новая бронь ТАТУ — ${who}. Слот закреплён, клиент ждёт реквизиты для предоплаты 200₪.`;
+    case 'confirm_consultation_booked':
+      return `🗓 Новая КОНСУЛЬТАЦИЯ — ${who}. Слот забронирован.`;
+    case 'payment_screenshot_received':
+      return `💰 ${who} прислал скрин предоплаты — проверь сумму и подтверди оплату (скрин переслан ниже).`;
+    case 'reschedule_requested_ping_master':
+      return `🔄 ${who} просит перенести запись — напиши насчёт нового времени.`;
+    case 'slot_change_requested_waiting':
+    case 'no_more_slots_waiting':
+      return `⏳ ${who} в листе ожидания — подходящих слотов сейчас нет.`;
+    default:
+      return null;
+  }
+}
+
+async function forwardTelegramMessage(
+  toChatId: number,
+  fromChatId: number,
+  messageId: number
+) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    console.error('TELEGRAM_BOT_TOKEN not set');
+    return;
+  }
+  const url = `https://api.telegram.org/bot${token}/forwardMessage`;
+  await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: toChatId,
+      from_chat_id: fromChatId,
+      message_id: messageId,
+    }),
+  });
 }
 
 async function sendTelegramMessage(chatId: number, text: string) {
