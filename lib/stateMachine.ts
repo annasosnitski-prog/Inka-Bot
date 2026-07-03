@@ -88,6 +88,7 @@ export interface ClientCard {
   wants_to_book: YesNo; // явное подтверждение клиента "да, хочу записаться" после цены
   contact_preference: ContactPreference;
   contact_value: string | null;
+  phone: string | null; // номер телефона клиента для подтверждения брони — спрашивается перед показом дат
   payment_status: PaymentStatus;
   client_type: ClientType;
   skin_notes: string | null;
@@ -130,6 +131,7 @@ export type NextStep =
   | 'ask_wants_to_book'
   | 'ask_first_tattoo'
   | 'ask_contact'
+  | 'ask_phone'
   | 'show_tattoo_slots'
   | 'show_consultation_slots'
   | 'slot_taken_pick_again'
@@ -187,13 +189,12 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     return 'handle_out_of_scope_block'; // ставит lead_status=blocked в Airtable
   }
 
-  // 5. ФОТО без подписи — отдельная ветка, один вопрос.
-  // (раздел 3: "сохранила. что из фото важно...")
-  if (card.has_photo_this_message && !card.photo_has_caption) {
-    return 'handle_photo_no_caption';
-  }
-
-  // 6. УЖЕ ПОДТВЕРЖДЁННАЯ ЗАПИСЬ — разговор после брони.
+  // 5. УЖЕ ПОДТВЕРЖДЁННАЯ ЗАПИСЬ — разговор после брони.
+  // ВАЖНО: этот блок проверяется РАНЬШЕ ветки "фото без подписи" ниже.
+  // Скрин предоплаты — это фото и обычно БЕЗ подписи; если бы photo-ветка
+  // шла первой, любой скрин уходил бы в handle_photo_no_caption и логика
+  // оплаты никогда не срабатывала. Поэтому booked-состояние имеет приоритет.
+  //
   // Инка САМА НЕ переносит встречи — она только спокойно фиксирует
   // запрос на перенос и явно пингует мастера. Для всех ОСТАЛЬНЫХ тем
   // (вопросы про процесс/боль/подготовку/что угодно ещё) — отдельный
@@ -225,6 +226,12 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
       return 'payment_screenshot_received';
     }
     return 'booked_followup_chat';
+  }
+
+  // 6. ФОТО без подписи — отдельная ветка, один вопрос.
+  // (раздел 3: "сохранила. что из фото важно...")
+  if (card.has_photo_this_message && !card.photo_has_caption) {
+    return 'handle_photo_no_caption';
   }
 
   // 7. СЛОТЫ УЖЕ ПОКАЗАНЫ — обрабатываем раньше, чем заново считать цену.
@@ -322,14 +329,12 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     if (card.first_tattoo === null) {
       return 'ask_first_tattoo';
     }
-    // Контакт считается известным, если выбран telegram (тогда отдельное
-    // значение не нужно — пишем в тот же чат по telegram_id) ИЛИ если
-    // выбран whatsapp И дано конкретное значение (номер).
-    const hasContact =
-      card.contact_preference === 'telegram' ||
-      (card.contact_preference === 'whatsapp' && !!card.contact_value);
-    if (!hasContact) {
-      return 'ask_contact';
+    // ТЕЛЕФОН — обязателен перед показом дат брони. По бизнес-правилу Ани
+    // мы всегда берём номер телефона клиента для подтверждения брони,
+    // прежде чем показывать/закреплять слоты. Пишем в тот же чат по
+    // telegram_id, но для подтверждения брони нужен именно телефон.
+    if (!card.phone) {
+      return 'ask_phone';
     }
     if (card.slot_options && card.slot_options.length > 0) {
       return 'show_tattoo_slots';
@@ -339,11 +344,10 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
 
   // 11b. КОНСУЛЬТАЦИОННЫЙ ПУТЬ
   if (card.consultation_needed === 'yes') {
-    const hasContact =
-      card.contact_preference === 'telegram' ||
-      (card.contact_preference === 'whatsapp' && !!card.contact_value);
-    if (!hasContact) {
-      return 'ask_contact';
+    // Телефон обязателен и для консультации — то же правило про любой
+    // запрос на даты брони.
+    if (!card.phone) {
+      return 'ask_phone';
     }
     if (card.slot_options && card.slot_options.length > 0) {
       return 'show_consultation_slots';

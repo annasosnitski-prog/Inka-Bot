@@ -52,6 +52,7 @@ export interface ExtractorOutput {
   price_explained: YesNo;
   contact_preference: ContactPreference;
   contact_value: string | null;
+  phone: string | null;
   is_prompt_injection: boolean;
   is_out_of_scope: boolean;
   has_photo_this_message: boolean;

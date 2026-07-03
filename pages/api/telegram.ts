@@ -225,12 +225,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // event.id в slot_options — эта строка только для текста ответа).
     let slotsDisplay: string[] | null = null;
 
-    const hasContact =
-      mergedCard.contact_preference === 'telegram' ||
-      (mergedCard.contact_preference === 'whatsapp' && !!mergedCard.contact_value);
+    // Слоты подгружаем, когда направление выбрано И у нас уже есть
+    // телефон клиента (по бизнес-правилу телефон обязателен перед
+    // показом дат — см. ask_phone в state machine). Раньше здесь был
+    // гейт по contact_preference; теперь единый гейт — телефон.
+    const hasPhone = !!mergedCard.phone;
     const routeChosen =
       mergedCard.direct_tattoo_allowed === 'yes' || mergedCard.consultation_needed === 'yes';
-    const needsFreshSlots = routeChosen && hasContact;
+    const needsFreshSlots = routeChosen && hasPhone;
 
     if (needsFreshSlots) {
       const slotType: SlotType = mergedCard.direct_tattoo_allowed === 'yes' ? 'tattoo' : 'consultation';
@@ -304,9 +306,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       slotsDisplay,
     });
 
+    // 9b. РЕКВИЗИТЫ ПРЕДОПЛАТЫ. На шаге подтверждения тату дописываем
+    // реквизиты (Bit + банковский счёт) ДЕТЕРМИНИРОВАННО из env, а не
+    // через LLM — номера нельзя доверять генерации, любая ошибка в
+    // цифре = потерянные деньги. Responder-у велено НЕ печатать
+    // реквизиты самому (см. confirm_slot_awaiting_payment в промпте).
+    let finalReply = replyText;
+    if (nextStep === 'confirm_slot_awaiting_payment') {
+      const payBlock = buildPaymentDetailsBlock();
+      if (payBlock) {
+        finalReply = replyText ? `${replyText}\n\n${payBlock}` : payBlock;
+      }
+    }
+
     // 10. Отправить ответ, если он не пустой.
-    if (chatId && replyText) {
-      await sendTelegramMessage(chatId, replyText);
+    if (chatId && finalReply) {
+      await sendTelegramMessage(chatId, finalReply);
     }
 
     // 11. ПИНГ МАСТЕРУ. Некоторые шаги обещают клиенту "передала мастеру"
@@ -367,6 +382,7 @@ function recordToClientCard(
     wants_to_book: fields.wants_to_book ?? null,
     contact_preference: fields.contact_preference ?? null,
     contact_value: fields.contact_value ?? null,
+    phone: fields.phone ?? null,
     payment_status: fields.deposit_status ?? null, // колонка в Airtable зовётся deposit_status
     client_type: fields.client_type ?? null,
     skin_notes: fields.skin_notes ?? null,
@@ -407,6 +423,7 @@ function mergeCard(
     price_explained: ClientCard['price_explained'];
     contact_preference: ClientCard['contact_preference'];
     contact_value: string | null;
+    phone: string | null;
   },
   messageFlags: { hasPhotoThisMessage: boolean; photoHasCaption: boolean }
 ): ClientCard {
@@ -431,6 +448,7 @@ function mergeCard(
     contact_preference:
       extracted.contact_preference ?? current.contact_preference,
     contact_value: extracted.contact_value ?? current.contact_value,
+    phone: extracted.phone ?? current.phone,
     has_photo_this_message: messageFlags.hasPhotoThisMessage,
     photo_has_caption: messageFlags.photoHasCaption,
   };
@@ -465,6 +483,7 @@ function clientCardToAirtableFields(
     wants_to_book: card.wants_to_book,
     contact_preference: card.contact_preference,
     contact_value: card.contact_value,
+    phone: card.phone,
     deposit_status: card.payment_status, // колонка в Airtable зовётся deposit_status
     skin_notes: card.skin_notes,
     spam_count: card.spam_count,
@@ -521,6 +540,26 @@ async function forwardTelegramMessage(
       message_id: messageId,
     }),
   });
+}
+
+// Блок реквизитов предоплаты, собранный из env-переменных. Клиенту
+// предлагается два способа на выбор: Bit (по номеру телефона) и
+// банковский перевод. Если ни один реквизит не задан в env — возвращаем
+// null (тогда сообщение уходит без блока, а не с битым текстом).
+// Env: PAYMENT_BIT (номер для Bit), PAYMENT_BANK (реквизиты банка).
+function buildPaymentDetailsBlock(): string | null {
+  const bit = (process.env.PAYMENT_BIT ?? '').trim();
+  const bank = (process.env.PAYMENT_BANK ?? '').trim();
+  if (!bit && !bank) {
+    console.warn('PAYMENT_BIT / PAYMENT_BANK not set — payment details block skipped');
+    return null;
+  }
+
+  const lines = ['реквизиты для предоплаты 200₪ (на выбор):'];
+  if (bit) lines.push(`📱 Bit: ${bit}`);
+  if (bank) lines.push(`🏦 банковский перевод: ${bank}`);
+  lines.push('после оплаты пришли, пожалуйста, скрин 🙏');
+  return lines.join('\n');
 }
 
 async function sendTelegramMessage(chatId: number, text: string) {
