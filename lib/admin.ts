@@ -173,7 +173,7 @@ function leadStatusLabel(status: any): string {
   }
 }
 
-function formatInvoice(f: Record<string, any>): string {
+export function formatInvoice(f: Record<string, any>): string {
   const who = f.name
     ? `${f.name}${f.username ? ` (@${f.username})` : ''}`
     : f.username

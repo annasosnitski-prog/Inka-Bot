@@ -547,7 +547,7 @@ async function forwardTelegramMessage(
 // банковский перевод. Если ни один реквизит не задан в env — возвращаем
 // null (тогда сообщение уходит без блока, а не с битым текстом).
 // Env: PAYMENT_BIT (номер для Bit), PAYMENT_BANK (реквизиты банка).
-function buildPaymentDetailsBlock(): string | null {
+export function buildPaymentDetailsBlock(): string | null {
   const bit = (process.env.PAYMENT_BIT ?? '').trim();
   const bank = (process.env.PAYMENT_BANK ?? '').trim();
   if (!bit && !bank) {
