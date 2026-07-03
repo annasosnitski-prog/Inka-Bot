@@ -78,6 +78,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({ ok: true });
   }
 
+  // НЕТЕКСТОВЫЕ / НЕПОДДЕРЖИВАЕМЫЕ ТИПЫ СООБЩЕНИЙ.
+  // Голосовые уже отбиты выше своим отдельным сообщением. Всё остальное
+  // без текста и без фото — стикер, видео, документ, аудио, гео, контакт,
+  // опрос и т.п. — Extractor разбирать не умеет, а пустой прогон пайплайна
+  // тратит вызовы OpenAI и может записать в карточку "пустое" сообщение,
+  // сбивая состояние. Даём единый мягкий фолбэк и выходим, как с голосом.
+  // Фото без подписи сюда НЕ попадает (hasPhoto=true) — у него своя ветка
+  // handle_photo_no_caption внутри пайплайна.
+  if (!messageText && !hasPhoto) {
+    if (chatId) {
+      await sendTelegramMessage(
+        chatId,
+        'я пока понимаю только текст и фото 🙂 опиши, пожалуйста, идею словами или пришли референс картинкой.'
+      );
+    }
+    return res.status(200).json({ ok: true });
+  }
+
   try {
     // 1. Найти текущую карточку клиента (если есть).
     const existing = await findClientByTelegramId(telegramId);
