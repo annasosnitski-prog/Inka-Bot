@@ -353,3 +353,104 @@ export async function bookSlot(
 
   return { success: true, newSummary };
 }
+
+// ----------------------------------------------------------
+// РАСПИСАНИЕ — ВСЕ события в окне (для admin-режима).
+// В отличие от getAvailableSlots (только свободные [ТАТУ]/[КОНС]),
+// здесь отдаём всё, что стоит в календаре у Ани — занятые слоты,
+// свободные слоты и любые её личные события — чтобы она видела
+// реальную картину дня/недели.
+// ----------------------------------------------------------
+
+export interface ScheduleEvent {
+  id: string;
+  summary: string;
+  start: string; // ISO datetime или YYYY-MM-DD для событий на весь день
+  end: string;
+  isBusy: boolean; // слот уже занят (маркер занятости в названии)
+  type: SlotType | null; // 'tattoo' | 'consultation' | null (личное событие)
+  allDay: boolean;
+}
+
+export async function getSchedule(days = 7): Promise<ScheduleEvent[]> {
+  const token = await getAccessToken();
+
+  const params = new URLSearchParams({
+    timeMin: new Date().toISOString(),
+    timeMax: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString(),
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    maxResults: '100',
+  });
+
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+    CALENDAR_ID
+  )}/events?${params.toString()}`;
+
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Calendar schedule list failed: ${response.status} ${errText}`);
+  }
+
+  const data = await response.json();
+  const items: any[] = data.items ?? [];
+
+  return items.map((event) => {
+    const summary: string = event.summary ?? '(без названия)';
+    const isBusy = BUSY_MARKERS.some((marker) => summary.includes(marker));
+    let type: SlotType | null = null;
+    if (summary.trim().startsWith(SLOT_TAG.tattoo)) type = 'tattoo';
+    else if (summary.trim().startsWith(SLOT_TAG.consultation)) type = 'consultation';
+    const allDay = !event.start?.dateTime;
+    return {
+      id: event.id,
+      summary,
+      start: event.start?.dateTime ?? event.start?.date,
+      end: event.end?.dateTime ?? event.end?.date,
+      isBusy,
+      type,
+      allDay,
+    };
+  });
+}
+
+// Человекочитаемое расписание, сгруппированное по дням, для отправки
+// Ане в Telegram. 🟢 — свободный слot, 🔴 — занятый, • — личное событие.
+export function formatSchedule(events: ScheduleEvent[]): string {
+  if (events.length === 0) {
+    return 'на ближайшие дни в календаре пусто.';
+  }
+
+  const byDay = new Map<string, string[]>();
+  const dayOrder: string[] = [];
+
+  for (const e of events) {
+    const d = new Date(e.start);
+    const dayKey = d.toLocaleDateString('ru-RU', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      timeZone: 'Asia/Jerusalem',
+    });
+    if (!byDay.has(dayKey)) {
+      byDay.set(dayKey, []);
+      dayOrder.push(dayKey);
+    }
+    const time = e.allDay
+      ? 'весь день'
+      : d.toLocaleTimeString('ru-RU', {
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: 'Asia/Jerusalem',
+        });
+    const mark = e.isBusy ? '🔴' : e.type ? '🟢' : '•';
+    byDay.get(dayKey)!.push(`  ${mark} ${time} — ${e.summary}`);
+  }
+
+  const blocks = dayOrder.map((day) => `📅 ${day}\n${byDay.get(day)!.join('\n')}`);
+  return blocks.join('\n\n');
+}

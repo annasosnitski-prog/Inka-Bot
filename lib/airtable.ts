@@ -37,6 +37,34 @@ export async function findClientByTelegramId(
   return data.records[0];
 }
 
+// Поиск клиента по имени или @username — для admin-режима, когда Аня
+// указывает клиента текстом, а не пересылкой. Регистронезависимо, по
+// подстроке. Может вернуть несколько (тёзки) — вызывающий код решает,
+// что делать с неоднозначностью.
+export async function findClientsByName(query: string): Promise<ClientRecord[]> {
+  // Чистим ввод: убираем ведущий @ и кавычки (последние сломали бы
+  // формулу Airtable). Пустой запрос — ничего не ищем.
+  const q = query.trim().replace(/^@+/, '').replace(/["']/g, '').toLowerCase();
+  if (!q) return [];
+
+  // FIND(needle, haystack) возвращает позицию (>0) при совпадении.
+  // Ищем и в name, и в username. Double-quotes в формуле — чтобы
+  // апострофы в именах не ломали синтаксис (кавычки из q уже убраны).
+  const formula = `OR(FIND("${q}", LOWER({name})), FIND("${q}", LOWER({username})))`;
+  const url = `${AIRTABLE_API_URL}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=5`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Airtable name search failed: ${res.status} ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  return data.records ?? [];
+}
+
 export async function createClient(fields: Record<string, any>): Promise<ClientRecord> {
   const res = await fetch(AIRTABLE_API_URL, {
     method: 'POST',

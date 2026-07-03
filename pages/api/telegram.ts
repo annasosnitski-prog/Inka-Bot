@@ -4,6 +4,7 @@ import { runExtractor } from '../../lib/extractor';
 import { getNextStep, getCardPatchForStep } from '../../lib/stateMachine';
 import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
+import { runAdmin } from '../../lib/admin';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { SlotType } from '../../lib/calendar';
 
@@ -86,7 +87,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // сбивая состояние. Даём единый мягкий фолбэк и выходим, как с голосом.
   // Фото без подписи сюда НЕ попадает (hasPhoto=true) — у него своя ветка
   // handle_photo_no_caption внутри пайплайна.
-  if (!messageText && !hasPhoto) {
+  //
+  // Мастера (isAdminSender) НЕ отбиваем этим фолбэком — её сообщения
+  // (в т.ч. пересылки без текста) должны дойти до admin-обработчика ниже.
+  if (!messageText && !hasPhoto && !isAdminSender) {
     if (chatId) {
       await sendTelegramMessage(
         chatId,
@@ -100,6 +104,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // 1. Найти текущую карточку клиента (если есть).
     const existing = await findClientByTelegramId(telegramId);
     const currentCard = recordToClientCard(telegramId, existing?.fields ?? {});
+
+    // 1a. ADMIN-РЕЖИМ (ШАГ 7). Мастер (isAdminSender), если она не
+    // переключилась в клиентский путь командой /client (force_client_mode),
+    // обрабатывается отдельным admin-модулем — БЕЗ клиентского Extractor /
+    // state machine / Responder. Иначе прогон Аниных служебных запросов
+    // через воронку засоряет её же карточку и выдаёт бессмыслицу.
+    if (isAdminSender && currentCard.force_client_mode !== 'yes') {
+      try {
+        const adminResult = await runAdmin({
+          text: messageText,
+          forwardFromId:
+            message.forward_from?.id ?? message.forward_origin?.sender_user?.id ?? null,
+          forwardName:
+            message.forward_from?.first_name ??
+            message.forward_sender_name ??
+            message.forward_origin?.sender_user?.first_name ??
+            null,
+        });
+        if (chatId && adminResult.reply) {
+          await sendTelegramMessage(chatId, adminResult.reply);
+        }
+      } catch (adminErr) {
+        console.error('Admin handler error:', adminErr);
+        if (chatId) {
+          await sendTelegramMessage(chatId, 'ошибка в admin-режиме, глянь логи.');
+        }
+      }
+      return res.status(200).json({ ok: true });
+    }
 
     // 2. EXTRACTOR — разобрать сообщение клиента на поля.
     const extracted = await runExtractor({
