@@ -316,7 +316,7 @@ function recordToClientCard(
     wants_to_book: fields.wants_to_book ?? null,
     contact_preference: fields.contact_preference ?? null,
     contact_value: fields.contact_value ?? null,
-    payment_status: fields.payment_status ?? null,
+    payment_status: fields.deposit_status ?? null, // колонка в Airtable зовётся deposit_status
     client_type: fields.client_type ?? null,
     skin_notes: fields.skin_notes ?? null,
     spam_count: fields.spam_count ?? 0,
@@ -414,7 +414,7 @@ function clientCardToAirtableFields(
     wants_to_book: card.wants_to_book,
     contact_preference: card.contact_preference,
     contact_value: card.contact_value,
-    payment_status: card.payment_status,
+    deposit_status: card.payment_status, // колонка в Airtable зовётся deposit_status
     skin_notes: card.skin_notes,
     spam_count: card.spam_count,
     chosen_slot_id: card.chosen_slot_id,
