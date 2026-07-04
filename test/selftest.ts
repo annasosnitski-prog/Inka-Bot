@@ -19,7 +19,7 @@ import {
   type NextStep,
 } from '../lib/stateMachine';
 import { formatSchedule, type ScheduleEvent } from '../lib/calendar';
-import { formatInvoice } from '../lib/admin';
+import { formatInvoice, isScheduleRequest } from '../lib/admin';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
 
 let passed = 0;
@@ -55,6 +55,7 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
 function sig(over: Partial<MessageSignals> = {}): MessageSignals {
   return {
     is_admin_sender: false, is_prompt_injection: false, is_out_of_scope: false,
+    is_wrong_layout: false,
     client_picked_slot_id: null, client_wants_other_slots: false,
     client_asks_for_more_slots: false, client_wants_to_reschedule: false,
     client_confirms_booking: null, ...over,
@@ -107,6 +108,10 @@ eq('вопрос после брони → booked_followup_chat',
 eq('перенос после брони → reschedule_requested_ping_master',
   step({ lead_status: 'consultation_booked' }, { client_wants_to_reschedule: true }),
   'reschedule_requested_ping_master');
+eq('неправильная раскладка → wrong_keyboard_layout',
+  step({ idea: null }, { is_wrong_layout: true }), 'wrong_keyboard_layout');
+eq('раскладка не перебивает блокировку',
+  step({ lead_status: 'blocked' }, { is_wrong_layout: true }), 'silence_blocked');
 eq('заблокирован → silence_blocked', step({ lead_status: 'blocked' }), 'silence_blocked');
 eq('админ → admin_mode', step({}, { is_admin_sender: true }), 'admin_mode');
 eq('админ в режиме /client → обычная воронка (не admin_mode)',
@@ -143,6 +148,14 @@ ok('счёт: телефон', inv.includes('0501112233'));
 ok('счёт: цена', inv.includes('800₪'));
 ok('счёт: депозит расшифрован', inv.includes('нужно подтвердить'));
 ok('счёт: статус расшифрован', inv.includes('ждёт предоплату'));
+
+console.log('\n▶ isScheduleRequest (естественные фразы про расписание)');
+ok('«что по записям» → true', isScheduleRequest('что по записям'));
+ok('«какие записи сегодня» → true', isScheduleRequest('какие записи сегодня'));
+ok('«покажи календарь» → true', isScheduleRequest('покажи календарь'));
+ok('«покажи расписание» → true', isScheduleRequest('покажи расписание'));
+ok('«что там с Машей» → false (не расписание)', !isScheduleRequest('что там с Машей'));
+ok('«как дела» → false', !isScheduleRequest('как дела'));
 
 console.log('\n▶ buildPaymentDetailsBlock');
 delete process.env.PAYMENT_BIT; delete process.env.PAYMENT_BANK;

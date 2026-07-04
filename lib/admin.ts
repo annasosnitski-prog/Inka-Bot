@@ -44,6 +44,13 @@ const INVOICE_CMDS = ['/счёт', '/счет', '/invoice', 'счёт', 'сче�
 const PORTRAIT_CMDS = ['/портрет', '/portrait', 'портрет'];
 const SCHEDULE_CMDS = ['/расписание', '/schedule', 'расписание'];
 
+// Естественный запрос расписания без команды: "что по записям", "какие
+// записи", "покажи расписание/календарь". Держим узко (запис/расписан/
+// календар), чтобы не перехватывать вопросы про конкретного клиента.
+export function isScheduleRequest(text: string): boolean {
+  return /запис|расписан|календар/i.test(text);
+}
+
 export async function runAdmin(msg: AdminMessage): Promise<AdminResult> {
   const raw = (msg.text ?? '').trim();
 
@@ -68,6 +75,14 @@ export async function runAdmin(msg: AdminMessage): Promise<AdminResult> {
   }
   if (SCHEDULE_CMDS.includes(firstWord)) {
     return { reply: await handleSchedule(rest) };
+  }
+
+  // Естественные фразы про расписание/записи — не команда, но по смыслу
+  // запрос календаря ("что по записям", "какие записи сегодня", "покажи
+  // календарь"). Тянем реальное расписание, а не отправляем в диалог,
+  // который календарь не видит.
+  if (isScheduleRequest(raw)) {
+    return { reply: await handleSchedule(raw) };
   }
 
   // Всё остальное — свободный диалог.
