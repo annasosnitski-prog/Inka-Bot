@@ -55,6 +55,7 @@ export interface ExtractorOutput {
   phone: string | null;
   is_prompt_injection: boolean;
   is_out_of_scope: boolean;
+  is_wrong_layout: boolean;
   has_photo_this_message: boolean;
   photo_has_caption: boolean;
   client_picked_slot_id: string | null;

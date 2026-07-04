@@ -107,6 +107,7 @@ export interface MessageSignals {
   is_admin_sender: boolean; // telegram_id === 457343487
   is_prompt_injection: boolean;
   is_out_of_scope: boolean;
+  is_wrong_layout: boolean; // русский текст, набранный в латинской раскладке (гиббериш)
   client_picked_slot_id: string | null; // id слота, который Extractor распознал в тексте клиента (валидность проверяет state machine, не Extractor)
   client_wants_other_slots: boolean; // "ничего не подходит", "другое время"
   client_asks_for_more_slots: boolean; // "а есть ещё?"
@@ -118,6 +119,7 @@ export type NextStep =
   | 'admin_mode'
   | 'silence_blocked'
   | 'handle_prompt_injection'
+  | 'wrong_keyboard_layout'
   | 'handle_out_of_scope_warning_1'
   | 'handle_out_of_scope_warning_2'
   | 'handle_out_of_scope_block'
@@ -178,6 +180,15 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   // 3. PROMPT INJECTION — проверяется раньше диагностики.
   if (signals.is_prompt_injection) {
     return 'handle_prompt_injection';
+  }
+
+  // 3b. НЕПРАВИЛЬНАЯ РАСКЛАДКА — русский текст, набранный латиницей
+  // (гиббериш вроде "e;t tcnm jgsn"). Расшифровать надёжно нельзя, поэтому
+  // не двигаем воронку — просто просим переключить раскладку и повторить.
+  // Проверяем рано (до out_of_scope/фото/брони): гиббериш в любом состоянии
+  // = один и тот же мягкий ответ, а не случайный шаг воронки.
+  if (signals.is_wrong_layout) {
+    return 'wrong_keyboard_layout';
   }
 
   // 4. OUT OF SCOPE — три предупреждения, потом блок.

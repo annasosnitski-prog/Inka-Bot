@@ -153,6 +153,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       is_admin_sender: isAdminSender,
       is_prompt_injection: extracted.is_prompt_injection,
       is_out_of_scope: extracted.is_out_of_scope,
+      is_wrong_layout: extracted.is_wrong_layout,
       client_picked_slot_id: extracted.client_picked_slot_id,
       client_wants_other_slots: extracted.client_wants_other_slots,
       client_asks_for_more_slots: extracted.client_asks_for_more_slots,
