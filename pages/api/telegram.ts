@@ -4,6 +4,7 @@ import { runExtractor } from '../../lib/extractor';
 import { getNextStep, getCardPatchForStep } from '../../lib/stateMachine';
 import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
+import { runAdmin } from '../../lib/admin';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { SlotType } from '../../lib/calendar';
 
@@ -78,10 +79,60 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({ ok: true });
   }
 
+  // НЕТЕКСТОВЫЕ / НЕПОДДЕРЖИВАЕМЫЕ ТИПЫ СООБЩЕНИЙ.
+  // Голосовые уже отбиты выше своим отдельным сообщением. Всё остальное
+  // без текста и без фото — стикер, видео, документ, аудио, гео, контакт,
+  // опрос и т.п. — Extractor разбирать не умеет, а пустой прогон пайплайна
+  // тратит вызовы OpenAI и может записать в карточку "пустое" сообщение,
+  // сбивая состояние. Даём единый мягкий фолбэк и выходим, как с голосом.
+  // Фото без подписи сюда НЕ попадает (hasPhoto=true) — у него своя ветка
+  // handle_photo_no_caption внутри пайплайна.
+  //
+  // Мастера (isAdminSender) НЕ отбиваем этим фолбэком — её сообщения
+  // (в т.ч. пересылки без текста) должны дойти до admin-обработчика ниже.
+  if (!messageText && !hasPhoto && !isAdminSender) {
+    if (chatId) {
+      await sendTelegramMessage(
+        chatId,
+        'я пока понимаю только текст и фото 🙂 опиши, пожалуйста, идею словами или пришли референс картинкой.'
+      );
+    }
+    return res.status(200).json({ ok: true });
+  }
+
   try {
     // 1. Найти текущую карточку клиента (если есть).
     const existing = await findClientByTelegramId(telegramId);
     const currentCard = recordToClientCard(telegramId, existing?.fields ?? {});
+
+    // 1a. ADMIN-РЕЖИМ (ШАГ 7). Мастер (isAdminSender), если она не
+    // переключилась в клиентский путь командой /client (force_client_mode),
+    // обрабатывается отдельным admin-модулем — БЕЗ клиентского Extractor /
+    // state machine / Responder. Иначе прогон Аниных служебных запросов
+    // через воронку засоряет её же карточку и выдаёт бессмыслицу.
+    if (isAdminSender && currentCard.force_client_mode !== 'yes') {
+      try {
+        const adminResult = await runAdmin({
+          text: messageText,
+          forwardFromId:
+            message.forward_from?.id ?? message.forward_origin?.sender_user?.id ?? null,
+          forwardName:
+            message.forward_from?.first_name ??
+            message.forward_sender_name ??
+            message.forward_origin?.sender_user?.first_name ??
+            null,
+        });
+        if (chatId && adminResult.reply) {
+          await sendTelegramMessage(chatId, adminResult.reply);
+        }
+      } catch (adminErr) {
+        console.error('Admin handler error:', adminErr);
+        if (chatId) {
+          await sendTelegramMessage(chatId, 'ошибка в admin-режиме, глянь логи.');
+        }
+      }
+      return res.status(200).json({ ok: true });
+    }
 
     // 2. EXTRACTOR — разобрать сообщение клиента на поля.
     const extracted = await runExtractor({
@@ -174,12 +225,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // event.id в slot_options — эта строка только для текста ответа).
     let slotsDisplay: string[] | null = null;
 
-    const hasContact =
-      mergedCard.contact_preference === 'telegram' ||
-      (mergedCard.contact_preference === 'whatsapp' && !!mergedCard.contact_value);
+    // Слоты подгружаем, когда направление выбрано И у нас уже есть
+    // телефон клиента (по бизнес-правилу телефон обязателен перед
+    // показом дат — см. ask_phone в state machine). Раньше здесь был
+    // гейт по contact_preference; теперь единый гейт — телефон.
+    const hasPhone = !!mergedCard.phone;
     const routeChosen =
       mergedCard.direct_tattoo_allowed === 'yes' || mergedCard.consultation_needed === 'yes';
-    const needsFreshSlots = routeChosen && hasContact;
+    const needsFreshSlots = routeChosen && hasPhone;
 
     if (needsFreshSlots) {
       const slotType: SlotType = mergedCard.direct_tattoo_allowed === 'yes' ? 'tattoo' : 'consultation';
@@ -253,9 +306,48 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       slotsDisplay,
     });
 
+    // 9b. РЕКВИЗИТЫ ПРЕДОПЛАТЫ. На шаге подтверждения тату дописываем
+    // реквизиты (Bit + банковский счёт) ДЕТЕРМИНИРОВАННО из env, а не
+    // через LLM — номера нельзя доверять генерации, любая ошибка в
+    // цифре = потерянные деньги. Responder-у велено НЕ печатать
+    // реквизиты самому (см. confirm_slot_awaiting_payment в промпте).
+    let finalReply = replyText;
+    if (nextStep === 'confirm_slot_awaiting_payment') {
+      const payBlock = buildPaymentDetailsBlock();
+      if (payBlock) {
+        finalReply = replyText ? `${replyText}\n\n${payBlock}` : payBlock;
+      }
+    }
+
     // 10. Отправить ответ, если он не пустой.
-    if (chatId && replyText) {
-      await sendTelegramMessage(chatId, replyText);
+    if (chatId && finalReply) {
+      await sendTelegramMessage(chatId, finalReply);
+    }
+
+    // 11. ПИНГ МАСТЕРУ. Некоторые шаги обещают клиенту "передала мастеру"
+    // или требуют действия Ани (подтвердить оплату, назначить перенос,
+    // подобрать слот). Раньше эти обещания уходили в пустоту — здесь
+    // реально уведомляем мастера в её личный чат. Не пингуем, когда сама
+    // Аня тестирует клиентский путь (isAdminSender) — иначе спам себе же.
+    // Обёрнуто в свой try/catch: сбой пинга не должен ломать ответ клиенту.
+    if (!isAdminSender) {
+      try {
+        const masterNote = buildMasterNotification(nextStep, clientLabel, username);
+        if (masterNote) {
+          await sendTelegramMessage(MASTER_TELEGRAM_ID, masterNote);
+          // Скрин оплаты пересылаем Ане целиком — ей нужно видеть саму
+          // картинку, чтобы сверить сумму и подтвердить.
+          if (
+            nextStep === 'payment_screenshot_received' &&
+            chatId &&
+            message.message_id
+          ) {
+            await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
+          }
+        }
+      } catch (notifyErr) {
+        console.error('Master notification failed:', notifyErr);
+      }
     }
   } catch (err) {
     console.error('INKA-BOT pipeline error:', err);
@@ -290,7 +382,8 @@ function recordToClientCard(
     wants_to_book: fields.wants_to_book ?? null,
     contact_preference: fields.contact_preference ?? null,
     contact_value: fields.contact_value ?? null,
-    payment_status: fields.payment_status ?? null,
+    phone: fields.phone ?? null,
+    payment_status: fields.deposit_status ?? null, // колонка в Airtable зовётся deposit_status
     client_type: fields.client_type ?? null,
     skin_notes: fields.skin_notes ?? null,
     spam_count: fields.spam_count ?? 0,
@@ -330,6 +423,7 @@ function mergeCard(
     price_explained: ClientCard['price_explained'];
     contact_preference: ClientCard['contact_preference'];
     contact_value: string | null;
+    phone: string | null;
   },
   messageFlags: { hasPhotoThisMessage: boolean; photoHasCaption: boolean }
 ): ClientCard {
@@ -354,6 +448,7 @@ function mergeCard(
     contact_preference:
       extracted.contact_preference ?? current.contact_preference,
     contact_value: extracted.contact_value ?? current.contact_value,
+    phone: extracted.phone ?? current.phone,
     has_photo_this_message: messageFlags.hasPhotoThisMessage,
     photo_has_caption: messageFlags.photoHasCaption,
   };
@@ -388,6 +483,8 @@ function clientCardToAirtableFields(
     wants_to_book: card.wants_to_book,
     contact_preference: card.contact_preference,
     contact_value: card.contact_value,
+    phone: card.phone,
+    deposit_status: card.payment_status, // колонка в Airtable зовётся deposit_status
     skin_notes: card.skin_notes,
     spam_count: card.spam_count,
     chosen_slot_id: card.chosen_slot_id,
@@ -395,6 +492,74 @@ function clientCardToAirtableFields(
     photos_count: extra.photos_count,
     force_client_mode: card.force_client_mode,
   };
+}
+
+// Текст уведомления мастеру для тех шагов, где Ане нужно что-то узнать
+// или сделать. Возвращает null для шагов, не требующих её внимания —
+// тогда пинг не отправляется вовсе.
+function buildMasterNotification(
+  step: NextStep,
+  clientLabel: string,
+  username: string
+): string | null {
+  const who = username ? `${clientLabel} (@${username})` : clientLabel;
+  switch (step) {
+    case 'confirm_slot_awaiting_payment':
+      return `🎨 Новая бронь ТАТУ — ${who}. Слот закреплён, клиент ждёт реквизиты для предоплаты 200₪.`;
+    case 'confirm_consultation_booked':
+      return `🗓 Новая КОНСУЛЬТАЦИЯ — ${who}. Слот забронирован.`;
+    case 'payment_screenshot_received':
+      return `💰 ${who} прислал скрин предоплаты — проверь сумму и подтверди оплату (скрин переслан ниже).`;
+    case 'reschedule_requested_ping_master':
+      return `🔄 ${who} просит перенести запись — напиши насчёт нового времени.`;
+    case 'slot_change_requested_waiting':
+    case 'no_more_slots_waiting':
+      return `⏳ ${who} в листе ожидания — подходящих слотов сейчас нет.`;
+    default:
+      return null;
+  }
+}
+
+async function forwardTelegramMessage(
+  toChatId: number,
+  fromChatId: number,
+  messageId: number
+) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    console.error('TELEGRAM_BOT_TOKEN not set');
+    return;
+  }
+  const url = `https://api.telegram.org/bot${token}/forwardMessage`;
+  await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: toChatId,
+      from_chat_id: fromChatId,
+      message_id: messageId,
+    }),
+  });
+}
+
+// Блок реквизитов предоплаты, собранный из env-переменных. Клиенту
+// предлагается два способа на выбор: Bit (по номеру телефона) и
+// банковский перевод. Если ни один реквизит не задан в env — возвращаем
+// null (тогда сообщение уходит без блока, а не с битым текстом).
+// Env: PAYMENT_BIT (номер для Bit), PAYMENT_BANK (реквизиты банка).
+export function buildPaymentDetailsBlock(): string | null {
+  const bit = (process.env.PAYMENT_BIT ?? '').trim();
+  const bank = (process.env.PAYMENT_BANK ?? '').trim();
+  if (!bit && !bank) {
+    console.warn('PAYMENT_BIT / PAYMENT_BANK not set — payment details block skipped');
+    return null;
+  }
+
+  const lines = ['реквизиты для предоплаты 200₪ (на выбор):'];
+  if (bit) lines.push(`📱 Bit: ${bit}`);
+  if (bank) lines.push(`🏦 банковский перевод: ${bank}`);
+  lines.push('после оплаты пришли, пожалуйста, скрин 🙏');
+  return lines.join('\n');
 }
 
 async function sendTelegramMessage(chatId: number, text: string) {

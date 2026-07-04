@@ -50,7 +50,16 @@ export type Category =
 export type YesNo = 'yes' | 'no' | null;
 export type ExistingTattoo = 'no' | 'cover' | 'modification' | 'scar_work' | null;
 export type ContactPreference = 'telegram' | 'whatsapp' | null;
-export type PaymentStatus = 'none' | 'waiting_prepayment' | 'paid' | null;
+// waiting_prepayment — слот закреплён, ждём скрин оплаты от клиента.
+// waiting_confirmation — клиент прислал скрин, ждём, что мастер сверит
+//   сумму и подтвердит (бот НЕ подтверждает оплату сам — не может
+//   проверить сумму по картинке). paid проставляет мастер.
+export type PaymentStatus =
+  | 'none'
+  | 'waiting_prepayment'
+  | 'waiting_confirmation'
+  | 'paid'
+  | null;
 export type ClientType =
   | '1_undefined'
   | '2_reference'
@@ -79,6 +88,7 @@ export interface ClientCard {
   wants_to_book: YesNo; // явное подтверждение клиента "да, хочу записаться" после цены
   contact_preference: ContactPreference;
   contact_value: string | null;
+  phone: string | null; // номер телефона клиента для подтверждения брони — спрашивается перед показом дат
   payment_status: PaymentStatus;
   client_type: ClientType;
   skin_notes: string | null;
@@ -121,6 +131,7 @@ export type NextStep =
   | 'ask_wants_to_book'
   | 'ask_first_tattoo'
   | 'ask_contact'
+  | 'ask_phone'
   | 'show_tattoo_slots'
   | 'show_consultation_slots'
   | 'slot_taken_pick_again'
@@ -130,6 +141,7 @@ export type NextStep =
   | 'reschedule_requested_ping_master'
   | 'confirm_slot_awaiting_payment'
   | 'confirm_consultation_booked'
+  | 'payment_screenshot_received'
   | 'booked_followup_chat'
   | 'all_done';
 
@@ -177,13 +189,12 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     return 'handle_out_of_scope_block'; // ставит lead_status=blocked в Airtable
   }
 
-  // 5. ФОТО без подписи — отдельная ветка, один вопрос.
-  // (раздел 3: "сохранила. что из фото важно...")
-  if (card.has_photo_this_message && !card.photo_has_caption) {
-    return 'handle_photo_no_caption';
-  }
-
-  // 6. УЖЕ ПОДТВЕРЖДЁННАЯ ЗАПИСЬ — разговор после брони.
+  // 5. УЖЕ ПОДТВЕРЖДЁННАЯ ЗАПИСЬ — разговор после брони.
+  // ВАЖНО: этот блок проверяется РАНЬШЕ ветки "фото без подписи" ниже.
+  // Скрин предоплаты — это фото и обычно БЕЗ подписи; если бы photo-ветка
+  // шла первой, любой скрин уходил бы в handle_photo_no_caption и логика
+  // оплаты никогда не срабатывала. Поэтому booked-состояние имеет приоритет.
+  //
   // Инка САМА НЕ переносит встречи — она только спокойно фиксирует
   // запрос на перенос и явно пингует мастера. Для всех ОСТАЛЬНЫХ тем
   // (вопросы про процесс/боль/подготовку/что угодно ещё) — отдельный
@@ -199,7 +210,28 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     if (signals.client_wants_to_reschedule) {
       return 'reschedule_requested_ping_master';
     }
+    // СКРИН ПРЕДОПЛАТЫ. Тату забронировано, оплата ещё не подтверждена, и
+    // клиент прислал фото — трактуем это как скрин предоплаты. Инка НЕ
+    // подтверждает оплату сама (не может сверить сумму по картинке) —
+    // фиксирует payment_status=waiting_confirmation и пингует мастера
+    // (пинг и пересылку скрина делает telegram.ts, здесь только шаг).
+    // Guard по payment_status, чтобы повторный скрин не пинговал мастера
+    // второй раз — тогда это уже обычный booked_followup_chat.
+    if (
+      card.lead_status === 'tattoo_booked_waiting_payment' &&
+      card.has_photo_this_message &&
+      card.payment_status !== 'waiting_confirmation' &&
+      card.payment_status !== 'paid'
+    ) {
+      return 'payment_screenshot_received';
+    }
     return 'booked_followup_chat';
+  }
+
+  // 6. ФОТО без подписи — отдельная ветка, один вопрос.
+  // (раздел 3: "сохранила. что из фото важно...")
+  if (card.has_photo_this_message && !card.photo_has_caption) {
+    return 'handle_photo_no_caption';
   }
 
   // 7. СЛОТЫ УЖЕ ПОКАЗАНЫ — обрабатываем раньше, чем заново считать цену.
@@ -297,14 +329,12 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     if (card.first_tattoo === null) {
       return 'ask_first_tattoo';
     }
-    // Контакт считается известным, если выбран telegram (тогда отдельное
-    // значение не нужно — пишем в тот же чат по telegram_id) ИЛИ если
-    // выбран whatsapp И дано конкретное значение (номер).
-    const hasContact =
-      card.contact_preference === 'telegram' ||
-      (card.contact_preference === 'whatsapp' && !!card.contact_value);
-    if (!hasContact) {
-      return 'ask_contact';
+    // ТЕЛЕФОН — обязателен перед показом дат брони. По бизнес-правилу Ани
+    // мы всегда берём номер телефона клиента для подтверждения брони,
+    // прежде чем показывать/закреплять слоты. Пишем в тот же чат по
+    // telegram_id, но для подтверждения брони нужен именно телефон.
+    if (!card.phone) {
+      return 'ask_phone';
     }
     if (card.slot_options && card.slot_options.length > 0) {
       return 'show_tattoo_slots';
@@ -314,11 +344,10 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
 
   // 11b. КОНСУЛЬТАЦИОННЫЙ ПУТЬ
   if (card.consultation_needed === 'yes') {
-    const hasContact =
-      card.contact_preference === 'telegram' ||
-      (card.contact_preference === 'whatsapp' && !!card.contact_value);
-    if (!hasContact) {
-      return 'ask_contact';
+    // Телефон обязателен и для консультации — то же правило про любой
+    // запрос на даты брони.
+    if (!card.phone) {
+      return 'ask_phone';
     }
     if (card.slot_options && card.slot_options.length > 0) {
       return 'show_consultation_slots';
@@ -345,6 +374,7 @@ export interface CardPatch {
   chosen_slot_id?: string | null;
   wants_to_book?: YesNo;
   slot_options?: string[] | null;
+  payment_status?: PaymentStatus;
 }
 
 export function getCardPatchForStep(
@@ -376,9 +406,18 @@ export function getCardPatchForStep(
     case 'show_consultation_slots':
       return { ...patch, lead_status: 'slots_shown' };
     case 'confirm_slot_awaiting_payment':
-      return { ...patch, lead_status: 'tattoo_booked_waiting_payment', slot_options: null };
+      return {
+        ...patch,
+        lead_status: 'tattoo_booked_waiting_payment',
+        slot_options: null,
+        payment_status: 'waiting_prepayment',
+      };
     case 'confirm_consultation_booked':
       return { ...patch, lead_status: 'consultation_booked', slot_options: null };
+    case 'payment_screenshot_received':
+      // lead_status НЕ трогаем — запись остаётся tattoo_booked_waiting_payment
+      // до тех пор, пока мастер не подтвердит оплату (payment_status=paid).
+      return { ...patch, payment_status: 'waiting_confirmation' };
     default:
       return patch;
   }
