@@ -99,7 +99,20 @@ export async function mirrorDialog(
     if (!topicId) {
       topicId = await createTopic(groupId, clientLabel);
       if (!topicId) return;
-      await updateClient(record.id, { log_topic_id: topicId });
+      // Сохраняем id для переиспользования в будущих сообщениях этого же
+      // клиента. Если сохранить не получилось (например поле log_topic_id
+      // ещё не добавлено в Airtable) — НЕ даём этому сорвать отправку
+      // самого сообщения: топик уже реально создан в Telegram, молчать в
+      // него из-за отдельной ошибки записи было бы хуже, чем просто не
+      // переиспользовать топик в следующий раз. Раньше ошибка здесь
+      // уходила во внешний catch ДО sendToTopic — топик создавался, но
+      // текст в него так и не попадал, и на каждое новое сообщение
+      // создавался ещё один пустой топик.
+      try {
+        await updateClient(record.id, { log_topic_id: topicId });
+      } catch (persistErr) {
+        console.error('mirrorDialog: failed to persist log_topic_id (non-fatal):', persistErr);
+      }
     }
 
     try {
