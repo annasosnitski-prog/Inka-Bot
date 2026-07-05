@@ -29,6 +29,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   console.log('Incoming Telegram update:', JSON.stringify(message));
 
+  // ТОЛЬКО ЛИЧНЫЕ ЧАТЫ. Бот состоит в лог-группе (см. lib/dialogLog.ts) как
+  // администратор, поэтому Telegram доставляет сюда и сообщения, написанные
+  // ВНУТРИ этой группы другими участниками. Без этой проверки такое
+  // сообщение раньше прогонялось через клиентский пайплайн и ответ уходил
+  // ПРЯМО В ГРУППУ (в топик General) — ломая смысл группы как одностороннего
+  // зеркала. Группы/супергруппы/каналы полностью игнорируем.
+  if (message.chat?.type !== 'private') {
+    return res.status(200).json({ ok: true });
+  }
+
   const telegramId = message.from?.id;
   const chatId = message.chat?.id;
 
@@ -273,7 +283,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         slotsDisplay = freshSlots.map(formatSlotForDisplay);
         nextStep = 'slot_taken_pick_again';
       } else {
-        liveCard = { ...liveCard, chosen_slot_id: signals.client_picked_slot_id };
+        // Сохраняем читаемую дату+время брони — иначе после того, как
+        // slot_options обнуляются патчем, у карточки не остаётся НИКАКИХ
+        // человекочитаемых данных о времени записи, и на follow-up вопрос
+        // "когда у меня запись" бот не может ответить сам (было замечено
+        // вживую). slotsDisplay и liveCard.slot_options построены из одного
+        // и того же вызова getAvailableSlots в том же порядке — по индексу
+        // выбранного id находим соответствующую человекочитаемую строку.
+        const pickedIndex = liveCard.slot_options?.indexOf(signals.client_picked_slot_id) ?? -1;
+        const pickedDisplay = pickedIndex >= 0 ? slotsDisplay?.[pickedIndex] ?? null : null;
+        liveCard = {
+          ...liveCard,
+          chosen_slot_id: signals.client_picked_slot_id,
+          booked_slot_display: pickedDisplay,
+        };
       }
     }
 
@@ -399,6 +422,7 @@ function recordToClientCard(
     spam_count: fields.spam_count ?? 0,
     chosen_slot_id: fields.chosen_slot_id ?? null,
     slot_options: parseSlotOptions(fields.slot_options),
+    booked_slot_display: fields.booked_slot_display ?? null,
     photos_count: fields.photos_count ?? 0,
     has_photo_this_message: false,
     photo_has_caption: false,
@@ -499,6 +523,7 @@ function clientCardToAirtableFields(
     spam_count: card.spam_count,
     chosen_slot_id: card.chosen_slot_id,
     slot_options: card.slot_options ? card.slot_options.join(',') : '',
+    booked_slot_display: card.booked_slot_display,
     photos_count: extra.photos_count,
     force_client_mode: card.force_client_mode,
   };

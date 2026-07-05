@@ -95,6 +95,7 @@ export interface ClientCard {
   spam_count: 0 | 1 | 2 | 3;
   chosen_slot_id: string | null;
   slot_options: string[] | null; // реальные слоты, пришедшие из календаря
+  booked_slot_display: string | null; // читаемые дата+время подтверждённой брони (для follow-up вопросов "когда у меня запись")
   photos_count: number;
   has_photo_this_message: boolean;
   photo_has_caption: boolean;

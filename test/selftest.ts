@@ -48,7 +48,7 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     active_work_time_estimate: '<=3h', price_quoted: '800₪', price_explained: 'yes',
     wants_to_book: 'yes', contact_preference: null, contact_value: null, phone: null,
     payment_status: null, client_type: '2_reference', skin_notes: null, spam_count: 0,
-    chosen_slot_id: null, slot_options: ['ev1', 'ev2'], photos_count: 0,
+    chosen_slot_id: null, slot_options: ['ev1', 'ev2'], booked_slot_display: null, photos_count: 0,
     has_photo_this_message: false, photo_has_caption: false, force_client_mode: null,
     ...over,
   };
