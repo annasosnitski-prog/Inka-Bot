@@ -20,6 +20,7 @@ import {
 } from '../lib/stateMachine';
 import { formatSchedule, type ScheduleEvent } from '../lib/calendar';
 import { formatInvoice, isScheduleRequest } from '../lib/admin';
+import { buildMirrorText } from '../lib/dialogLog';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
 
 let passed = 0;
@@ -156,6 +157,16 @@ ok('«покажи календарь» → true', isScheduleRequest('покаж
 ok('«покажи расписание» → true', isScheduleRequest('покажи расписание'));
 ok('«что там с Машей» → false (не расписание)', !isScheduleRequest('что там с Машей'));
 ok('«как дела» → false', !isScheduleRequest('как дела'));
+
+console.log('\n▶ buildMirrorText (лог живого диалога)');
+eq('оба есть → 👤+🤖 через пустую строку',
+  buildMirrorText('хочу тату', 'супер, расскажи подробнее'),
+  '👤 хочу тату\n\n🤖 супер, расскажи подробнее');
+eq('только клиент (Инка ещё не ответила)',
+  buildMirrorText('хочу тату', null), '👤 хочу тату');
+eq('только Инка (silence_blocked — клиент промолчал)',
+  buildMirrorText(null, 'привет!'), '🤖 привет!');
+eq('оба пустые → null', buildMirrorText(null, null), null as any);
 
 console.log('\n▶ buildPaymentDetailsBlock');
 delete process.env.PAYMENT_BIT; delete process.env.PAYMENT_BANK;

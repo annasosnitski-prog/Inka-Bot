@@ -5,6 +5,7 @@ import { getNextStep, getCardPatchForStep } from '../../lib/stateMachine';
 import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
 import { runAdmin } from '../../lib/admin';
+import { mirrorDialog } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { SlotType } from '../../lib/calendar';
 
@@ -324,6 +325,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (chatId && finalReply) {
       await sendTelegramMessage(chatId, finalReply);
     }
+
+    // 10b. ЖИВОЙ ЛОГ ДИАЛОГА. Зеркалим этот обмен репликами (клиент + Инка)
+    // в топик супергруппы мастера — Аня видит переписку в реальном времени
+    // отдельно от рабочего чата с ботом. Вызывается ПОСЛЕ отправки ответа
+    // клиенту, чтобы задержка логирования не влияла на его получение.
+    // Полностью опционально (без TELEGRAM_LOG_GROUP_ID — no-op) и никогда
+    // не бросает исключение.
+    await mirrorDialog(existing, clientLabel, lastMessageForRecord, finalReply);
 
     // 11. ПИНГ МАСТЕРУ. Некоторые шаги обещают клиенту "передала мастеру"
     // или требуют действия Ани (подтвердить оплату, назначить перенос,
