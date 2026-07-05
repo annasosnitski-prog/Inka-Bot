@@ -360,27 +360,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // 11. ПИНГ МАСТЕРУ. Некоторые шаги обещают клиенту "передала мастеру"
     // или требуют действия Ани (подтвердить оплату, назначить перенос,
     // подобрать слот). Раньше эти обещания уходили в пустоту — здесь
-    // реально уведомляем мастера в её личный чат. Не пингуем, когда сама
-    // Аня тестирует клиентский путь (isAdminSender) — иначе спам себе же.
+    // реально уведомляем мастера в её личный чат.
+    //
+    // ВАЖНО: этот код выполняется, только когда клиентский пайплайн
+    // реально отработал — а он либо для настоящего клиента (isAdminSender
+    // = false), либо для Ани, сознательно тестирующей клиентский путь
+    // командой /client (isAdminSender = true, но тогда шаг 1a уже
+    // перехватил бы её как admin_mode и сюда мы бы не попали). То есть
+    // если мы здесь — уведомление ожидаемо и нужно ВСЕГДА, включая
+    // собственные тесты Ани: раньше был отдельный guard "!isAdminSender",
+    // который в /client-тестах ложно гасил пинг целиком (Аня жаловалась,
+    // что не получает уведомление о брони при тестировании) — этот guard
+    // был лишним и неверным, убран.
     // Обёрнуто в свой try/catch: сбой пинга не должен ломать ответ клиенту.
-    if (!isAdminSender) {
-      try {
-        const masterNote = buildMasterNotification(nextStep, clientLabel, username);
-        if (masterNote) {
-          await sendTelegramMessage(MASTER_TELEGRAM_ID, masterNote);
-          // Скрин оплаты пересылаем Ане целиком — ей нужно видеть саму
-          // картинку, чтобы сверить сумму и подтвердить.
-          if (
-            nextStep === 'payment_screenshot_received' &&
-            chatId &&
-            message.message_id
-          ) {
-            await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
-          }
+    try {
+      const masterNote = buildMasterNotification(nextStep, clientLabel, username);
+      if (masterNote) {
+        await sendTelegramMessage(MASTER_TELEGRAM_ID, masterNote);
+        // Скрин оплаты пересылаем Ане целиком — ей нужно видеть саму
+        // картинку, чтобы сверить сумму и подтвердить.
+        if (
+          nextStep === 'payment_screenshot_received' &&
+          chatId &&
+          message.message_id
+        ) {
+          await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
         }
-      } catch (notifyErr) {
-        console.error('Master notification failed:', notifyErr);
       }
+    } catch (notifyErr) {
+      console.error('Master notification failed:', notifyErr);
     }
   } catch (err) {
     console.error('INKA-BOT pipeline error:', err);
