@@ -269,7 +269,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       signals.client_picked_slot_id
     ) {
       const slotType: SlotType = nextStep === 'confirm_slot_awaiting_payment' ? 'tattoo' : 'consultation';
-      const result = await bookSlot(signals.client_picked_slot_id, slotType, clientLabel);
+      const result = await bookSlot(
+        signals.client_picked_slot_id,
+        slotType,
+        clientLabel,
+        liveCard.phone
+      );
 
       if (!result.success) {
         console.log('Booking failed, refetching slots:', result.error);

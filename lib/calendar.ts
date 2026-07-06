@@ -303,7 +303,8 @@ export interface BookSlotResult {
 export async function bookSlot(
   eventId: string,
   type: SlotType,
-  clientLabel: string // например имя клиента или username, для [КОНС]
+  clientLabel: string, // имя клиента или username
+  clientPhone?: string | null // телефон, если уже известен — чтобы Аня могла опознать/связаться по одной записи в календаре
 ): Promise<BookSlotResult> {
   const token = await getAccessToken();
 
@@ -333,7 +334,15 @@ export async function bookSlot(
     return { success: false, error: 'SLOT_ALREADY_BOOKED' };
   }
 
-  const marker = type === 'tattoo' ? 'ОЖИДАЕТ ПРЕДОПЛАТЫ' : `КОНС ОНЛАЙН ${clientLabel}`;
+  // Раньше тату-бронь помечалась просто "ОЖИДАЕТ ПРЕДОПЛАТЫ" без имени —
+  // Аня не могла понять из календаря (или из /расписание, которое читает
+  // те же summary), чья это запись. Теперь имя (и телефон, если уже
+  // известен) дописываются для ОБОИХ типов брони — карточка в календаре
+  // сама по себе достаточна, чтобы опознать и связаться с клиентом, не
+  // открывая Airtable/Telegram отдельно.
+  const contact = clientPhone ? `${clientLabel}, ${clientPhone}` : clientLabel;
+  const marker =
+    type === 'tattoo' ? `ОЖИДАЕТ ПРЕДОПЛАТЫ — ${contact}` : `КОНС ОНЛАЙН — ${contact}`;
   const newSummary = `${currentSummary} — ${marker}`;
 
   const patchUrl = getUrl;
