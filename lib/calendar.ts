@@ -605,6 +605,10 @@ export interface DiarySyncResult {
   ok: boolean;
   created?: boolean; // true = создано новое событие, false = обновлено существующее
   error?: string;
+  // Абсолютное время события, как его разрешил Google (RFC3339 со смещением) —
+  // нужно для проверки пересечений без самодельной таймзонной арифметики.
+  resolvedStart?: string;
+  resolvedEnd?: string;
 }
 
 // Создать ИЛИ обновить событие Дневника по детерминированному eventId.
@@ -626,6 +630,17 @@ export async function upsertDiaryEvent(
     CALENDAR_ID
   )}/events`;
 
+  // Ответ Google на insert/patch содержит событие с уже разрешённым
+  // абсолютным временем (start/end.dateTime с офсетом) — берём его для
+  // последующей проверки пересечений.
+  const resolvedTimes = async (res: Response) => {
+    const ev = await res.json().catch(() => null);
+    return {
+      resolvedStart: ev?.start?.dateTime as string | undefined,
+      resolvedEnd: ev?.end?.dateTime as string | undefined,
+    };
+  };
+
   const insertResponse = await fetch(base, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -633,7 +648,7 @@ export async function upsertDiaryEvent(
   });
 
   if (insertResponse.ok) {
-    return { ok: true, created: true };
+    return { ok: true, created: true, ...(await resolvedTimes(insertResponse)) };
   }
 
   if (insertResponse.status === 409) {
@@ -644,7 +659,7 @@ export async function upsertDiaryEvent(
       body: JSON.stringify(eventBody),
     });
     if (patchResponse.ok) {
-      return { ok: true, created: false };
+      return { ok: true, created: false, ...(await resolvedTimes(patchResponse)) };
     }
     return {
       ok: false,
@@ -675,4 +690,55 @@ export async function deleteDiaryEvent(eventId: string): Promise<DiarySyncResult
     return { ok: true };
   }
   return { ok: false, error: `diary events.delete failed: ${res.status} ${await res.text()}` };
+}
+
+// ----------------------------------------------------------
+// ПРОВЕРКА ПЕРЕСЕЧЕНИЙ — «а не стоит ли на это время что-то ещё?»
+// Дневник не читает календарь перед сохранением, поэтому мастер могла
+// поставить сессию поверх брони бота, не заметив. После синхронизации
+// «дверца» ищет пересекающиеся события и возвращает их Дневнику —
+// тот показывает предупреждение. Запись НЕ блокируется: решение за
+// мастером (возможно, параллельная запись поставлена сознательно).
+// ----------------------------------------------------------
+
+export interface ConflictInfo {
+  summary: string;
+  start: string;
+  end: string;
+}
+
+// Семантика timeMin/timeMax у Google (нижняя граница по КОНЦУ события,
+// верхняя — по НАЧАЛУ) — это ровно определение пересечения интервалов,
+// поэтому фильтр «наши границы как timeMin/timeMax» отдаёт в точности
+// пересекающиеся события; остаётся исключить само синхронизируемое.
+export async function findDiaryConflicts(
+  selfEventId: string,
+  startAbs: string,
+  endAbs: string
+): Promise<ConflictInfo[]> {
+  const token = await getAccessToken();
+  const params = new URLSearchParams({
+    timeMin: startAbs,
+    timeMax: endAbs,
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    maxResults: '10',
+  });
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+    CALENDAR_ID
+  )}/events?${params.toString()}`;
+
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    throw new Error(`conflict check failed: ${res.status} ${await res.text()}`);
+  }
+  const data = await res.json();
+  const items: any[] = data.items ?? [];
+  return items
+    .filter((e) => e.id !== selfEventId && e.status !== 'cancelled')
+    .map((e) => ({
+      summary: e.summary ?? '(без названия)',
+      start: e.start?.dateTime ?? e.start?.date,
+      end: e.end?.dateTime ?? e.end?.date,
+    }));
 }
