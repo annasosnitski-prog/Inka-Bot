@@ -15,6 +15,8 @@
 // googleapis — легче и предсказуемее в серверless-среде Vercel).
 // ============================================================
 
+import { createHash } from 'crypto';
+
 const CALENDAR_ID =
   '5e40406c76b8c676638fea6ef53cd3207a2ec754c6d0c5113d04a1a52d5c820d@group.calendar.google.com';
 
@@ -462,4 +464,152 @@ export function formatSchedule(events: ScheduleEvent[]): string {
 
   const blocks = dayOrder.map((day) => `📅 ${day}\n${byDay.get(day)!.join('\n')}`);
   return blocks.join('\n\n');
+}
+
+// ----------------------------------------------------------
+// СИНХРОНИЗАЦИЯ С ДНЕВНИКОМ МАСТЕРА (мост Дневник → календарь → бот).
+// Дневник — отдельное приложение мастера; когда она ставит там запись,
+// та кладётся В ТОТ ЖЕ календарь, что читает бот (getSchedule), поэтому
+// на "что на неделе" запись из Дневника видна автоматически.
+//
+// Здесь — создание/обновление/удаление события С НУЛЯ (events.insert /
+// patch / delete), в отличие от bookSlot(), который только переименовывает
+// уже созданный мастером слот.
+//
+// ВАЖНО: события из Дневника помечаются маркером "ЗАНЯТО" — тогда
+// getAvailableSlots (которая исключает BUSY_MARKERS) НЕ предложит их
+// клиенту как свободный слот. Это защита от двойной записи: реальная
+// встреча из Дневника не должна попасть в пул свободных для клиентов.
+// ----------------------------------------------------------
+
+// Детерминированный id события Google по стабильному id записи Дневника.
+// Требования Google: [a-v0-9], длина 5..1024. hex-хэш (0-9a-f) — валидное
+// подмножество, префикс 'd' (в a-v) неймспейсит diary-события. Один и тот
+// же diaryId всегда даёт тот же eventId → повторная синхронизация
+// ОБНОВЛЯЕТ то же событие, а не плодит дубли.
+export function diaryEventId(diaryId: string): string {
+  return 'd' + createHash('sha1').update(diaryId).digest('hex');
+}
+
+// Короткая строка названия события Дневника. Начинается с тега
+// [ТАТУ]/[КОНС] (чтобы getSchedule определил тип) и содержит "ЗАНЯТО"
+// (чтобы getAvailableSlots исключила из свободных).
+export function buildDiaryEventSummary(
+  type: SlotType,
+  clientName: string | null,
+  descriptor: string | null
+): string {
+  const head = `${SLOT_TAG[type]} ЗАНЯТО`;
+  const tail = [clientName, descriptor].filter(Boolean).join(' · ');
+  return tail ? `${head} — ${tail}` : head;
+}
+
+// Более полное описание (поле notes события) — видно, когда мастер
+// открывает запись в календаре.
+export function buildDiaryEventDescription(
+  clientName: string | null,
+  descriptor: string | null
+): string {
+  const lines = ['📓 из Дневника мастера'];
+  if (clientName) lines.push(`клиент: ${clientName}`);
+  if (descriptor) lines.push(descriptor);
+  return lines.join('\n');
+}
+
+// Конец встречи как локальное wall-clock время (наивная строка без
+// смещения — Google интерпретирует её по timeZone). Считаем через UTC
+// как чистую арифметику часов/минут; редкий переход на летнее время
+// внутри одной встречи не обрабатываем — для длительности брони это не
+// критично.
+export function computeEndNaive(date: string, time: string, durationMin: number): string {
+  const start = new Date(`${date}T${time}:00Z`);
+  const end = new Date(start.getTime() + durationMin * 60_000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${end.getUTCFullYear()}-${p(end.getUTCMonth() + 1)}-${p(end.getUTCDate())}` +
+    `T${p(end.getUTCHours())}:${p(end.getUTCMinutes())}:00`
+  );
+}
+
+export interface DiaryEventInput {
+  startNaive: string; // "YYYY-MM-DDTHH:MM:SS" — локальное время (Asia/Jerusalem)
+  endNaive: string;
+  summary: string;
+  description: string;
+}
+
+export interface DiarySyncResult {
+  ok: boolean;
+  created?: boolean; // true = создано новое событие, false = обновлено существующее
+  error?: string;
+}
+
+// Создать ИЛИ обновить событие Дневника по детерминированному eventId.
+// Сначала insert; если событие с таким id уже есть (409) — patch. Так
+// повторная синхронизация одной записи не создаёт дубль, а обновляет.
+export async function upsertDiaryEvent(
+  eventId: string,
+  input: DiaryEventInput
+): Promise<DiarySyncResult> {
+  const token = await getAccessToken();
+  const eventBody = {
+    summary: input.summary,
+    description: input.description,
+    start: { dateTime: input.startNaive, timeZone: 'Asia/Jerusalem' },
+    end: { dateTime: input.endNaive, timeZone: 'Asia/Jerusalem' },
+  };
+
+  const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+    CALENDAR_ID
+  )}/events`;
+
+  const insertResponse = await fetch(base, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: eventId, ...eventBody }),
+  });
+
+  if (insertResponse.ok) {
+    return { ok: true, created: true };
+  }
+
+  if (insertResponse.status === 409) {
+    // Событие уже существует — обновляем его.
+    const patchResponse = await fetch(`${base}/${encodeURIComponent(eventId)}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(eventBody),
+    });
+    if (patchResponse.ok) {
+      return { ok: true, created: false };
+    }
+    return {
+      ok: false,
+      error: `diary events.patch failed: ${patchResponse.status} ${await patchResponse.text()}`,
+    };
+  }
+
+  return {
+    ok: false,
+    error: `diary events.insert failed: ${insertResponse.status} ${await insertResponse.text()}`,
+  };
+}
+
+// Удалить событие Дневника. Отсутствие события (404/410) считаем успехом —
+// удаление идемпотентно.
+export async function deleteDiaryEvent(eventId: string): Promise<DiarySyncResult> {
+  const token = await getAccessToken();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+    CALENDAR_ID
+  )}/events/${encodeURIComponent(eventId)}`;
+
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (res.ok || res.status === 404 || res.status === 410) {
+    return { ok: true };
+  }
+  return { ok: false, error: `diary events.delete failed: ${res.status} ${await res.text()}` };
 }

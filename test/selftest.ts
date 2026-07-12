@@ -18,7 +18,14 @@ import {
   type MessageSignals,
   type NextStep,
 } from '../lib/stateMachine';
-import { formatSchedule, type ScheduleEvent } from '../lib/calendar';
+import {
+  formatSchedule,
+  type ScheduleEvent,
+  diaryEventId,
+  buildDiaryEventSummary,
+  buildDiaryEventDescription,
+  computeEndNaive,
+} from '../lib/calendar';
 import { formatInvoice, isScheduleRequest } from '../lib/admin';
 import { buildMirrorText } from '../lib/dialogLog';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
@@ -178,6 +185,30 @@ ok('блок: сумма 200₪', block.includes('200₪'));
 ok('блок: Bit', block.includes('050-123-4567'));
 ok('блок: банк', block.includes('Hapoalim 12-345-678901'));
 ok('блок: просьба скрина', block.toLowerCase().includes('скрин'));
+
+console.log('\n▶ diary sync — event id / summary / description / end time');
+// diaryEventId: детерминированный, валидный для Google ([a-v0-9], 5+)
+const id1 = diaryEventId('client-42-session-7');
+const id2 = diaryEventId('client-42-session-7');
+const id3 = diaryEventId('client-42-session-8');
+ok('id детерминированный (тот же вход → тот же id)', id1 === id2);
+ok('id разный для разных записей', id1 !== id3);
+ok('id валиден для Google ([a-v0-9], 5+)', /^[a-v0-9]{5,}$/.test(id1));
+// summary: тег в начале + ЗАНЯТО (чтобы не попасть в свободные слоты)
+const sumT = buildDiaryEventSummary('tattoo', 'Мария', 'большая · старый клиент');
+ok('summary тату начинается с [ТАТУ]', sumT.startsWith('[ТАТУ]'));
+ok('summary содержит ЗАНЯТО', sumT.includes('ЗАНЯТО'));
+ok('summary содержит имя и ярлык', sumT.includes('Мария') && sumT.includes('большая'));
+const sumC = buildDiaryEventSummary('consultation', null, null);
+ok('summary конс начинается с [КОНС]', sumC.startsWith('[КОНС]'));
+ok('summary без имени/ярлыка не падает', sumC.includes('ЗАНЯТО'));
+// description
+const desc = buildDiaryEventDescription('Олег', 'новый клиент');
+ok('описание помечено Дневником', desc.includes('Дневник'));
+ok('описание содержит клиента и ярлык', desc.includes('Олег') && desc.includes('новый клиент'));
+// computeEndNaive: wall-clock арифметика
+eq('конец: 14:30 + 120 мин = 16:30', computeEndNaive('2026-07-08', '14:30', 120), '2026-07-08T16:30:00');
+eq('конец: 23:30 + 60 мин = 00:30 след. дня', computeEndNaive('2026-07-08', '23:30', 60), '2026-07-09T00:30:00');
 
 // ================= ИТОГ =================
 console.log(`\n${'='.repeat(40)}`);
