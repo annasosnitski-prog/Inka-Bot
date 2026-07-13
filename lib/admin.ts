@@ -24,7 +24,8 @@ import {
   findClientsByName,
   type ClientRecord,
 } from './airtable';
-import { getSchedule, formatSchedule } from './calendar';
+import { getSchedule, formatSchedule, createOpenSlot, findDiaryConflicts } from './calendar';
+import { parseAddSlotCommand } from './addSlotParser';
 
 export interface AdminMessage {
   text: string | null;
@@ -43,6 +44,7 @@ export interface AdminResult {
 const INVOICE_CMDS = ['/счёт', '/счет', '/invoice', 'счёт', 'счет'];
 const PORTRAIT_CMDS = ['/портрет', '/portrait', 'портрет'];
 const SCHEDULE_CMDS = ['/расписание', '/schedule', 'расписание'];
+const ADD_SLOT_CMDS = ['/добавить', '/добавь', '/add', 'добавить', 'добавь'];
 
 // Естественный запрос расписания без команды: "что по записям", "какие
 // записи", "покажи расписание/календарь". Держим узко (запис/расписан/
@@ -75,6 +77,9 @@ export async function runAdmin(msg: AdminMessage): Promise<AdminResult> {
   }
   if (SCHEDULE_CMDS.includes(firstWord)) {
     return { reply: await handleSchedule(rest) };
+  }
+  if (ADD_SLOT_CMDS.includes(firstWord)) {
+    return { reply: await handleAddSlot(rest) };
   }
 
   // Естественные фразы про расписание/записи — не команда, но по смыслу
@@ -261,6 +266,67 @@ async function handleSchedule(arg: string): Promise<string> {
   const events = await getSchedule(days);
   const header = days === 1 ? 'на сегодня:' : days <= 2 ? 'на ближайшие дни:' : days >= 30 ? 'на месяц:' : 'на неделю:';
   return `${header}\n\n${formatSchedule(events)}`;
+}
+
+// ----------------------------------------------------------
+// /добавить — создать открытый слот в календаре (ШАГ 3).
+// Разбор ДЕТЕРМИНИРОВАННЫЙ (lib/addSlotParser.ts, без LLM) — ошибка
+// здесь означает неправильный слот, который увидят клиенты, поэтому
+// не гадаем: формат не распознан → просим переформулировать по образцу.
+// ----------------------------------------------------------
+
+function humanDate(ymd: string): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  return d.toLocaleDateString('ru-RU', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    timeZone: 'Asia/Jerusalem',
+  });
+}
+
+async function handleAddSlot(arg: string): Promise<string> {
+  if (!arg.trim()) {
+    return (
+      'что и когда поставить? например:\n' +
+      '/добавить walkin пятница 12:00-14:00\n' +
+      '/добавить конс завтра 10:00-10:30\n' +
+      '/добавить тату 20.07 15:00-18:00'
+    );
+  }
+
+  const parsed = parseAddSlotCommand(arg, new Date());
+  if (!parsed.ok) {
+    return `${parsed.error}\nпример: /добавить walkin пятница 12:00-14:00`;
+  }
+
+  const startNaive = `${parsed.date}T${parsed.startTime}:00`;
+  const endNaive = `${parsed.date}T${parsed.endTime}:00`;
+
+  const result = await createOpenSlot(parsed.tag, startNaive, endNaive);
+  if (!result.ok) {
+    console.error('handleAddSlot: createOpenSlot failed:', result.error);
+    return 'не получилось создать слот — глянь логи.';
+  }
+
+  const when = `${humanDate(parsed.date)}, ${parsed.startTime}–${parsed.endTime}`;
+  let reply = `готово: ${parsed.tag} ${when}`;
+
+  // Пересечение не блокирует создание — только предупреждаем, как в
+  // синхронизации Дневника (mастер сама решает, накладка это или нет).
+  if (result.resolvedStart && result.resolvedEnd && result.eventId) {
+    try {
+      const conflicts = await findDiaryConflicts(result.eventId, result.resolvedStart, result.resolvedEnd);
+      if (conflicts.length > 0) {
+        const lines = conflicts.slice(0, 3).map((c) => c.summary);
+        reply += `\n\n⚠️ на это время уже есть: ${lines.join('; ')}`;
+      }
+    } catch (confErr) {
+      console.error('handleAddSlot: conflict check failed (non-fatal):', confErr);
+    }
+  }
+
+  return reply;
 }
 
 // ----------------------------------------------------------

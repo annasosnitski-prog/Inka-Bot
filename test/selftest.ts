@@ -34,6 +34,7 @@ import {
 } from '../lib/calendar';
 import { formatInvoice, isScheduleRequest } from '../lib/admin';
 import { buildMirrorText } from '../lib/dialogLog';
+import { parseAddSlotCommand } from '../lib/addSlotParser';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
 
 let passed = 0;
@@ -180,6 +181,52 @@ eq('только клиент (Инка ещё не ответила)',
 eq('только Инка (silence_blocked — клиент промолчал)',
   buildMirrorText(null, 'привет!'), '🤖 привет!');
 eq('оба пустые → null', buildMirrorText(null, null), null as any);
+
+console.log('\n▶ parseAddSlotCommand (Шаг 3 — /добавить, детерминированный разбор)');
+// "сейчас" зафиксировано на понедельник 13.07.2026, 13:00 Israel time
+// (10:00 UTC, лето — UTC+3), чтобы тесты были воспроизводимы.
+const NOW = new Date('2026-07-13T10:00:00Z');
+
+function expectOk(name: string, text: string, want: { tag: string; date: string; startTime: string; endTime: string }) {
+  const r = parseAddSlotCommand(text, NOW);
+  ok(`${name}: ok`, r.ok === true, JSON.stringify(r));
+  if (r.ok) {
+    ok(`${name}: tag=${want.tag}`, r.tag === want.tag, r.tag);
+    ok(`${name}: date=${want.date}`, r.date === want.date, r.date);
+    ok(`${name}: time=${want.startTime}-${want.endTime}`, r.startTime === want.startTime && r.endTime === want.endTime, `${r.startTime}-${r.endTime}`);
+  }
+}
+function expectFail(name: string, text: string) {
+  const r = parseAddSlotCommand(text, NOW);
+  ok(`${name}: fail`, r.ok === false, JSON.stringify(r));
+}
+
+expectOk('walkin пятница', 'walkin пятница 12:00-14:00', { tag: '[WALKIN]', date: '2026-07-17', startTime: '12:00', endTime: '14:00' });
+expectOk('вокин через дефис', 'вок-ин пятница 12-14', { tag: '[WALKIN]', date: '2026-07-17', startTime: '12:00', endTime: '14:00' });
+expectOk('конс завтра', 'конс завтра 10:00-10:30', { tag: '[КОНС]', date: '2026-07-14', startTime: '10:00', endTime: '10:30' });
+expectOk('онлайн приоритетнее конс', 'консультация онлайн завтра 09:00-09:30', { tag: '[ONLINE]', date: '2026-07-14', startTime: '09:00', endTime: '09:30' });
+expectOk('тату явная дата', 'тату 20.07 15:00-18:00', { tag: '[ТАТУ]', date: '2026-07-20', startTime: '15:00', endTime: '18:00' });
+expectOk('тату дата словом', 'тату 20 июля 15:00-18:00', { tag: '[ТАТУ]', date: '2026-07-20', startTime: '15:00', endTime: '18:00' });
+expectOk('сегодня = день недели (понедельник)', 'walkin понедельник 12:00-13:00', { tag: '[WALKIN]', date: '2026-07-13', startTime: '12:00', endTime: '13:00' });
+expectOk('сегодня явно', 'конс сегодня 18:00-18:30', { tag: '[КОНС]', date: '2026-07-13', startTime: '18:00', endTime: '18:30' });
+expectOk('послезавтра', 'тату послезавтра 11-12', { tag: '[ТАТУ]', date: '2026-07-15', startTime: '11:00', endTime: '12:00' });
+expectOk('воскресенье (после пятницы)', 'онлайн воскресенье 09:00-09:20', { tag: '[ONLINE]', date: '2026-07-19', startTime: '09:00', endTime: '09:20' });
+expectOk('«с 12 до 14»', 'walkin пятница с 12 до 14', { tag: '[WALKIN]', date: '2026-07-17', startTime: '12:00', endTime: '14:00' });
+expectOk('явная дата в прошлом года без года → следующий год', 'тату 01.01 10:00-11:00', { tag: '[ТАТУ]', date: '2027-01-01', startTime: '10:00', endTime: '11:00' });
+
+// Регрессия на класс бага "\b не матчится с кириллицей" (см. коммит) —
+// короткие 2-буквенные аббревиатуры дней недели остались непроверенными
+// в первой версии тестов и не поймали баг сразу.
+expectOk('короткая аббревиатура «вт» (вторник)', 'тату вт 09:00-10:00', { tag: '[ТАТУ]', date: '2026-07-14', startTime: '09:00', endTime: '10:00' });
+expectOk('короткая аббревиатура «сб» (суббота)', 'конс сб 11:00-11:30', { tag: '[КОНС]', date: '2026-07-18', startTime: '11:00', endTime: '11:30' });
+// "послезавтра" содержит подстроку "завтра" — не должно её перебивать.
+expectOk('послезавтра не путается с завтра', 'walkin послезавтра 08:00-09:00', { tag: '[WALKIN]', date: '2026-07-15', startTime: '08:00', endTime: '09:00' });
+
+expectFail('нет тега вообще', 'пятница 12:00-14:00');
+expectFail('нет времени', 'walkin пятница');
+expectFail('нет даты', 'walkin 12:00-14:00');
+expectFail('конец раньше начала', 'walkin пятница 14:00-12:00');
+expectFail('пустая строка', '');
 
 console.log('\n▶ buildPaymentDetailsBlock');
 delete process.env.PAYMENT_BIT; delete process.env.PAYMENT_BANK;
