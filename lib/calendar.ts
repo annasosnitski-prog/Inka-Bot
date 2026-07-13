@@ -27,15 +27,64 @@ const SLOT_TAG = {
 
 export type SlotType = keyof typeof SLOT_TAG; // 'consultation' | 'tattoo'
 
+// ЧЕТЫРЕ вида тегов в календаре мастера. [КОНС]/[ТАТУ] — базовые (как в
+// мастер-промпте), [ONLINE] — онлайн-консультация, [WALKIN] — окно для
+// маленьких тату (до ~2ч). Правила бота (промпты, state machine) при
+// добавлении ONLINE/WALKIN НЕ менялись — вся логика "какому клиенту какой
+// тег" живёт здесь, в слое подбора слотов, на уже существующих полях
+// карточки (category mini/small).
+export type SlotTag = '[ТАТУ]' | '[КОНС]' | '[ONLINE]' | '[WALKIN]';
+const ALL_TAGS: SlotTag[] = ['[ТАТУ]', '[КОНС]', '[ONLINE]', '[WALKIN]'];
+
+// Какие теги подходят под запрос клиента. Walk-in добавляется к тату
+// ТОЛЬКО когда работа маленькая (category mini/small — заведомо ≤2ч);
+// консультация всегда предлагает оба формата — онлайн и в студии.
+export function tagsForRequest(type: SlotType, opts?: { smallTattoo?: boolean }): SlotTag[] {
+  if (type === 'tattoo') {
+    return opts?.smallTattoo ? ['[ТАТУ]', '[WALKIN]'] : ['[ТАТУ]'];
+  }
+  return ['[КОНС]', '[ONLINE]'];
+}
+
+// Тег события по началу названия (или null — личное событие без тега).
+export function tagOf(summary: string): SlotTag | null {
+  const s = (summary ?? '').trim();
+  return ALL_TAGS.find((t) => s.startsWith(t)) ?? null;
+}
+
+// Пометка формата для показа клиенту рядом с датой/временем. [ТАТУ] —
+// без пометки (обычная запись, как раньше).
+export function tagDisplayLabel(tag: SlotTag | null): string {
+  switch (tag) {
+    case '[ONLINE]':
+      return ' (онлайн)';
+    case '[КОНС]':
+      return ' (в студии)';
+    case '[WALKIN]':
+      return ' (walk-in)';
+    default:
+      return '';
+  }
+}
+
+// Маркер занятости при брони — зависит от ТЕГА слота, а не только от
+// маршрута: онлайн-конса помечается как раньше ("КОНС ОНЛАЙН"), очная —
+// новым маркером "КОНС ЗАПИСЬ", тату и walk-in ждут предоплату.
+export function busyMarkerForTag(tag: SlotTag | null, type: SlotType): string {
+  if (type === 'tattoo') return 'ОЖИДАЕТ ПРЕДОПЛАТЫ';
+  return tag === '[КОНС]' ? 'КОНС ЗАПИСЬ' : 'КОНС ОНЛАЙН';
+}
+
 // Маркеры занятости — если они уже есть в названии события, слот
 // считается занятым и не попадает в свободные.
-const BUSY_MARKERS = ['ОЖИДАЕТ ПРЕДОПЛАТЫ', 'КОНС ОНЛАЙН', 'ЗАНЯТО'];
+const BUSY_MARKERS = ['ОЖИДАЕТ ПРЕДОПЛАТЫ', 'КОНС ОНЛАЙН', 'КОНС ЗАПИСЬ', 'ЗАНЯТО'];
 
 export interface AvailableSlot {
   id: string; // Google Calendar event id — это и есть slot id для ClientCard.slot_options
   summary: string; // полное название события, как есть в календаре
   start: string; // ISO datetime
   end: string; // ISO datetime
+  tag: SlotTag; // какой из четырёх тегов у этого слота
 }
 
 // Превращает ISO datetime слота в человекочитаемую русскую строку для
@@ -59,7 +108,9 @@ export function formatSlotForDisplay(slot: AvailableSlot): string {
     minute: '2-digit',
     timeZone: 'Asia/Jerusalem',
   });
-  return `${dayName}, ${dayMonth}, ${time}`;
+  // Пометка формата ("(онлайн)"/"(в студии)"/"(walk-in)") — чтобы клиент
+  // понимал, что выбирает, когда в одном списке разные виды слотов.
+  return `${dayName}, ${dayMonth}, ${time}${tagDisplayLabel(slot.tag ?? null)}`;
 }
 
 // ----------------------------------------------------------
@@ -236,9 +287,13 @@ async function buildSignedJwt(email: string, privateKey: string): Promise<string
 // ПОИСК СВОБОДНЫХ СЛОТОВ
 // ----------------------------------------------------------
 
-export async function getAvailableSlots(type: SlotType, maxResults = 3): Promise<AvailableSlot[]> {
+export async function getAvailableSlots(
+  type: SlotType,
+  maxResults = 3,
+  opts?: { smallTattoo?: boolean }
+): Promise<AvailableSlot[]> {
   const token = await getAccessToken();
-  const tag = SLOT_TAG[type];
+  const wantedTags = tagsForRequest(type, opts);
 
   // НЕ используем q= — полнотекстовый поиск Google Calendar API
   // ненадёжно работает с квадратными скобками [ТАТУ]/[КОНС] (это
@@ -277,15 +332,16 @@ export async function getAvailableSlots(type: SlotType, maxResults = 3): Promise
   const freeSlots: AvailableSlot[] = items
     .filter((event) => {
       const summary: string = event.summary ?? '';
-      const startsWithTag = summary.trim().startsWith(tag);
+      const eventTag = tagOf(summary);
       const isBusy = BUSY_MARKERS.some((marker) => summary.includes(marker));
-      return startsWithTag && !isBusy;
+      return eventTag !== null && wantedTags.includes(eventTag) && !isBusy;
     })
     .map((event) => ({
       id: event.id,
       summary: event.summary,
       start: event.start?.dateTime ?? event.start?.date,
       end: event.end?.dateTime ?? event.end?.date,
+      tag: tagOf(event.summary ?? '') as SlotTag,
     }))
     .slice(0, maxResults);
 
@@ -339,12 +395,13 @@ export async function bookSlot(
   // Раньше тату-бронь помечалась просто "ОЖИДАЕТ ПРЕДОПЛАТЫ" без имени —
   // Аня не могла понять из календаря (или из /расписание, которое читает
   // те же summary), чья это запись. Теперь имя (и телефон, если уже
-  // известен) дописываются для ОБОИХ типов брони — карточка в календаре
+  // известен) дописываются для ВСЕХ типов брони — карточка в календаре
   // сама по себе достаточна, чтобы опознать и связаться с клиентом, не
   // открывая Airtable/Telegram отдельно.
+  // Маркер выбирается по ТЕГУ самого события: [ONLINE] → "КОНС ОНЛАЙН",
+  // очная [КОНС] → "КОНС ЗАПИСЬ", [ТАТУ]/[WALKIN] → "ОЖИДАЕТ ПРЕДОПЛАТЫ".
   const contact = clientPhone ? `${clientLabel}, ${clientPhone}` : clientLabel;
-  const marker =
-    type === 'tattoo' ? `ОЖИДАЕТ ПРЕДОПЛАТЫ — ${contact}` : `КОНС ОНЛАЙН — ${contact}`;
+  const marker = `${busyMarkerForTag(tagOf(currentSummary), type)} — ${contact}`;
   const newSummary = `${currentSummary} — ${marker}`;
 
   const patchUrl = getUrl;
@@ -413,9 +470,15 @@ export async function getSchedule(days = 7): Promise<ScheduleEvent[]> {
   return items.map((event) => {
     const summary: string = event.summary ?? '(без названия)';
     const isBusy = BUSY_MARKERS.some((marker) => summary.includes(marker));
-    let type: SlotType | null = null;
-    if (summary.trim().startsWith(SLOT_TAG.tattoo)) type = 'tattoo';
-    else if (summary.trim().startsWith(SLOT_TAG.consultation)) type = 'consultation';
+    // Все 4 тега: [ТАТУ]/[WALKIN] — тату-слоты, [КОНС]/[ONLINE] — консы.
+    // Сам тег виден в raw summary, отдельно его не дублируем.
+    const eventTag = tagOf(summary);
+    const type: SlotType | null =
+      eventTag === '[ТАТУ]' || eventTag === '[WALKIN]'
+        ? 'tattoo'
+        : eventTag === '[КОНС]' || eventTag === '[ONLINE]'
+        ? 'consultation'
+        : null;
     const allDay = !event.start?.dateTime;
     return {
       id: event.id,
@@ -542,6 +605,10 @@ export interface DiarySyncResult {
   ok: boolean;
   created?: boolean; // true = создано новое событие, false = обновлено существующее
   error?: string;
+  // Абсолютное время события, как его разрешил Google (RFC3339 со смещением) —
+  // нужно для проверки пересечений без самодельной таймзонной арифметики.
+  resolvedStart?: string;
+  resolvedEnd?: string;
 }
 
 // Создать ИЛИ обновить событие Дневника по детерминированному eventId.
@@ -563,6 +630,17 @@ export async function upsertDiaryEvent(
     CALENDAR_ID
   )}/events`;
 
+  // Ответ Google на insert/patch содержит событие с уже разрешённым
+  // абсолютным временем (start/end.dateTime с офсетом) — берём его для
+  // последующей проверки пересечений.
+  const resolvedTimes = async (res: Response) => {
+    const ev = await res.json().catch(() => null);
+    return {
+      resolvedStart: ev?.start?.dateTime as string | undefined,
+      resolvedEnd: ev?.end?.dateTime as string | undefined,
+    };
+  };
+
   const insertResponse = await fetch(base, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -570,7 +648,7 @@ export async function upsertDiaryEvent(
   });
 
   if (insertResponse.ok) {
-    return { ok: true, created: true };
+    return { ok: true, created: true, ...(await resolvedTimes(insertResponse)) };
   }
 
   if (insertResponse.status === 409) {
@@ -581,7 +659,7 @@ export async function upsertDiaryEvent(
       body: JSON.stringify(eventBody),
     });
     if (patchResponse.ok) {
-      return { ok: true, created: false };
+      return { ok: true, created: false, ...(await resolvedTimes(patchResponse)) };
     }
     return {
       ok: false,
@@ -612,4 +690,55 @@ export async function deleteDiaryEvent(eventId: string): Promise<DiarySyncResult
     return { ok: true };
   }
   return { ok: false, error: `diary events.delete failed: ${res.status} ${await res.text()}` };
+}
+
+// ----------------------------------------------------------
+// ПРОВЕРКА ПЕРЕСЕЧЕНИЙ — «а не стоит ли на это время что-то ещё?»
+// Дневник не читает календарь перед сохранением, поэтому мастер могла
+// поставить сессию поверх брони бота, не заметив. После синхронизации
+// «дверца» ищет пересекающиеся события и возвращает их Дневнику —
+// тот показывает предупреждение. Запись НЕ блокируется: решение за
+// мастером (возможно, параллельная запись поставлена сознательно).
+// ----------------------------------------------------------
+
+export interface ConflictInfo {
+  summary: string;
+  start: string;
+  end: string;
+}
+
+// Семантика timeMin/timeMax у Google (нижняя граница по КОНЦУ события,
+// верхняя — по НАЧАЛУ) — это ровно определение пересечения интервалов,
+// поэтому фильтр «наши границы как timeMin/timeMax» отдаёт в точности
+// пересекающиеся события; остаётся исключить само синхронизируемое.
+export async function findDiaryConflicts(
+  selfEventId: string,
+  startAbs: string,
+  endAbs: string
+): Promise<ConflictInfo[]> {
+  const token = await getAccessToken();
+  const params = new URLSearchParams({
+    timeMin: startAbs,
+    timeMax: endAbs,
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    maxResults: '10',
+  });
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+    CALENDAR_ID
+  )}/events?${params.toString()}`;
+
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    throw new Error(`conflict check failed: ${res.status} ${await res.text()}`);
+  }
+  const data = await res.json();
+  const items: any[] = data.items ?? [];
+  return items
+    .filter((e) => e.id !== selfEventId && e.status !== 'cancelled')
+    .map((e) => ({
+      summary: e.summary ?? '(без названия)',
+      start: e.start?.dateTime ?? e.start?.date,
+      end: e.end?.dateTime ?? e.end?.date,
+    }));
 }

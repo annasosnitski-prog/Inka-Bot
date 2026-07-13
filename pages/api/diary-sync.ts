@@ -34,6 +34,8 @@ import {
   buildDiaryEventDescription,
   upsertDiaryEvent,
   deleteDiaryEvent,
+  findDiaryConflicts,
+  type ConflictInfo,
 } from '../../lib/calendar';
 
 function safeEqual(a: string, b: string): boolean {
@@ -126,9 +128,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         summary,
         description,
       });
-      return result.ok
-        ? res.status(200).json({ ok: true, eventId, created: result.created })
-        : res.status(502).json({ error: result.error });
+      if (!result.ok) {
+        return res.status(502).json({ error: result.error });
+      }
+
+      // Проверка пересечений: если на это же время в календаре уже что-то
+      // стоит (бронь бота, другая запись), сообщаем Дневнику — он покажет
+      // предупреждение мастеру. Сама запись НЕ блокируется. Сбой проверки
+      // не должен ломать успешный upsert — тогда просто без conflicts.
+      let conflicts: ConflictInfo[] = [];
+      if (result.resolvedStart && result.resolvedEnd) {
+        try {
+          conflicts = await findDiaryConflicts(eventId, result.resolvedStart, result.resolvedEnd);
+        } catch (confErr) {
+          console.error('diary-sync conflict check failed (non-fatal):', confErr);
+        }
+      }
+
+      return res.status(200).json({ ok: true, eventId, created: result.created, conflicts });
     }
 
     return res.status(400).json({ error: `unknown action: ${String(action)}` });

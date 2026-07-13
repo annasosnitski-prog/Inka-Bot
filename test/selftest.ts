@@ -25,6 +25,12 @@ import {
   buildDiaryEventSummary,
   buildDiaryEventDescription,
   computeEndNaive,
+  tagsForRequest,
+  tagOf,
+  tagDisplayLabel,
+  busyMarkerForTag,
+  formatSlotForDisplay,
+  type AvailableSlot,
 } from '../lib/calendar';
 import { formatInvoice, isScheduleRequest } from '../lib/admin';
 import { buildMirrorText } from '../lib/dialogLog';
@@ -185,6 +191,33 @@ ok('блок: сумма 200₪', block.includes('200₪'));
 ok('блок: Bit', block.includes('050-123-4567'));
 ok('блок: банк', block.includes('Hapoalim 12-345-678901'));
 ok('блок: просьба скрина', block.toLowerCase().includes('скрин'));
+
+console.log('\n▶ 4 тега слотов — подбор / распознавание / маркеры');
+// tagsForRequest: какие теги подходят под запрос
+ok('большая тату → только [ТАТУ]',
+  JSON.stringify(tagsForRequest('tattoo')) === JSON.stringify(['[ТАТУ]']));
+ok('маленькая тату → [ТАТУ]+[WALKIN]',
+  JSON.stringify(tagsForRequest('tattoo', { smallTattoo: true })) === JSON.stringify(['[ТАТУ]', '[WALKIN]']));
+ok('конса → [КОНС]+[ONLINE]',
+  JSON.stringify(tagsForRequest('consultation')) === JSON.stringify(['[КОНС]', '[ONLINE]']));
+// tagOf: распознавание тега по названию события
+eq('tagOf [WALKIN]', tagOf('[WALKIN] окно с 12'), '[WALKIN]');
+eq('tagOf [ONLINE]', tagOf(' [ONLINE] вечер'), '[ONLINE]');
+eq('tagOf личное событие → null', tagOf('зубной'), null as any);
+eq('tagOf [КОНС ОНЛАЙН... ≠ [КОНС]', tagOf('[КОНС ОНЛАЙН] старое'), null as any);
+// подписи формата для клиента
+eq('label online', tagDisplayLabel('[ONLINE]'), ' (онлайн)');
+eq('label конс', tagDisplayLabel('[КОНС]'), ' (в студии)');
+eq('label walkin', tagDisplayLabel('[WALKIN]'), ' (walk-in)');
+eq('label тату — пусто', tagDisplayLabel('[ТАТУ]'), '');
+// formatSlotForDisplay дописывает пометку
+const walkinSlot: AvailableSlot = { id: 'e1', summary: '[WALKIN] окно', start: '2026-07-17T12:00:00+03:00', end: '2026-07-17T14:00:00+03:00', tag: '[WALKIN]' };
+ok('дисплей слота содержит (walk-in)', formatSlotForDisplay(walkinSlot).includes('(walk-in)'));
+// busyMarkerForTag: маркер занятости по тегу
+eq('бронь [ТАТУ] → ОЖИДАЕТ ПРЕДОПЛАТЫ', busyMarkerForTag('[ТАТУ]', 'tattoo'), 'ОЖИДАЕТ ПРЕДОПЛАТЫ');
+eq('бронь [WALKIN] → ОЖИДАЕТ ПРЕДОПЛАТЫ', busyMarkerForTag('[WALKIN]', 'tattoo'), 'ОЖИДАЕТ ПРЕДОПЛАТЫ');
+eq('бронь [ONLINE] → КОНС ОНЛАЙН', busyMarkerForTag('[ONLINE]', 'consultation'), 'КОНС ОНЛАЙН');
+eq('бронь очной [КОНС] → КОНС ЗАПИСЬ', busyMarkerForTag('[КОНС]', 'consultation'), 'КОНС ЗАПИСЬ');
 
 console.log('\n▶ diary sync — event id / summary / description / end time');
 // diaryEventId: детерминированный, валидный для Google ([a-v0-9], 5+)
