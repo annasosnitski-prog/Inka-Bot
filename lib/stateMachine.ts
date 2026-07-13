@@ -96,6 +96,8 @@ export interface ClientCard {
   chosen_slot_id: string | null;
   slot_options: string[] | null; // реальные слоты, пришедшие из календаря
   booked_slot_display: string | null; // читаемые дата+время подтверждённой брони (для follow-up вопросов "когда у меня запись")
+  booked_slot_start_iso: string | null; // машиночитаемое время начала тату-брони (ISO) — для напоминания мастеру о неоплате за 36ч до слота
+  payment_reminder_sent: YesNo; // уже пинговали мастера про неоплату этой брони? сбрасывается при новой брони
   photos_count: number;
   has_photo_this_message: boolean;
   photo_has_caption: boolean;

@@ -22,6 +22,7 @@ import path from 'path';
 import {
   findClientByTelegramId,
   findClientsByName,
+  upsertClient,
   type ClientRecord,
 } from './airtable';
 import { getSchedule, formatSchedule, createOpenSlot, findDiaryConflicts } from './calendar';
@@ -29,6 +30,7 @@ import { parseAddSlotCommand } from './addSlotParser';
 
 export interface AdminMessage {
   text: string | null;
+  masterTelegramId: number; // telegram_id самой Ани — для памяти диалога (её же запись в Airtable)
   forwardFromId: number | null; // id исходного отправителя пересланного сообщения (если доступен)
   forwardName: string | null; // имя из пересылки (fallback, если id скрыт приватностью)
 }
@@ -90,13 +92,20 @@ export async function runAdmin(msg: AdminMessage): Promise<AdminResult> {
     return { reply: await handleSchedule(raw) };
   }
 
-  // Всё остальное — свободный диалог.
+  // Всё остальное — свободный диалог. С ПАМЯТЬЮ: подтягиваем последние
+  // реплики этого же диалога с Аней (её собственная запись в Airtable,
+  // та же, что заводится при переключении /client-/admin), иначе каждое
+  // сообщение уходит в LLM изолированно и она "не помнит", о чём шла речь
+  // минуту назад.
+  const history = await loadDialogHistory(msg.masterTelegramId);
   const userContent = JSON.stringify(
     { mode: 'dialog', today: new Date().toISOString().slice(0, 10), message: raw },
     null,
     2
   );
-  return { reply: await callAdminLLM(userContent) };
+  const reply = await callAdminLLM(userContent, history);
+  await saveDialogHistory(msg.masterTelegramId, history, raw, reply);
+  return { reply };
 }
 
 // ----------------------------------------------------------
@@ -342,7 +351,7 @@ function getAdminPrompt(): string {
   return cachedPrompt;
 }
 
-async function callAdminLLM(userContent: string): Promise<string> {
+async function callAdminLLM(userContent: string, history: DialogTurn[] = []): Promise<string> {
   const systemPrompt = getAdminPrompt();
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -356,6 +365,7 @@ async function callAdminLLM(userContent: string): Promise<string> {
       temperature: 0.6,
       messages: [
         { role: 'system', content: systemPrompt },
+        ...history.map((h) => ({ role: h.role, content: h.content })),
         { role: 'user', content: userContent },
       ],
     }),
@@ -372,4 +382,59 @@ async function callAdminLLM(userContent: string): Promise<string> {
     throw new Error('Admin: empty response from OpenAI');
   }
   return text.trim();
+}
+
+// ----------------------------------------------------------
+// ПАМЯТЬ СВОБОДНОГО ДИАЛОГА С МАСТЕРОМ.
+// Serverless-функция ничего не помнит между сообщениями сама — храним
+// последние реплики в её же записи Airtable (та же, что заводится
+// переключателем /client-/admin), поле admin_dialog_history (JSON-массив).
+// Только для mode="dialog" — портрет клиента это разовый анализ чужих
+// данных, мешать его с разговором Ани не нужно. Ограничено последними
+// MAX_HISTORY репликами: и по деньгам не заметно (несколько KB текста
+// на запрос), и Airtable Long text не резиновый.
+// ----------------------------------------------------------
+
+export interface DialogTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export const MAX_HISTORY_TURNS = 12; // реплик всего (не пар) — ~6 обменов
+
+export async function loadDialogHistory(masterTelegramId: number): Promise<DialogTurn[]> {
+  try {
+    const record = await findClientByTelegramId(masterTelegramId);
+    const raw = record?.fields?.admin_dialog_history;
+    if (!raw || typeof raw !== 'string') return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (t): t is DialogTurn =>
+        t && (t.role === 'user' || t.role === 'assistant') && typeof t.content === 'string'
+    );
+  } catch (err) {
+    console.error('loadDialogHistory failed (non-fatal, старт с чистого листа):', err);
+    return [];
+  }
+}
+
+export async function saveDialogHistory(
+  masterTelegramId: number,
+  prevHistory: DialogTurn[],
+  userMessage: string,
+  assistantReply: string
+): Promise<void> {
+  try {
+    const updated = [
+      ...prevHistory,
+      { role: 'user' as const, content: userMessage },
+      { role: 'assistant' as const, content: assistantReply },
+    ].slice(-MAX_HISTORY_TURNS);
+    await upsertClient(masterTelegramId, { admin_dialog_history: JSON.stringify(updated) });
+  } catch (err) {
+    // Сбой сохранения истории не должен ломать сам ответ — в следующий
+    // раз диалог просто начнётся немного "с чистого листа".
+    console.error('saveDialogHistory failed (non-fatal):', err);
+  }
 }
