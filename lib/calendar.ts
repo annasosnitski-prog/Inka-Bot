@@ -742,3 +742,52 @@ export async function findDiaryConflicts(
       end: e.end?.dateTime ?? e.end?.date,
     }));
 }
+
+// ----------------------------------------------------------
+// СОЗДАНИЕ ОТКРЫТОГО СЛОТА (ШАГ 3 — admin-команда /добавить).
+// В отличие от upsertDiaryEvent (которая создаёт УЖЕ ЗАНЯТУЮ запись с
+// маркером "ЗАНЯТО"), эта функция создаёт ПУСТОЙ слот — просто [ТЕГ] без
+// маркера занятости. Такой слот сразу подхватывается getAvailableSlots
+// и может быть предложен клиенту, как если бы мастер создала его вручную.
+// ----------------------------------------------------------
+
+export interface CreateSlotResult {
+  ok: boolean;
+  eventId?: string;
+  resolvedStart?: string;
+  resolvedEnd?: string;
+  error?: string;
+}
+
+export async function createOpenSlot(
+  tag: SlotTag,
+  startNaive: string,
+  endNaive: string
+): Promise<CreateSlotResult> {
+  const token = await getAccessToken();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+    CALENDAR_ID
+  )}/events`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      summary: tag,
+      start: { dateTime: startNaive, timeZone: 'Asia/Jerusalem' },
+      end: { dateTime: endNaive, timeZone: 'Asia/Jerusalem' },
+    }),
+  });
+
+  if (!res.ok) {
+    return { ok: false, error: `createOpenSlot events.insert failed: ${res.status} ${await res.text()}` };
+  }
+
+  const ev = await res.json();
+  return {
+    ok: true,
+    eventId: ev.id,
+    resolvedStart: ev.start?.dateTime,
+    resolvedEnd: ev.end?.dateTime,
+  };
+}
