@@ -7,7 +7,8 @@ import { runResponder } from '../../lib/responder';
 import { runAdmin } from '../../lib/admin';
 import { mirrorDialog } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
-import type { SlotType } from '../../lib/calendar';
+import type { SlotType, AvailableSlot } from '../../lib/calendar';
+import { sendTelegramMessage } from '../../lib/telegramApi';
 
 // Master's own Telegram ID — admin/test mode detection.
 // ЗАГЛУШКА на шаге 3-4: admin_mode сейчас просто отвечает заглушкой,
@@ -125,6 +126,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       try {
         const adminResult = await runAdmin({
           text: messageText,
+          masterTelegramId: telegramId,
           forwardFromId:
             message.forward_from?.id ?? message.forward_origin?.sender_user?.id ?? null,
           forwardName:
@@ -236,6 +238,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Responder (Extractor и bookSlot продолжают работать с чистыми
     // event.id в slot_options — эта строка только для текста ответа).
     let slotsDisplay: string[] | null = null;
+    // Сырые слоты с ISO-временем (не только текст) — нужны при успешной
+    // брони, чтобы сохранить машиночитаемое время начала (booked_slot_start_iso,
+    // см. ниже) для напоминания мастеру о неоплате за 36ч до слота.
+    let rawSlots: AvailableSlot[] | null = null;
 
     // Слоты подгружаем, когда направление выбрано И у нас уже есть
     // телефон клиента (по бизнес-правилу телефон обязателен перед
@@ -258,6 +264,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const slots = await getAvailableSlots(slotType, 3, { smallTattoo: isSmallTattoo });
         liveCard = { ...mergedCard, slot_options: slots.map((s) => s.id) };
         slotsDisplay = slots.map(formatSlotForDisplay);
+        rawSlots = slots;
         nextStep = getNextStep(liveCard, signals);
       } catch (calErr) {
         console.error('Calendar lookup failed, falling back to no slots:', calErr);
@@ -303,10 +310,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // выбранного id находим соответствующую человекочитаемую строку.
         const pickedIndex = liveCard.slot_options?.indexOf(signals.client_picked_slot_id) ?? -1;
         const pickedDisplay = pickedIndex >= 0 ? slotsDisplay?.[pickedIndex] ?? null : null;
+        // ISO-время начала — только для тату (нужно исключительно для
+        // напоминания о неоплаченной предоплате, а предоплата есть только
+        // у тату-брони; консультации бесплатные, напоминание им не нужно).
+        const pickedStartIso =
+          nextStep === 'confirm_slot_awaiting_payment' && pickedIndex >= 0
+            ? rawSlots?.[pickedIndex]?.start ?? null
+            : null;
         liveCard = {
           ...liveCard,
           chosen_slot_id: signals.client_picked_slot_id,
           booked_slot_display: pickedDisplay,
+          booked_slot_start_iso: pickedStartIso,
+          payment_reminder_sent: null, // новая бронь — сбрасываем гвард напоминания
         };
       }
     }
@@ -442,6 +458,8 @@ function recordToClientCard(
     chosen_slot_id: fields.chosen_slot_id ?? null,
     slot_options: parseSlotOptions(fields.slot_options),
     booked_slot_display: fields.booked_slot_display ?? null,
+    booked_slot_start_iso: fields.booked_slot_start_iso ?? null,
+    payment_reminder_sent: fields.payment_reminder_sent ?? null,
     photos_count: fields.photos_count ?? 0,
     has_photo_this_message: false,
     photo_has_caption: false,
@@ -543,6 +561,8 @@ function clientCardToAirtableFields(
     chosen_slot_id: card.chosen_slot_id,
     slot_options: card.slot_options ? card.slot_options.join(',') : '',
     booked_slot_display: card.booked_slot_display,
+    booked_slot_start_iso: card.booked_slot_start_iso,
+    payment_reminder_sent: card.payment_reminder_sent,
     photos_count: extra.photos_count,
     force_client_mode: card.force_client_mode,
   };
@@ -616,16 +636,3 @@ export function buildPaymentDetailsBlock(): string | null {
   return lines.join('\n');
 }
 
-async function sendTelegramMessage(chatId: number, text: string) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) {
-    console.error('TELEGRAM_BOT_TOKEN not set');
-    return;
-  }
-  const url = `https://api.telegram.org/bot${token}/sendMessage`;
-  await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text }),
-  });
-}

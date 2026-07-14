@@ -65,6 +65,28 @@ export async function findClientsByName(query: string): Promise<ClientRecord[]> 
   return data.records ?? [];
 }
 
+// Клиенты с тату-бронью, за которую ещё не пришла предоплата и по которой
+// мастеру ещё не отправлялось напоминание — источник для cron-джобы
+// /api/payment-reminders (шаг 6 #4). Именно deposit_status = "waiting_prepayment"
+// (не waiting_confirmation) — если клиент уже прислал скрин, это её забота
+// подтвердить оплату, а не напоминание "клиент ничего не прислал".
+export async function findClientsAwaitingPayment(): Promise<ClientRecord[]> {
+  const formula =
+    `AND({deposit_status} = "waiting_prepayment", {payment_reminder_sent} != "yes", {booked_slot_start_iso} != "")`;
+  const url = `${AIRTABLE_API_URL}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=100`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Airtable payment-reminder search failed: ${res.status} ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  return data.records ?? [];
+}
+
 export async function createClient(fields: Record<string, any>): Promise<ClientRecord> {
   const res = await fetch(AIRTABLE_API_URL, {
     method: 'POST',
