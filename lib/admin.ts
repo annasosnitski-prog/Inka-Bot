@@ -400,7 +400,7 @@ export interface DialogTurn {
   content: string;
 }
 
-export const MAX_HISTORY_TURNS = 12; // реплик всего (не пар) — ~6 обменов
+export const MAX_HISTORY_TURNS = 40; // реплик всего (не пар) — ~20 обменов, по просьбе Ани (было 12/~6)
 
 export async function loadDialogHistory(masterTelegramId: number): Promise<DialogTurn[]> {
   try {
