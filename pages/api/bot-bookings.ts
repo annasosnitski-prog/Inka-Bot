@@ -57,7 +57,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const tag = tagOf(e.summary);
         return e.isBusy && (tag === '[ONLINE]' || tag === '[WALKIN]');
       })
-      .map((e) => ({ id: e.id, summary: e.summary, start: e.start, end: e.end }));
+      .map((e) => ({ id: e.id, tag: tagOf(e.summary), summary: e.summary, start: e.start, end: e.end }));
 
     return res.status(200).json({ ok: true, bookings });
   } catch (err) {
