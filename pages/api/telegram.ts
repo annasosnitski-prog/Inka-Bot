@@ -252,23 +252,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       mergedCard.direct_tattoo_allowed === 'yes' || mergedCard.consultation_needed === 'yes';
     const needsFreshSlots = routeChosen && hasPhone;
 
-    // Маленькая работа (walk-in — заведомо ≤2ч, категория mini/small) может
-    // занять и walk-in окно: календарный слой добавит [WALKIN] к [ТАТУ].
-    // Правила бота (промпты/state machine) при этом не менялись — используем
-    // уже посчитанные Extractor-ом поля, ничего нового у клиента не спрашиваем.
-    // Категория одна не гарантирует ≤2ч (маленькая, но сложная работа может
-    // реально тянуть на 2.5-3ч) — подстраховываемся вторым, уже собранным
-    // Extractor-ом сигналом: active_work_time_estimate. У него нет отдельного
-    // деления "≤2ч" (только "<=3h"/">3h"/"unknown") — точного часа бот не
-    // знает, но это отсекает то, что явно НЕ маленькое (>3h/unknown).
-    const isSmallTattoo =
-      (mergedCard.category === 'mini' || mergedCard.category === 'small') &&
-      mergedCard.active_work_time_estimate === '<=3h';
-
     if (needsFreshSlots) {
       const slotType: SlotType = mergedCard.direct_tattoo_allowed === 'yes' ? 'tattoo' : 'consultation';
       try {
-        const slots = await getAvailableSlots(slotType, 3, { smallTattoo: isSmallTattoo });
+        const slots = await getAvailableSlots(slotType, 3);
         liveCard = { ...mergedCard, slot_options: slots.map((s) => s.id) };
         slotsDisplay = slots.map(formatSlotForDisplay);
         rawSlots = slots;
@@ -299,7 +286,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!result.success) {
         console.log('Booking failed, refetching slots:', result.error);
         // Слот увели — подгружаем свежий список и просим выбрать снова.
-        const freshSlots = await getAvailableSlots(slotType, 3, { smallTattoo: isSmallTattoo }).catch(() => []);
+        const freshSlots = await getAvailableSlots(slotType, 3).catch(() => []);
         liveCard = {
           ...liveCard,
           chosen_slot_id: null,

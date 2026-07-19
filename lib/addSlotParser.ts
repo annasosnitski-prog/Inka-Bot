@@ -196,7 +196,16 @@ export function findTimeRange(text: string): { startTime: string; endTime: strin
 export function parseAddSlotCommand(text: string, now: Date): ParsedAddSlot | ParseFailure {
   const tag = findTag(text);
   if (!tag) {
-    return { ok: false, error: 'не поняла тип слота. напиши: тату / конс / онлайн / walkin.' };
+    return { ok: false, error: 'не поняла тип слота. напиши: online / walkin.' };
+  }
+  // [ТАТУ]/[КОНС] — это Дневник-сессии мастера с реальным клиентом, бот их
+  // никогда не предлагает в чате (см. tagsForRequest в lib/calendar.ts).
+  // /добавить создаёт ТОЛЬКО открытый пул для новых клиентов — WALKIN/ONLINE.
+  if (tag === '[ТАТУ]' || tag === '[КОНС]') {
+    return {
+      ok: false,
+      error: `${tag} — это Дневник-сессия с конкретным клиентом, бот такое не предлагает. Для открытого слота новому клиенту напиши: walkin (тату) или online (конс).`,
+    };
   }
 
   const time = findTimeRange(text);

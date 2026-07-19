@@ -314,10 +314,9 @@ function humanDate(ymd: string): string {
 async function handleAddSlot(arg: string): Promise<string> {
   if (!arg.trim()) {
     return (
-      'что и когда поставить? например:\n' +
+      'что и когда поставить (только walkin/online — открытый слот для нового клиента)? например:\n' +
       '/добавить walkin пятница 12:00-14:00\n' +
-      '/добавить конс завтра 10:00-10:30\n' +
-      '/добавить тату 20.07 15:00-18:00'
+      '/добавить online завтра 10:00-10:30'
     );
   }
 

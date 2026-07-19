@@ -209,22 +209,22 @@ function expectFail(name: string, text: string) {
 
 expectOk('walkin пятница', 'walkin пятница 12:00-14:00', { tag: '[WALKIN]', date: '2026-07-17', startTime: '12:00', endTime: '14:00' });
 expectOk('вокин через дефис', 'вок-ин пятница 12-14', { tag: '[WALKIN]', date: '2026-07-17', startTime: '12:00', endTime: '14:00' });
-expectOk('конс завтра', 'конс завтра 10:00-10:30', { tag: '[КОНС]', date: '2026-07-14', startTime: '10:00', endTime: '10:30' });
+expectOk('online завтра', 'online завтра 10:00-10:30', { tag: '[ONLINE]', date: '2026-07-14', startTime: '10:00', endTime: '10:30' });
 expectOk('онлайн приоритетнее конс', 'консультация онлайн завтра 09:00-09:30', { tag: '[ONLINE]', date: '2026-07-14', startTime: '09:00', endTime: '09:30' });
-expectOk('тату явная дата', 'тату 20.07 15:00-18:00', { tag: '[ТАТУ]', date: '2026-07-20', startTime: '15:00', endTime: '18:00' });
-expectOk('тату дата словом', 'тату 20 июля 15:00-18:00', { tag: '[ТАТУ]', date: '2026-07-20', startTime: '15:00', endTime: '18:00' });
+expectOk('walkin явная дата', 'walkin 20.07 15:00-18:00', { tag: '[WALKIN]', date: '2026-07-20', startTime: '15:00', endTime: '18:00' });
+expectOk('walkin дата словом', 'walkin 20 июля 15:00-18:00', { tag: '[WALKIN]', date: '2026-07-20', startTime: '15:00', endTime: '18:00' });
 expectOk('сегодня = день недели (понедельник)', 'walkin понедельник 12:00-13:00', { tag: '[WALKIN]', date: '2026-07-13', startTime: '12:00', endTime: '13:00' });
-expectOk('сегодня явно', 'конс сегодня 18:00-18:30', { tag: '[КОНС]', date: '2026-07-13', startTime: '18:00', endTime: '18:30' });
-expectOk('послезавтра', 'тату послезавтра 11-12', { tag: '[ТАТУ]', date: '2026-07-15', startTime: '11:00', endTime: '12:00' });
+expectOk('сегодня явно', 'online сегодня 18:00-18:30', { tag: '[ONLINE]', date: '2026-07-13', startTime: '18:00', endTime: '18:30' });
+expectOk('послезавтра', 'walkin послезавтра 11-12', { tag: '[WALKIN]', date: '2026-07-15', startTime: '11:00', endTime: '12:00' });
 expectOk('воскресенье (после пятницы)', 'онлайн воскресенье 09:00-09:20', { tag: '[ONLINE]', date: '2026-07-19', startTime: '09:00', endTime: '09:20' });
 expectOk('«с 12 до 14»', 'walkin пятница с 12 до 14', { tag: '[WALKIN]', date: '2026-07-17', startTime: '12:00', endTime: '14:00' });
-expectOk('явная дата в прошлом года без года → следующий год', 'тату 01.01 10:00-11:00', { tag: '[ТАТУ]', date: '2027-01-01', startTime: '10:00', endTime: '11:00' });
+expectOk('явная дата в прошлом года без года → следующий год', 'walkin 01.01 10:00-11:00', { tag: '[WALKIN]', date: '2027-01-01', startTime: '10:00', endTime: '11:00' });
 
 // Регрессия на класс бага "\b не матчится с кириллицей" (см. коммит) —
 // короткие 2-буквенные аббревиатуры дней недели остались непроверенными
 // в первой версии тестов и не поймали баг сразу.
-expectOk('короткая аббревиатура «вт» (вторник)', 'тату вт 09:00-10:00', { tag: '[ТАТУ]', date: '2026-07-14', startTime: '09:00', endTime: '10:00' });
-expectOk('короткая аббревиатура «сб» (суббота)', 'конс сб 11:00-11:30', { tag: '[КОНС]', date: '2026-07-18', startTime: '11:00', endTime: '11:30' });
+expectOk('короткая аббревиатура «вт» (вторник)', 'walkin вт 09:00-10:00', { tag: '[WALKIN]', date: '2026-07-14', startTime: '09:00', endTime: '10:00' });
+expectOk('короткая аббревиатура «сб» (суббота)', 'online сб 11:00-11:30', { tag: '[ONLINE]', date: '2026-07-18', startTime: '11:00', endTime: '11:30' });
 // "послезавтра" содержит подстроку "завтра" — не должно её перебивать.
 expectOk('послезавтра не путается с завтра', 'walkin послезавтра 08:00-09:00', { tag: '[WALKIN]', date: '2026-07-15', startTime: '08:00', endTime: '09:00' });
 
@@ -232,6 +232,9 @@ expectFail('нет тега вообще', 'пятница 12:00-14:00');
 expectFail('нет времени', 'walkin пятница');
 expectFail('нет даты', 'walkin 12:00-14:00');
 expectFail('конец раньше начала', 'walkin пятница 14:00-12:00');
+// [ТАТУ]/[КОНС] — Дневник-сессии, /добавить их больше не создаёт.
+expectFail('тату отклонён (это Дневник-сессия, не открытый слот)', 'тату 20.07 15:00-18:00');
+expectFail('конс отклонён (это Дневник-сессия, не открытый слот)', 'конс завтра 10:00-10:30');
 expectFail('пустая строка', '');
 
 console.log('\n▶ parseCloseCommand (/закрой) — время обязательно для обоих типов, конса максимум 2ч');
@@ -302,13 +305,10 @@ ok('блок: банк', block.includes('Hapoalim 12-345-678901'));
 ok('блок: просьба скрина', block.toLowerCase().includes('скрин'));
 
 console.log('\n▶ 4 тега слотов — подбор / распознавание / маркеры');
-// tagsForRequest: какие теги подходят под запрос
-ok('большая тату → только [ТАТУ]',
-  JSON.stringify(tagsForRequest('tattoo')) === JSON.stringify(['[ТАТУ]']));
-ok('маленькая тату → [ТАТУ]+[WALKIN]',
-  JSON.stringify(tagsForRequest('tattoo', { smallTattoo: true })) === JSON.stringify(['[ТАТУ]', '[WALKIN]']));
-ok('конса → [КОНС]+[ONLINE]',
-  JSON.stringify(tagsForRequest('consultation')) === JSON.stringify(['[КОНС]', '[ONLINE]']));
+// tagsForRequest: боту клиенту можно предложить ТОЛЬКО WALKIN/ONLINE —
+// [ТАТУ]/[КОНС] это Дневник-сессии мастера, никогда не оффер клиенту.
+ok('тату → только [WALKIN]', JSON.stringify(tagsForRequest('tattoo')) === JSON.stringify(['[WALKIN]']));
+ok('консультация → только [ONLINE]', JSON.stringify(tagsForRequest('consultation')) === JSON.stringify(['[ONLINE]']));
 // tagOf: распознавание тега по названию события
 eq('tagOf [WALKIN]', tagOf('[WALKIN] окно с 12'), '[WALKIN]');
 eq('tagOf [ONLINE]', tagOf(' [ONLINE] вечер'), '[ONLINE]');
