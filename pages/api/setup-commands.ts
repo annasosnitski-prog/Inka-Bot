@@ -23,7 +23,7 @@ function safeEqual(a: string, b: string): boolean {
 
 const COMMANDS = [
   { command: 'schedule', description: 'расписание: /schedule неделя|сегодня|месяц' },
-  { command: 'add', description: 'открыть слот: /add тату 20.07 15:00-18:00' },
+  { command: 'add', description: 'открыть слот для клиента: /add walkin 20.07 15:00-18:00' },
   { command: 'close', description: 'закрыть день/окно: /close конс 20.07 10:00-12:00' },
   { command: 'delete', description: 'удалить запись: /delete конс 20.07 [имя]' },
   { command: 'invoice', description: 'клиент: /invoice Имя (или перешли сообщение)' },
@@ -31,6 +31,17 @@ const COMMANDS = [
 ];
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'POST only' });
+  }
+
   const secret = process.env.CRON_SECRET;
   if (secret) {
     const authHeader = req.headers.authorization ?? '';
