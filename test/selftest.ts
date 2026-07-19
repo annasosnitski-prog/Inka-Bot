@@ -234,19 +234,19 @@ expectFail('нет даты', 'walkin 12:00-14:00');
 expectFail('конец раньше начала', 'walkin пятница 14:00-12:00');
 expectFail('пустая строка', '');
 
-console.log('\n▶ parseCloseCommand (/закрой)');
+console.log('\n▶ parseCloseCommand (/закрой) — время обязательно для обоих типов, конса максимум 2ч');
 {
-  const r = parseCloseCommand('конс 20.07', NOW);
-  ok('конс без времени: ok', r.ok === true, JSON.stringify(r));
+  const r = parseCloseCommand('конс 20.07 10:00-12:00', NOW);
+  ok('конс 2ч (на грани): ok', r.ok === true, JSON.stringify(r));
   if (r.ok) {
     eq('конс: family', r.family, 'consultation');
     eq('конс: date', r.date, '2026-07-20');
-    ok('конс: timeRange null (весь день)', r.timeRange === null);
+    ok('конс: timeRange задан', r.timeRange.startTime === '10:00' && r.timeRange.endTime === '12:00');
     ok('конс: без имени → null', r.name === null);
   }
 }
 {
-  const r = parseCloseCommand('конс 20.07 Мария', NOW);
+  const r = parseCloseCommand('конс 20.07 10:00-11:00 Мария', NOW);
   ok('конс с именем: ok', r.ok === true, JSON.stringify(r));
   if (r.ok) eq('конс: имя вычищено верно', r.name, 'Мария');
 }
@@ -255,7 +255,7 @@ console.log('\n▶ parseCloseCommand (/закрой)');
   ok('тату 5ч: ok', r.ok === true, JSON.stringify(r));
   if (r.ok) {
     eq('тату: family', r.family, 'tattoo');
-    ok('тату: timeRange задан', r.timeRange !== null && r.timeRange.startTime === '09:00' && r.timeRange.endTime === '14:00');
+    ok('тату: timeRange задан', r.timeRange.startTime === '09:00' && r.timeRange.endTime === '14:00');
     eq('тату: имя вычищено верно', r.name, 'Мария');
   }
 }
@@ -264,10 +264,12 @@ console.log('\n▶ parseCloseCommand (/закрой)');
   ok('walkin относится к tattoo-семье', r.ok === true && r.family === 'tattoo', JSON.stringify(r));
 }
 {
-  const r = parseCloseCommand('online 20.07', NOW);
-  ok('online относится к consultation-семье, время не нужно', r.ok === true && r.family === 'consultation' && r.timeRange === null, JSON.stringify(r));
+  const r = parseCloseCommand('online 20.07 09:00-10:00', NOW);
+  ok('online относится к consultation-семье', r.ok === true && r.family === 'consultation', JSON.stringify(r));
 }
-ok('тату без времени: fail (для тату время обязательно)', parseCloseCommand('тату 20.07', NOW).ok === false);
+ok('конс без времени: fail (время обязательно)', parseCloseCommand('конс 20.07', NOW).ok === false);
+ok('тату без времени: fail (время обязательно)', parseCloseCommand('тату 20.07', NOW).ok === false);
+ok('конс дольше 2ч: fail (максимум консультации)', parseCloseCommand('конс 20.07 10:00-13:00', NOW).ok === false);
 ok('нет тега вообще: fail', parseCloseCommand('20.07 12:00-14:00', NOW).ok === false);
 ok('нет даты: fail', parseCloseCommand('тату 12:00-14:00', NOW).ok === false);
 
@@ -429,20 +431,15 @@ ok('tagsInFamily(tattoo) содержит оба', tagsInFamily('tattoo').includ
 ok('tagsInFamily(consultation) содержит оба', tagsInFamily('consultation').includes('[КОНС]') && tagsInFamily('consultation').includes('[ONLINE]'));
 
 console.log('\n▶ computeDayBlockInfo — блокировки мастера через /закрой (MASTER_CLOSED_MARKER)');
-function fakeAllDayEvent(summary: string, date: string) {
-  return { summary, start: { date }, end: { date: addOneDay(date) } };
-}
-function addOneDay(ymd: string): string {
-  const d = new Date(`${ymd}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
-// /закрой конс — весь день, all-day событие, но ТОЛЬКО консультация.
+// /закрой конс — только указанное окно, только консультация (не весь день).
 {
-  const items = [fakeAllDayEvent(`[КОНС] ${MASTER_CLOSED_MARKER}`, '2026-07-28')];
+  const items = [fakeEvent(`[КОНС] ${MASTER_CLOSED_MARKER}`, '2026-07-28T10:00:00+03:00', '2026-07-28T12:00:00+03:00')];
   const info = computeDayBlockInfo(items);
-  ok('закрытая конса блокирует день для консультаций', info.blockedConsultationDays.has('2026-07-28'));
-  ok('закрытая конса НЕ блокирует день целиком (тату не трогает)', !info.blockedDays.has('2026-07-28'));
+  ok('закрытая конса НЕ блокирует день целиком', !info.blockedDays.has('2026-07-28'));
+  const insideMs = new Date('2026-07-28T11:00:00+03:00').getTime();
+  const outsideMs = new Date('2026-07-28T15:00:00+03:00').getTime();
+  ok('окно закрытой консы перекрывает интервал внутри', info.blockedConsultationIntervals.some((iv) => insideMs >= iv.startMs && insideMs < iv.endMs));
+  ok('время вне окна закрытой консы не задето', !info.blockedConsultationIntervals.some((iv) => outsideMs >= iv.startMs && outsideMs < iv.endMs));
 }
 // /закрой тату ≥4ч — весь день целиком, как длинная сессия из Дневника.
 {

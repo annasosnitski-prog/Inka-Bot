@@ -8,7 +8,7 @@
 // ============================================================
 
 import type { SlotTag, SlotFamily } from './calendar';
-import { familyOfTag } from './calendar';
+import { familyOfTag, MAX_CONSULTATION_HOURS } from './calendar';
 
 export interface ParsedAddSlot {
   ok: true;
@@ -236,14 +236,17 @@ function extractName(text: string, tag: SlotTag, timeRange: { startTime: string;
 }
 
 // ---- /закрой ----
-// Конс — всегда весь день, время не нужно. Тату — время ОБЯЗАТЕЛЬНО
-// (длительность решает: ≥4ч блокирует весь день целиком, короче — только
-// это окно — см. computeDayBlockInfo в lib/calendar.ts).
+// Время ОБЯЗАТЕЛЬНО для обоих типов — "весь день" для консультации не
+// бывает (максимум встречи — MAX_CONSULTATION_HOURS, дальше ошибка).
+// Для тату "весь день" получается не флагом, а следствием: ≥4ч в
+// диапазоне дальше подхватит TATTOO_DAY_BLOCK_HOURS в computeDayBlockInfo
+// (lib/calendar.ts) и заблокирует весь день целиком, короче — только
+// это окно.
 export interface ParsedClose {
   ok: true;
   family: SlotFamily;
   date: string;
-  timeRange: { startTime: string; endTime: string } | null;
+  timeRange: { startTime: string; endTime: string };
   name: string | null;
 }
 
@@ -257,17 +260,20 @@ export function parseCloseCommand(text: string, now: Date): ParsedClose | ParseF
   const date = findDate(text, now);
   if (!date) return { ok: false, error: DATE_ERROR };
 
-  let timeRange: { startTime: string; endTime: string } | null = null;
-  if (family === 'tattoo') {
-    const time = findTimeRange(text);
-    if ('error' in time) {
-      return { ok: false, error: `для тату нужно время (иначе не пойму — весь день закрыть или окно). ${time.error}` };
+  const time = findTimeRange(text);
+  if ('error' in time) return time;
+
+  if (family === 'consultation') {
+    const [h1, m1] = time.startTime.split(':').map(Number);
+    const [h2, m2] = time.endTime.split(':').map(Number);
+    const hours = (h2 * 60 + m2 - (h1 * 60 + m1)) / 60;
+    if (hours > MAX_CONSULTATION_HOURS) {
+      return { ok: false, error: `консультация не бывает длиннее ${MAX_CONSULTATION_HOURS}ч — проверь время.` };
     }
-    timeRange = time;
   }
 
-  const name = extractName(text, tag, timeRange);
-  return { ok: true, family, date, timeRange, name };
+  const name = extractName(text, tag, time);
+  return { ok: true, family, date, timeRange: time, name };
 }
 
 // ---- /удалить ----

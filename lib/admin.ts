@@ -370,36 +370,32 @@ async function handleCloseSlot(arg: string): Promise<string> {
   if (!arg.trim()) {
     return (
       'что и когда закрыть? например:\n' +
-      '/закрой конс 20.07 [имя]\n' +
+      '/закрой конс 20.07 10:00-12:00 [имя]\n' +
       '/закрой тату 20.07 09:00-14:00 [имя]'
     );
   }
 
   const parsed = parseCloseCommand(arg, new Date());
   if (!parsed.ok) {
-    return `${parsed.error}\nпример: /закрой конс 20.07 [имя] или /закрой тату 20.07 09:00-14:00 [имя]`;
+    return `${parsed.error}\nпример: /закрой конс 20.07 10:00-12:00 [имя] или /закрой тату 20.07 09:00-14:00 [имя]`;
   }
 
-  const timeRangeNaive = parsed.timeRange
-    ? {
-        startNaive: `${parsed.date}T${parsed.timeRange.startTime}:00`,
-        endNaive: `${parsed.date}T${parsed.timeRange.endTime}:00`,
-      }
-    : null;
+  const timeRangeNaive = {
+    startNaive: `${parsed.date}T${parsed.timeRange.startTime}:00`,
+    endNaive: `${parsed.date}T${parsed.timeRange.endTime}:00`,
+  };
 
-  const result = await createMasterCloseBlock(parsed.family, parsed.date, timeRangeNaive, parsed.name);
+  const result = await createMasterCloseBlock(parsed.family, timeRangeNaive, parsed.name);
   if (!result.ok) {
     console.error('handleCloseSlot: createMasterCloseBlock failed:', result.error);
     return 'не получилось закрыть — глянь логи.';
   }
 
-  const when = parsed.timeRange
-    ? `${humanDate(parsed.date)}, ${parsed.timeRange.startTime}–${parsed.timeRange.endTime}`
-    : `${humanDate(parsed.date)} (весь день)`;
+  const when = `${humanDate(parsed.date)}, ${parsed.timeRange.startTime}–${parsed.timeRange.endTime}`;
   const nameSuffix = parsed.name ? ` — ${parsed.name}` : '';
 
-  let scope = '';
-  if (parsed.family === 'tattoo' && parsed.timeRange) {
+  let scope = ' (только это окно, для консультаций)';
+  if (parsed.family === 'tattoo') {
     const [h1, m1] = parsed.timeRange.startTime.split(':').map(Number);
     const [h2, m2] = parsed.timeRange.endTime.split(':').map(Number);
     const hours = (h2 * 60 + m2 - (h1 * 60 + m1)) / 60;
@@ -407,8 +403,6 @@ async function handleCloseSlot(arg: string): Promise<string> {
       hours >= TATTOO_DAY_BLOCK_HOURS
         ? ' (весь день закрыт для любых записей)'
         : ' (только это окно, для тату)';
-  } else {
-    scope = ' (день закрыт только для консультаций, тату можно ставить)';
   }
 
   return `закрыла: ${familyLabel(parsed.family)}, ${when}${nameSuffix}${scope}`;

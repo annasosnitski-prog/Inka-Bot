@@ -332,12 +332,17 @@ async function buildSignedJwt(email: string, privateKey: string): Promise<string
 //      нужен полный отдых.
 //   2. Консультация из Дневника НЕ блокирует весь день — только
 //      2-часовой буфer сразу после её окончания.
-//   3. /закрой консультация — блокирует весь день, но ТОЛЬКО для
-//      консультаций (КОНС+ONLINE); тату в этот день предлагать можно.
+//   3. /закрой консультация — "весь день" для консультации не бывает
+//      (максимум встречи — 2ч, см. MAX_CONSULTATION_HOURS), поэтому
+//      блокирует ТОЛЬКО указанное окно, только консультации (КОНС+ONLINE).
 //   4. /закрой тату короче 4ч — блокирует ТОЛЬКО это окно времени, ТОЛЬКО
 //      для тату-семьи (ТАТУ+WALKIN).
 export const TATTOO_DAY_BLOCK_HOURS = 4;
 const CONSULTATION_BUFFER_HOURS = 2;
+// Реальный потолок длительности консультации — используется и парсером
+// /закрой (не дать закрыть "консультацию" на 5 часов — это не консультация),
+// и порогом WALKIN (см. lib/telegram.ts): маленькая работа = короче этого.
+export const MAX_CONSULTATION_HOURS = 2;
 // Минимальный запас перед WALKIN/ONLINE-бронью — бот не предлагает клиенту
 // слот этих тегов, если до его начала осталось меньше суток (не хочет
 // просыпаться утром с неожиданной консультацией/walk-in на сегодня).
@@ -350,7 +355,7 @@ export function jerusalemDayKey(iso: string): string {
 export interface DayBlockInfo {
   blockedDays: Set<string>; // дни, целиком заблокированные (любой тип) длинной тату-сессией
   bufferIntervals: Array<{ startMs: number; endMs: number }>; // 2ч после консультаций из Дневника
-  blockedConsultationDays: Set<string>; // /закрой конс — весь день, только КОНС+ONLINE
+  blockedConsultationIntervals: Array<{ startMs: number; endMs: number }>; // /закрой конс — только это окно, только КОНС+ONLINE
   blockedTattooIntervals: Array<{ startMs: number; endMs: number }>; // /закрой тату <4ч — только это окно, только ТАТУ+WALKIN
 }
 
@@ -363,7 +368,7 @@ function overlapsInterval(startMs: number, endMs: number, intervals: Array<{ sta
 export function computeDayBlockInfo(items: any[]): DayBlockInfo {
   const blockedDays = new Set<string>();
   const bufferIntervals: Array<{ startMs: number; endMs: number }> = [];
-  const blockedConsultationDays = new Set<string>();
+  const blockedConsultationIntervals: Array<{ startMs: number; endMs: number }> = [];
   const blockedTattooIntervals: Array<{ startMs: number; endMs: number }> = [];
 
   for (const event of items) {
@@ -375,14 +380,6 @@ export function computeDayBlockInfo(items: any[]): DayBlockInfo {
     const eventTag = tagOf(summary);
     if (!eventTag) continue;
     const family = familyOfTag(eventTag);
-
-    // /закрой конс — всегда весь день (all-day событие, только date).
-    if (isMasterClose && family === 'consultation') {
-      const dayKey: string | undefined =
-        event.start?.date ?? (event.start?.dateTime ? jerusalemDayKey(event.start.dateTime) : undefined);
-      if (dayKey) blockedConsultationDays.add(dayKey);
-      continue;
-    }
 
     const startIso: string | undefined = event.start?.dateTime;
     const endIso: string | undefined = event.end?.dateTime;
@@ -397,12 +394,16 @@ export function computeDayBlockInfo(items: any[]): DayBlockInfo {
       } else if (isMasterClose) {
         blockedTattooIntervals.push({ startMs, endMs });
       }
-    } else if (family === 'consultation' && isDiary) {
-      bufferIntervals.push({ startMs: endMs, endMs: endMs + CONSULTATION_BUFFER_HOURS * 3_600_000 });
+    } else if (family === 'consultation') {
+      if (isDiary) {
+        bufferIntervals.push({ startMs: endMs, endMs: endMs + CONSULTATION_BUFFER_HOURS * 3_600_000 });
+      } else if (isMasterClose) {
+        blockedConsultationIntervals.push({ startMs, endMs });
+      }
     }
   }
 
-  return { blockedDays, bufferIntervals, blockedConsultationDays, blockedTattooIntervals };
+  return { blockedDays, bufferIntervals, blockedConsultationIntervals, blockedTattooIntervals };
 }
 
 export async function getAvailableSlots(
@@ -447,7 +448,7 @@ export async function getAvailableSlots(
     items.map((e) => e.summary)
   );
 
-  const { blockedDays, bufferIntervals, blockedConsultationDays, blockedTattooIntervals } = computeDayBlockInfo(items);
+  const { blockedDays, bufferIntervals, blockedConsultationIntervals, blockedTattooIntervals } = computeDayBlockInfo(items);
   const leadTimeMs = Date.now() + LEAD_TIME_HOURS * 3_600_000;
 
   const freeSlots: AvailableSlot[] = items
@@ -461,14 +462,13 @@ export async function getAvailableSlots(
       const endIso: string | undefined = event.end?.dateTime;
       if (startIso) {
         const startMs = new Date(startIso).getTime();
+        const endMs = endIso ? new Date(endIso).getTime() : startMs;
         if (blockedDays.has(jerusalemDayKey(startIso))) return false;
-        if (overlapsInterval(startMs, endIso ? new Date(endIso).getTime() : startMs, bufferIntervals)) return false;
+        if (overlapsInterval(startMs, endMs, bufferIntervals)) return false;
 
         const family = familyOfTag(eventTag);
-        if (family === 'consultation' && blockedConsultationDays.has(jerusalemDayKey(startIso))) return false;
-        if (family === 'tattoo' && endIso) {
-          if (overlapsInterval(startMs, new Date(endIso).getTime(), blockedTattooIntervals)) return false;
-        }
+        if (family === 'consultation' && overlapsInterval(startMs, endMs, blockedConsultationIntervals)) return false;
+        if (family === 'tattoo' && overlapsInterval(startMs, endMs, blockedTattooIntervals)) return false;
 
         // Лаг 24ч — только для WALKIN/ONLINE (см. LEAD_TIME_HOURS).
         if ((eventTag === '[WALKIN]' || eventTag === '[ONLINE]') && startMs < leadTimeMs) return false;
@@ -938,22 +938,15 @@ export async function createOpenSlot(
 // карточку клиента в Дневнике руками, если понадобится).
 // ----------------------------------------------------------
 
-function addDaysYmd(ymd: string, days: number): string {
-  const d = new Date(`${ymd}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
-}
-
-// Консультация закрывается ВСЕГДА весь день (all-day событие, только
-// date, без time) — партиршного режима у неё нет. Тату закрывается на
-// конкретный диапазон времени; ≥4ч из него дальше подхватит тот же
-// TATTOO_DAY_BLOCK_HOURS в computeDayBlockInfo и заблокирует весь день
-// целиком (для любого типа), короче — только это окно (только тату).
+// Время всегда обязательно — "закрыть весь день" для консультации не
+// бывает (максимум встречи — MAX_CONSULTATION_HOURS), а для тату "весь
+// день" получается не явным флагом, а следствием: ≥TATTOO_DAY_BLOCK_HOURS
+// в диапазоне дальше подхватит тот же порог в computeDayBlockInfo и
+// заблокирует весь день целиком (для любого типа), короче — только это
+// окно (только тату-семья).
 export async function createMasterCloseBlock(
   family: SlotFamily,
-  date: string, // YYYY-MM-DD
-  timeRange: { startNaive: string; endNaive: string } | null,
+  timeRange: { startNaive: string; endNaive: string },
   name: string | null
 ): Promise<CreateSlotResult> {
   const token = await getAccessToken();
@@ -962,14 +955,11 @@ export async function createMasterCloseBlock(
   const tag: SlotTag = family === 'tattoo' ? '[ТАТУ]' : '[КОНС]';
   const summary = name ? `${tag} ${MASTER_CLOSED_MARKER} — ${name}` : `${tag} ${MASTER_CLOSED_MARKER}`;
 
-  const body: Record<string, unknown> = { summary };
-  if (timeRange) {
-    body.start = { dateTime: timeRange.startNaive, timeZone: 'Asia/Jerusalem' };
-    body.end = { dateTime: timeRange.endNaive, timeZone: 'Asia/Jerusalem' };
-  } else {
-    body.start = { date };
-    body.end = { date: addDaysYmd(date, 1) }; // конец all-day события у Google эксклюзивный
-  }
+  const body: Record<string, unknown> = {
+    summary,
+    start: { dateTime: timeRange.startNaive, timeZone: 'Asia/Jerusalem' },
+    end: { dateTime: timeRange.endNaive, timeZone: 'Asia/Jerusalem' },
+  };
 
   const res = await fetch(url, {
     method: 'POST',

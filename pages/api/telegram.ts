@@ -252,11 +252,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       mergedCard.direct_tattoo_allowed === 'yes' || mergedCard.consultation_needed === 'yes';
     const needsFreshSlots = routeChosen && hasPhone;
 
-    // Маленькая работа (category mini/small — заведомо ≤2ч) может занять
-    // и walk-in окно: календарный слой добавит [WALKIN] к [ТАТУ]. Правила
-    // бота (промпты/state machine) при этом не менялись — используем уже
-    // посчитанную Extractor-ом категорию.
-    const isSmallTattoo = mergedCard.category === 'mini' || mergedCard.category === 'small';
+    // Маленькая работа (walk-in — заведомо ≤2ч, категория mini/small) может
+    // занять и walk-in окно: календарный слой добавит [WALKIN] к [ТАТУ].
+    // Правила бота (промпты/state machine) при этом не менялись — используем
+    // уже посчитанные Extractor-ом поля, ничего нового у клиента не спрашиваем.
+    // Категория одна не гарантирует ≤2ч (маленькая, но сложная работа может
+    // реально тянуть на 2.5-3ч) — подстраховываемся вторым, уже собранным
+    // Extractor-ом сигналом: active_work_time_estimate. У него нет отдельного
+    // деления "≤2ч" (только "<=3h"/">3h"/"unknown") — точного часа бот не
+    // знает, но это отсекает то, что явно НЕ маленькое (>3h/unknown).
+    const isSmallTattoo =
+      (mergedCard.category === 'mini' || mergedCard.category === 'small') &&
+      mergedCard.active_work_time_estimate === '<=3h';
 
     if (needsFreshSlots) {
       const slotType: SlotType = mergedCard.direct_tattoo_allowed === 'yes' ? 'tattoo' : 'consultation';
