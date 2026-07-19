@@ -1,21 +1,22 @@
 // ============================================================
-// INKA-BOT — список броней, оформленных БОТОМ, для Дневника мастера
+// INKA-BOT — список броней и открытых слотов бота для Дневника мастера
 // (обратный поток, только для чтения)
 //
 // По просьбе Ани: НЕ карточки клиентов, НЕ привязка, только простой
-// список событий, чтобы она видела брони от бота в удобном месте
-// и сама заводила клиента в Дневнике вручную. Карточку клиента бот не
-// создаёт и не трогает.
+// список событий, чтобы она видела всё от бота в удобном месте и сама
+// заводила клиента в Дневнике вручную. Карточку клиента бот не создаёт
+// и не трогает.
 //
-// Раньше фильтровали по тегу (только ONLINE/WALKIN), в расчёте что
-// [ТАТУ]/[КОНС] мастер всегда заводит сама в Дневнике. Но /добавить
-// позволяет ей создавать открытые слоты С ЛЮБЫМ тегом через бота — и
-// клиент может забронировать [ТАТУ]/[КОНС]-слот через обычный бот-флоу
-// тоже. Поэтому теперь фильтр по СМЫСЛУ, не по тегу: любая занятая
-// запись, которую оформил бот (isBotBooking — есть тег, есть маркер
-// занятости, но это не маркер "ЗАНЯТО" из Дневника). Пустые открытые
-// слоты не отдаём — это ещё не бронь, показывать как "запись" неверно.
-// Свои же события из Дневника (маркер "ЗАНЯТО") не показываем обратно —
+// Три вида записей — kind:
+//   'booking'    — реальная бронь с клиентом (isBotBooking).
+//   'master_block' — блокировка мастера через /закрой, без клиента.
+//   'open_slot'  — ещё НЕ забронированный слот (WALKIN/ONLINE, /добавить).
+//     Раньше такие вообще не отдавали ("это не бронь, показывать как
+//     запись неверно") — но мастеру важно видеть, что вообще выставлено,
+//     не только что уже забронировано, для планирования. Только
+//     WALKIN/ONLINE — [ТАТУ]/[КОНС] открытыми через бота не бывают
+//     (см. lib/calendar.ts, tagsForRequest).
+// Свои события из Дневника (маркер "ЗАНЯТО") не показываем обратно —
 // они там и так есть.
 //
 // Авторизация — тот же секрет, что и у /api/diary-sync (DIARY_SYNC_SECRET),
@@ -59,7 +60,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const events = await getSchedule(30); // ближайшие 30 дней
-    const bookings = events
+
+    const realBookings = events
       .filter((e) => isBotBooking(e.summary))
       .map((e) => ({
         id: e.id,
@@ -67,13 +69,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         summary: e.summary,
         start: e.start,
         end: e.end,
-        // 'master_block' — мастер закрыла день/окно через /закрой, без
-        // реального клиента за этим (см. MASTER_CLOSED_MARKER); Дневник
-        // должен показать это отдельно от настоящих броней с клиентом.
-        kind: e.summary.includes(MASTER_CLOSED_MARKER) ? 'master_block' : 'booking',
+        kind: e.summary.includes(MASTER_CLOSED_MARKER) ? ('master_block' as const) : ('booking' as const),
       }));
 
-    return res.status(200).json({ ok: true, bookings });
+    const openSlots = events
+      .filter((e) => {
+        if (e.isBusy) return false;
+        const tag = tagOf(e.summary);
+        return tag === '[WALKIN]' || tag === '[ONLINE]';
+      })
+      .map((e) => ({
+        id: e.id,
+        tag: tagOf(e.summary),
+        summary: e.summary,
+        start: e.start,
+        end: e.end,
+        kind: 'open_slot' as const,
+      }));
+
+    return res.status(200).json({ ok: true, bookings: [...realBookings, ...openSlots] });
   } catch (err) {
     console.error('bot-bookings error:', err);
     return res.status(500).json({ error: 'internal error' });
