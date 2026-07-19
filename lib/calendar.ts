@@ -75,9 +75,16 @@ export function busyMarkerForTag(tag: SlotTag | null, type: SlotType): string {
   return tag === '[КОНС]' ? 'КОНС ЗАПИСЬ' : 'КОНС ОНЛАЙН';
 }
 
+// Маркер для блокировок, которые мастер ставит САМА через бот-команду
+// /закрой (см. lib/admin.ts) — быстро закрыть день/окно, не открывая
+// Дневник прямо сейчас. У такой записи нет реального клиента за ней —
+// это просто "сюда пока не бронировать", в отличие от "ЗАНЯТО" (реальная
+// запись из Дневника с клиентом) и маркеров брони бота (реальный клиент).
+export const MASTER_CLOSED_MARKER = 'ЗАКРЫТО МАСТЕРОМ';
+
 // Маркеры занятости — если они уже есть в названии события, слот
 // считается занятым и не попадает в свободные.
-const BUSY_MARKERS = ['ОЖИДАЕТ ПРЕДОПЛАТЫ', 'КОНС ОНЛАЙН', 'КОНС ЗАПИСЬ', 'ЗАНЯТО'];
+const BUSY_MARKERS = ['ОЖИДАЕТ ПРЕДОПЛАТЫ', 'КОНС ОНЛАЙН', 'КОНС ЗАПИСЬ', 'ЗАНЯТО', MASTER_CLOSED_MARKER];
 
 // Маркер "ЗАНЯТО" — особый: им помечаются ТОЛЬКО события из Дневника
 // (buildDiaryEventSummary), а не брони, которые оформил сам бот. Разница
@@ -85,11 +92,26 @@ const BUSY_MARKERS = ['ОЖИДАЕТ ПРЕДОПЛАТЫ', 'КОНС ОНЛА�
 // сделал бот — независимо от тега [ТАТУ]/[КОНС]/[ONLINE]/[WALKIN] — это
 // то, чего у мастера ещё нет в Дневнике и стоит показать. А её же
 // собственные события из Дневника показывать ей обратно не нужно.
+// Блокировки /закрой (MASTER_CLOSED_MARKER) — это тоже действие бота
+// (не Дневника), поэтому isBotBooking для них тоже true — Дневник должен
+// их увидеть, просто с пометкой "без данных клиента" (см. bot-bookings.ts).
 export function isBotBooking(summary: string): boolean {
   const s = summary ?? '';
   if (!tagOf(s)) return false;
   if (!BUSY_MARKERS.some((m) => s.includes(m))) return false;
   return !s.includes('ЗАНЯТО');
+}
+
+// Семья тега — для /закрой и /удалить: закрывая "тату" мастер имеет в
+// виду и обычную запись, и walk-in-окно; закрывая "консультацию" — и
+// очную, и онлайн. Совпадает с тем, как tagsForRequest группирует теги
+// под один клиентский запрос.
+export type SlotFamily = 'tattoo' | 'consultation';
+export function familyOfTag(tag: SlotTag): SlotFamily {
+  return tag === '[ТАТУ]' || tag === '[WALKIN]' ? 'tattoo' : 'consultation';
+}
+export function tagsInFamily(family: SlotFamily): SlotTag[] {
+  return family === 'tattoo' ? ['[ТАТУ]', '[WALKIN]'] : ['[КОНС]', '[ONLINE]'];
 }
 
 export interface AvailableSlot {
@@ -300,52 +322,87 @@ async function buildSignedJwt(email: string, privateKey: string): Promise<string
 // ПОИСК СВОБОДНЫХ СЛОТОВ
 // ----------------------------------------------------------
 
-// Политика мастера — два РАЗНЫХ правила отдыха после записи из Дневника:
-//   1. Длинная тату-сессия (≥4ч) "съедает" весь день целиком — после такой
-//      работы мастеру нужен полный отдых, бот в этот день вообще не
-//      предлагает клиентам новые открытые слоты, даже если по времени
-//      формально нет пересечения.
-//   2. Консультация НЕ блокирует весь день — только 2-часовой буфer сразу
-//      после её окончания (короткий перерыв на отдых), дальше день как
-//      обычно открыт для новых предложений.
-const TATTOO_DAY_BLOCK_HOURS = 4;
+// Политика мастера — правила отдыха/блокировки поверх уже существующих
+// открытых слотов. Источники: свои записи из Дневника ("ЗАНЯТО") и её
+// собственные блокировки через бот-команду /закрой (MASTER_CLOSED_MARKER,
+// см. lib/admin.ts) — оба считаются одинаково для длительности-зависимых
+// правил, дальше расходятся:
+//   1. Длинная тату-сессия (≥4ч, из Дневника ИЛИ через /закрой) "съедает"
+//      весь день целиком, для ЛЮБОГО типа — после такой работы мастеру
+//      нужен полный отдых.
+//   2. Консультация из Дневника НЕ блокирует весь день — только
+//      2-часовой буфer сразу после её окончания.
+//   3. /закрой консультация — блокирует весь день, но ТОЛЬКО для
+//      консультаций (КОНС+ONLINE); тату в этот день предлагать можно.
+//   4. /закрой тату короче 4ч — блокирует ТОЛЬКО это окно времени, ТОЛЬКО
+//      для тату-семьи (ТАТУ+WALKIN).
+export const TATTOO_DAY_BLOCK_HOURS = 4;
 const CONSULTATION_BUFFER_HOURS = 2;
+// Минимальный запас перед WALKIN/ONLINE-бронью — бот не предлагает клиенту
+// слот этих тегов, если до его начала осталось меньше суток (не хочет
+// просыпаться утром с неожиданной консультацией/walk-in на сегодня).
+export const LEAD_TIME_HOURS = 24;
 
 export function jerusalemDayKey(iso: string): string {
   return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 }
 
 export interface DayBlockInfo {
-  blockedDays: Set<string>; // дни, целиком заблокированные длинной тату-сессией
-  bufferIntervals: Array<{ startMs: number; endMs: number }>; // 2ч после консультаций
+  blockedDays: Set<string>; // дни, целиком заблокированные (любой тип) длинной тату-сессией
+  bufferIntervals: Array<{ startMs: number; endMs: number }>; // 2ч после консультаций из Дневника
+  blockedConsultationDays: Set<string>; // /закрой конс — весь день, только КОНС+ONLINE
+  blockedTattooIntervals: Array<{ startMs: number; endMs: number }>; // /закрой тату <4ч — только это окно, только ТАТУ+WALKIN
 }
 
-// Разбирает события с маркером "ЗАНЯТО" (это ТОЛЬКО свои записи из
-// Дневника — buildDiaryEventSummary, не брони бота) на два списка выше.
+function overlapsInterval(startMs: number, endMs: number, intervals: Array<{ startMs: number; endMs: number }>): boolean {
+  return intervals.some((iv) => startMs < iv.endMs && endMs > iv.startMs);
+}
+
+// Разбирает события с маркером "ЗАНЯТО" (свои записи из Дневника) и
+// MASTER_CLOSED_MARKER (блокировки через /закрой) на правила выше.
 export function computeDayBlockInfo(items: any[]): DayBlockInfo {
   const blockedDays = new Set<string>();
   const bufferIntervals: Array<{ startMs: number; endMs: number }> = [];
+  const blockedConsultationDays = new Set<string>();
+  const blockedTattooIntervals: Array<{ startMs: number; endMs: number }> = [];
+
   for (const event of items) {
     const summary: string = event.summary ?? '';
-    if (!summary.includes('ЗАНЯТО')) continue; // не своя запись из Дневника — не считается
+    const isDiary = summary.includes('ЗАНЯТО');
+    const isMasterClose = summary.includes(MASTER_CLOSED_MARKER);
+    if (!isDiary && !isMasterClose) continue;
+
     const eventTag = tagOf(summary);
+    if (!eventTag) continue;
+    const family = familyOfTag(eventTag);
+
+    // /закрой конс — всегда весь день (all-day событие, только date).
+    if (isMasterClose && family === 'consultation') {
+      const dayKey: string | undefined =
+        event.start?.date ?? (event.start?.dateTime ? jerusalemDayKey(event.start.dateTime) : undefined);
+      if (dayKey) blockedConsultationDays.add(dayKey);
+      continue;
+    }
+
     const startIso: string | undefined = event.start?.dateTime;
     const endIso: string | undefined = event.end?.dateTime;
     if (!startIso || !endIso) continue;
     const startMs = new Date(startIso).getTime();
     const endMs = new Date(endIso).getTime();
-    if (eventTag === '[ТАТУ]') {
-      const hours = (endMs - startMs) / 3_600_000;
-      if (hours >= TATTOO_DAY_BLOCK_HOURS) blockedDays.add(jerusalemDayKey(startIso));
-    } else if (eventTag === '[КОНС]') {
+    const hours = (endMs - startMs) / 3_600_000;
+
+    if (family === 'tattoo') {
+      if (hours >= TATTOO_DAY_BLOCK_HOURS) {
+        blockedDays.add(jerusalemDayKey(startIso));
+      } else if (isMasterClose) {
+        blockedTattooIntervals.push({ startMs, endMs });
+      }
+    } else if (family === 'consultation' && isDiary) {
       bufferIntervals.push({ startMs: endMs, endMs: endMs + CONSULTATION_BUFFER_HOURS * 3_600_000 });
     }
   }
-  return { blockedDays, bufferIntervals };
-}
 
-function isInConsultationBuffer(candidateStartMs: number, intervals: Array<{ startMs: number; endMs: number }>): boolean {
-  return intervals.some((iv) => candidateStartMs >= iv.startMs && candidateStartMs < iv.endMs);
+  return { blockedDays, bufferIntervals, blockedConsultationDays, blockedTattooIntervals };
 }
 
 export async function getAvailableSlots(
@@ -390,7 +447,8 @@ export async function getAvailableSlots(
     items.map((e) => e.summary)
   );
 
-  const { blockedDays, bufferIntervals } = computeDayBlockInfo(items);
+  const { blockedDays, bufferIntervals, blockedConsultationDays, blockedTattooIntervals } = computeDayBlockInfo(items);
+  const leadTimeMs = Date.now() + LEAD_TIME_HOURS * 3_600_000;
 
   const freeSlots: AvailableSlot[] = items
     .filter((event) => {
@@ -398,10 +456,22 @@ export async function getAvailableSlots(
       const eventTag = tagOf(summary);
       const isBusy = BUSY_MARKERS.some((marker) => summary.includes(marker));
       if (eventTag === null || !wantedTags.includes(eventTag) || isBusy) return false;
+
       const startIso: string | undefined = event.start?.dateTime;
+      const endIso: string | undefined = event.end?.dateTime;
       if (startIso) {
+        const startMs = new Date(startIso).getTime();
         if (blockedDays.has(jerusalemDayKey(startIso))) return false;
-        if (isInConsultationBuffer(new Date(startIso).getTime(), bufferIntervals)) return false;
+        if (overlapsInterval(startMs, endIso ? new Date(endIso).getTime() : startMs, bufferIntervals)) return false;
+
+        const family = familyOfTag(eventTag);
+        if (family === 'consultation' && blockedConsultationDays.has(jerusalemDayKey(startIso))) return false;
+        if (family === 'tattoo' && endIso) {
+          if (overlapsInterval(startMs, new Date(endIso).getTime(), blockedTattooIntervals)) return false;
+        }
+
+        // Лаг 24ч — только для WALKIN/ONLINE (см. LEAD_TIME_HOURS).
+        if ((eventTag === '[WALKIN]' || eventTag === '[ONLINE]') && startMs < leadTimeMs) return false;
       }
       return true;
     })
@@ -859,4 +929,89 @@ export async function createOpenSlot(
     resolvedStart: ev.start?.dateTime,
     resolvedEnd: ev.end?.dateTime,
   };
+}
+
+// ----------------------------------------------------------
+// БЛОКИРОВКА /закрой И ПОИСК/УДАЛЕНИЕ /удалить — admin-команды, чтобы
+// быстро закрыть день/окно или снять существующую запись из бота, не
+// открывая Дневник прямо сейчас (потом мастер сама пересоздаст нужную
+// карточку клиента в Дневнике руками, если понадобится).
+// ----------------------------------------------------------
+
+function addDaysYmd(ymd: string, days: number): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+}
+
+// Консультация закрывается ВСЕГДА весь день (all-day событие, только
+// date, без time) — партиршного режима у неё нет. Тату закрывается на
+// конкретный диапазон времени; ≥4ч из него дальше подхватит тот же
+// TATTOO_DAY_BLOCK_HOURS в computeDayBlockInfo и заблокирует весь день
+// целиком (для любого типа), короче — только это окно (только тату).
+export async function createMasterCloseBlock(
+  family: SlotFamily,
+  date: string, // YYYY-MM-DD
+  timeRange: { startNaive: string; endNaive: string } | null,
+  name: string | null
+): Promise<CreateSlotResult> {
+  const token = await getAccessToken();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CALENDAR_ID)}/events`;
+
+  const tag: SlotTag = family === 'tattoo' ? '[ТАТУ]' : '[КОНС]';
+  const summary = name ? `${tag} ${MASTER_CLOSED_MARKER} — ${name}` : `${tag} ${MASTER_CLOSED_MARKER}`;
+
+  const body: Record<string, unknown> = { summary };
+  if (timeRange) {
+    body.start = { dateTime: timeRange.startNaive, timeZone: 'Asia/Jerusalem' };
+    body.end = { dateTime: timeRange.endNaive, timeZone: 'Asia/Jerusalem' };
+  } else {
+    body.start = { date };
+    body.end = { date: addDaysYmd(date, 1) }; // конец all-day события у Google эксклюзивный
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    return { ok: false, error: `createMasterCloseBlock events.insert failed: ${res.status} ${await res.text()}` };
+  }
+
+  const ev = await res.json();
+  return {
+    ok: true,
+    eventId: ev.id,
+    resolvedStart: ev.start?.dateTime ?? ev.start?.date,
+    resolvedEnd: ev.end?.dateTime ?? ev.end?.date,
+  };
+}
+
+export interface CloseTargetEvent {
+  id: string;
+  summary: string;
+  start: string;
+  end: string;
+  tag: SlotTag;
+}
+
+// Ищет существующие события нужной семьи тегов на конкретную дату — и
+// для /закрой (не дублировать блок, если уже есть — хотя дубли и не
+// страшны сами по себе), и для /удалить (найти, что снимать).
+export async function findEventsOnDate(date: string, family: SlotFamily): Promise<CloseTargetEvent[]> {
+  const today = jerusalemDayKey(new Date().toISOString());
+  const daysAhead = Math.max(
+    2,
+    Math.round((new Date(`${date}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86_400_000) + 2
+  );
+  const events = await getSchedule(daysAhead);
+  const wanted = tagsInFamily(family);
+  return events
+    .filter((e) => (e.allDay ? e.start === date : jerusalemDayKey(e.start) === date))
+    .map((e) => ({ ...e, parsedTag: tagOf(e.summary) }))
+    .filter((e): e is typeof e & { parsedTag: SlotTag } => e.parsedTag !== null && wanted.includes(e.parsedTag))
+    .map((e) => ({ id: e.id, summary: e.summary, start: e.start, end: e.end, tag: e.parsedTag }));
 }

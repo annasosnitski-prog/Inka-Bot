@@ -25,8 +25,17 @@ import {
   upsertClient,
   type ClientRecord,
 } from './airtable';
-import { getSchedule, formatSchedule, createOpenSlot, findDiaryConflicts } from './calendar';
-import { parseAddSlotCommand } from './addSlotParser';
+import {
+  getSchedule,
+  formatSchedule,
+  createOpenSlot,
+  findDiaryConflicts,
+  createMasterCloseBlock,
+  findEventsOnDate,
+  deleteDiaryEvent,
+  TATTOO_DAY_BLOCK_HOURS,
+} from './calendar';
+import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from './addSlotParser';
 
 export interface AdminMessage {
   text: string | null;
@@ -47,6 +56,8 @@ const INVOICE_CMDS = ['/счёт', '/счет', '/invoice', 'счёт', 'сче�
 const PORTRAIT_CMDS = ['/портрет', '/portrait', 'портрет'];
 const SCHEDULE_CMDS = ['/расписание', '/schedule', 'расписание'];
 const ADD_SLOT_CMDS = ['/добавить', '/добавь', '/add', 'добавить', 'добавь'];
+const CLOSE_SLOT_CMDS = ['/закрой', '/закрыть', 'закрой', 'закрыть'];
+const DELETE_SLOT_CMDS = ['/удали', '/удалить', 'удали', 'удалить'];
 
 // Естественный запрос расписания без команды: "что по записям", "какие
 // записи", "покажи расписание/календарь". Держим узко (запис/расписан/
@@ -82,6 +93,12 @@ export async function runAdmin(msg: AdminMessage): Promise<AdminResult> {
   }
   if (ADD_SLOT_CMDS.includes(firstWord)) {
     return { reply: await handleAddSlot(rest) };
+  }
+  if (CLOSE_SLOT_CMDS.includes(firstWord)) {
+    return { reply: await handleCloseSlot(rest) };
+  }
+  if (DELETE_SLOT_CMDS.includes(firstWord)) {
+    return { reply: await handleDeleteSlot(rest) };
   }
 
   // Естественные фразы про расписание/записи — не команда, но по смыслу
@@ -336,6 +353,112 @@ async function handleAddSlot(arg: string): Promise<string> {
   }
 
   return reply;
+}
+
+// ----------------------------------------------------------
+// /закрой — быстро заблокировать день/окно, не открывая Дневник прямо
+// сейчас. Конс — весь день (только консультации). Тату — время
+// обязательно; ≥4ч блокирует весь день целиком (как реальная сессия из
+// Дневника), короче — только это окно (только тату).
+// ----------------------------------------------------------
+
+function familyLabel(family: 'tattoo' | 'consultation'): string {
+  return family === 'tattoo' ? 'тату' : 'консультации';
+}
+
+async function handleCloseSlot(arg: string): Promise<string> {
+  if (!arg.trim()) {
+    return (
+      'что и когда закрыть? например:\n' +
+      '/закрой конс 20.07 [имя]\n' +
+      '/закрой тату 20.07 09:00-14:00 [имя]'
+    );
+  }
+
+  const parsed = parseCloseCommand(arg, new Date());
+  if (!parsed.ok) {
+    return `${parsed.error}\nпример: /закрой конс 20.07 [имя] или /закрой тату 20.07 09:00-14:00 [имя]`;
+  }
+
+  const timeRangeNaive = parsed.timeRange
+    ? {
+        startNaive: `${parsed.date}T${parsed.timeRange.startTime}:00`,
+        endNaive: `${parsed.date}T${parsed.timeRange.endTime}:00`,
+      }
+    : null;
+
+  const result = await createMasterCloseBlock(parsed.family, parsed.date, timeRangeNaive, parsed.name);
+  if (!result.ok) {
+    console.error('handleCloseSlot: createMasterCloseBlock failed:', result.error);
+    return 'не получилось закрыть — глянь логи.';
+  }
+
+  const when = parsed.timeRange
+    ? `${humanDate(parsed.date)}, ${parsed.timeRange.startTime}–${parsed.timeRange.endTime}`
+    : `${humanDate(parsed.date)} (весь день)`;
+  const nameSuffix = parsed.name ? ` — ${parsed.name}` : '';
+
+  let scope = '';
+  if (parsed.family === 'tattoo' && parsed.timeRange) {
+    const [h1, m1] = parsed.timeRange.startTime.split(':').map(Number);
+    const [h2, m2] = parsed.timeRange.endTime.split(':').map(Number);
+    const hours = (h2 * 60 + m2 - (h1 * 60 + m1)) / 60;
+    scope =
+      hours >= TATTOO_DAY_BLOCK_HOURS
+        ? ' (весь день закрыт для любых записей)'
+        : ' (только это окно, для тату)';
+  } else {
+    scope = ' (день закрыт только для консультаций, тату можно ставить)';
+  }
+
+  return `закрыла: ${familyLabel(parsed.family)}, ${when}${nameSuffix}${scope}`;
+}
+
+// ----------------------------------------------------------
+// /удалить — снять существующую запись/бронь из календаря целиком.
+// Если находится больше одной — просим уточнить имя/время, ничего не
+// удаляем вслепую (это реальное действие с чужим/своим временем).
+// ----------------------------------------------------------
+
+async function handleDeleteSlot(arg: string): Promise<string> {
+  if (!arg.trim()) {
+    return 'что и когда удалить? например:\n/удалить конс 20.07 [имя]\n/удалить тату 20.07 [имя]';
+  }
+
+  const parsed = parseDeleteCommand(arg, new Date());
+  if (!parsed.ok) {
+    return `${parsed.error}\nпример: /удалить конс 20.07 [имя]`;
+  }
+
+  let candidates;
+  try {
+    candidates = await findEventsOnDate(parsed.date, parsed.family);
+  } catch (err) {
+    console.error('handleDeleteSlot: findEventsOnDate failed:', err);
+    return 'не получилось найти записи — глянь логи.';
+  }
+
+  if (parsed.name) {
+    const nameLower = parsed.name.toLowerCase();
+    const filtered = candidates.filter((c) => c.summary.toLowerCase().includes(nameLower));
+    if (filtered.length > 0) candidates = filtered;
+  }
+
+  if (candidates.length === 0) {
+    return `ничего не нашла на ${humanDate(parsed.date)} (${familyLabel(parsed.family)}).`;
+  }
+  if (candidates.length > 1) {
+    const lines = candidates.map((c) => `• ${c.summary}`);
+    return `нашла несколько на ${humanDate(parsed.date)}:\n${lines.join('\n')}\nуточни имя или добавь ещё деталей — не хочу удалить не то.`;
+  }
+
+  const target = candidates[0];
+  const result = await deleteDiaryEvent(target.id);
+  if (!result.ok) {
+    console.error('handleDeleteSlot: deleteDiaryEvent failed:', result.error);
+    return 'не получилось удалить — глянь логи.';
+  }
+  return `удалила: ${target.summary} (${humanDate(parsed.date)})`;
 }
 
 // ----------------------------------------------------------

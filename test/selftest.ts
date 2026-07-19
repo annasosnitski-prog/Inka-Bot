@@ -32,11 +32,14 @@ import {
   formatSlotForDisplay,
   isBotBooking,
   computeDayBlockInfo,
+  familyOfTag,
+  tagsInFamily,
+  MASTER_CLOSED_MARKER,
   type AvailableSlot,
 } from '../lib/calendar';
 import { formatInvoice, isScheduleRequest } from '../lib/admin';
 import { buildMirrorText } from '../lib/dialogLog';
-import { parseAddSlotCommand } from '../lib/addSlotParser';
+import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from '../lib/addSlotParser';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
 
 let passed = 0;
@@ -231,6 +234,60 @@ expectFail('нет даты', 'walkin 12:00-14:00');
 expectFail('конец раньше начала', 'walkin пятница 14:00-12:00');
 expectFail('пустая строка', '');
 
+console.log('\n▶ parseCloseCommand (/закрой)');
+{
+  const r = parseCloseCommand('конс 20.07', NOW);
+  ok('конс без времени: ok', r.ok === true, JSON.stringify(r));
+  if (r.ok) {
+    eq('конс: family', r.family, 'consultation');
+    eq('конс: date', r.date, '2026-07-20');
+    ok('конс: timeRange null (весь день)', r.timeRange === null);
+    ok('конс: без имени → null', r.name === null);
+  }
+}
+{
+  const r = parseCloseCommand('конс 20.07 Мария', NOW);
+  ok('конс с именем: ok', r.ok === true, JSON.stringify(r));
+  if (r.ok) eq('конс: имя вычищено верно', r.name, 'Мария');
+}
+{
+  const r = parseCloseCommand('тату 20.07 09:00-14:00 Мария', NOW);
+  ok('тату 5ч: ok', r.ok === true, JSON.stringify(r));
+  if (r.ok) {
+    eq('тату: family', r.family, 'tattoo');
+    ok('тату: timeRange задан', r.timeRange !== null && r.timeRange.startTime === '09:00' && r.timeRange.endTime === '14:00');
+    eq('тату: имя вычищено верно', r.name, 'Мария');
+  }
+}
+{
+  const r = parseCloseCommand('walkin 20.07 12:00-13:00', NOW);
+  ok('walkin относится к tattoo-семье', r.ok === true && r.family === 'tattoo', JSON.stringify(r));
+}
+{
+  const r = parseCloseCommand('online 20.07', NOW);
+  ok('online относится к consultation-семье, время не нужно', r.ok === true && r.family === 'consultation' && r.timeRange === null, JSON.stringify(r));
+}
+ok('тату без времени: fail (для тату время обязательно)', parseCloseCommand('тату 20.07', NOW).ok === false);
+ok('нет тега вообще: fail', parseCloseCommand('20.07 12:00-14:00', NOW).ok === false);
+ok('нет даты: fail', parseCloseCommand('тату 12:00-14:00', NOW).ok === false);
+
+console.log('\n▶ parseDeleteCommand (/удалить)');
+{
+  const r = parseDeleteCommand('конс 20.07 Олег', NOW);
+  ok('конс с именем: ok', r.ok === true, JSON.stringify(r));
+  if (r.ok) {
+    eq('family', r.family, 'consultation');
+    eq('date', r.date, '2026-07-20');
+    eq('имя вычищено верно', r.name, 'Олег');
+  }
+}
+{
+  const r = parseDeleteCommand('тату 20.07', NOW);
+  ok('тату без имени: ok, имя null', r.ok === true && r.name === null, JSON.stringify(r));
+}
+ok('нет тега вообще: fail', parseDeleteCommand('20.07', NOW).ok === false);
+ok('нет даты: fail', parseDeleteCommand('тату', NOW).ok === false);
+
 console.log('\n▶ buildPaymentDetailsBlock');
 delete process.env.PAYMENT_BIT; delete process.env.PAYMENT_BANK;
 ok('нет env → null', buildPaymentDetailsBlock() === null);
@@ -362,6 +419,49 @@ function fakeEvent(summary: string, startIso: string, endIso: string) {
   ok('день с консой не заблокирован целиком', !info.blockedDays.has('2026-07-27'));
   ok('у дня с консой есть только буфер, не весь день', info.bufferIntervals.length === 1);
 }
+
+console.log('\n▶ familyOfTag / tagsInFamily — группировка тегов для /закрой и /удалить');
+eq('ТАТУ → tattoo', familyOfTag('[ТАТУ]'), 'tattoo');
+eq('WALKIN → tattoo', familyOfTag('[WALKIN]'), 'tattoo');
+eq('КОНС → consultation', familyOfTag('[КОНС]'), 'consultation');
+eq('ONLINE → consultation', familyOfTag('[ONLINE]'), 'consultation');
+ok('tagsInFamily(tattoo) содержит оба', tagsInFamily('tattoo').includes('[ТАТУ]') && tagsInFamily('tattoo').includes('[WALKIN]'));
+ok('tagsInFamily(consultation) содержит оба', tagsInFamily('consultation').includes('[КОНС]') && tagsInFamily('consultation').includes('[ONLINE]'));
+
+console.log('\n▶ computeDayBlockInfo — блокировки мастера через /закрой (MASTER_CLOSED_MARKER)');
+function fakeAllDayEvent(summary: string, date: string) {
+  return { summary, start: { date }, end: { date: addOneDay(date) } };
+}
+function addOneDay(ymd: string): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+// /закрой конс — весь день, all-day событие, но ТОЛЬКО консультация.
+{
+  const items = [fakeAllDayEvent(`[КОНС] ${MASTER_CLOSED_MARKER}`, '2026-07-28')];
+  const info = computeDayBlockInfo(items);
+  ok('закрытая конса блокирует день для консультаций', info.blockedConsultationDays.has('2026-07-28'));
+  ok('закрытая конса НЕ блокирует день целиком (тату не трогает)', !info.blockedDays.has('2026-07-28'));
+}
+// /закрой тату ≥4ч — весь день целиком, как длинная сессия из Дневника.
+{
+  const items = [fakeEvent(`[ТАТУ] ${MASTER_CLOSED_MARKER} — Мария`, '2026-07-29T09:00:00+03:00', '2026-07-29T14:00:00+03:00')];
+  const info = computeDayBlockInfo(items);
+  ok('закрытое тату ≥4ч блокирует весь день', info.blockedDays.has('2026-07-29'));
+}
+// /закрой тату <4ч — только это окно, только тату-семья.
+{
+  const items = [fakeEvent(`[ТАТУ] ${MASTER_CLOSED_MARKER}`, '2026-07-30T12:00:00+03:00', '2026-07-30T14:00:00+03:00')];
+  const info = computeDayBlockInfo(items);
+  ok('закрытое тату <4ч НЕ блокирует весь день', !info.blockedDays.has('2026-07-30'));
+  const insideMs = new Date('2026-07-30T13:00:00+03:00').getTime();
+  const outsideMs = new Date('2026-07-30T16:00:00+03:00').getTime();
+  ok('окно закрытия перекрывает интервал внутри', info.blockedTattooIntervals.some((iv) => insideMs >= iv.startMs && insideMs < iv.endMs));
+  ok('время вне окна закрытия не задето', !info.blockedTattooIntervals.some((iv) => outsideMs >= iv.startMs && outsideMs < iv.endMs));
+}
+// Закрытие бота — это тоже "бронь бота" для обратного потока в Дневник (не ЗАНЯТО).
+ok('закрытие /закрой — isBotBooking true (без данных клиента, но от бота)', isBotBooking(`[ТАТУ] ${MASTER_CLOSED_MARKER}`));
 
 // ================= ИТОГ =================
 console.log(`\n${'='.repeat(40)}`);
