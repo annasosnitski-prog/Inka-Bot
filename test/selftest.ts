@@ -30,6 +30,7 @@ import {
   tagDisplayLabel,
   busyMarkerForTag,
   formatSlotForDisplay,
+  isBotBooking,
   type AvailableSlot,
 } from '../lib/calendar';
 import { formatInvoice, isScheduleRequest } from '../lib/admin';
@@ -290,6 +291,20 @@ ok('описание содержит клиента и ярлык', desc.includ
 // computeEndNaive: wall-clock арифметика
 eq('конец: 14:30 + 120 мин = 16:30', computeEndNaive('2026-07-08', '14:30', 120), '2026-07-08T16:30:00');
 eq('конец: 23:30 + 60 мин = 00:30 след. дня', computeEndNaive('2026-07-08', '23:30', 60), '2026-07-09T00:30:00');
+
+console.log('\n▶ isBotBooking — обратный поток в Дневник: бронь от бота vs своя из Дневника');
+// Реальная бронь бота — любой тег, не только ONLINE/WALKIN.
+ok('тату-бронь бота (через /добавить + клиент) — бот', isBotBooking('[ТАТУ] ОЖИДАЕТ ПРЕДОПЛАТЫ — Мария, +972501234567'));
+ok('конс-бронь бота очная — бот', isBotBooking('[КОНС] КОНС ЗАПИСЬ — Олег'));
+ok('онлайн-конс бота — бот', isBotBooking('[ONLINE] КОНС ОНЛАЙН — Оля'));
+ok('walkin-бронь бота — бот', isBotBooking('[WALKIN] ОЖИДАЕТ ПРЕДОПЛАТЫ — Игорь'));
+// Свои события из Дневника (маркер ЗАНЯТО) — не бронь бота, не дублируем обратно.
+ok('тату из Дневника — не бронь бота', !isBotBooking(buildDiaryEventSummary('tattoo', 'Мария', 'большая')));
+ok('конс из Дневника — не бронь бота', !isBotBooking(buildDiaryEventSummary('consultation', null, null)));
+// Открытый пустой слот (ещё не бронь) и личные/чужие события — тоже нет.
+ok('открытый пустой слот — не бронь', !isBotBooking('[КОНС]'));
+ok('личное событие без тега — не бронь', !isBotBooking('Стоматолог 15:00'));
+ok('пустая строка — не бронь', !isBotBooking(''));
 
 // ================= ИТОГ =================
 console.log(`\n${'='.repeat(40)}`);

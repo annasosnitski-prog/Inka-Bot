@@ -79,6 +79,19 @@ export function busyMarkerForTag(tag: SlotTag | null, type: SlotType): string {
 // считается занятым и не попадает в свободные.
 const BUSY_MARKERS = ['ОЖИДАЕТ ПРЕДОПЛАТЫ', 'КОНС ОНЛАЙН', 'КОНС ЗАПИСЬ', 'ЗАНЯТО'];
 
+// Маркер "ЗАНЯТО" — особый: им помечаются ТОЛЬКО события из Дневника
+// (buildDiaryEventSummary), а не брони, которые оформил сам бот. Разница
+// важна для обратного потока в Дневник (bot-bookings): бронь, которую
+// сделал бот — независимо от тега [ТАТУ]/[КОНС]/[ONLINE]/[WALKIN] — это
+// то, чего у мастера ещё нет в Дневнике и стоит показать. А её же
+// собственные события из Дневника показывать ей обратно не нужно.
+export function isBotBooking(summary: string): boolean {
+  const s = summary ?? '';
+  if (!tagOf(s)) return false;
+  if (!BUSY_MARKERS.some((m) => s.includes(m))) return false;
+  return !s.includes('ЗАНЯТО');
+}
+
 export interface AvailableSlot {
   id: string; // Google Calendar event id — это и есть slot id для ClientCard.slot_options
   summary: string; // полное название события, как есть в календаре
