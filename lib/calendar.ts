@@ -300,40 +300,52 @@ async function buildSignedJwt(email: string, privateKey: string): Promise<string
 // ПОИСК СВОБОДНЫХ СЛОТОВ
 // ----------------------------------------------------------
 
-// Политика мастера: длинная запись из Дневника "съедает" весь день — после
-// нескольких часов тату-сессии или полной 2-часовой консультации мастеру
-// нужен отдых, поэтому в этот день бот вообще не предлагает клиентам новые
-// открытые слоты, даже если по времени формально нет пересечения.
-const DAY_BLOCK_THRESHOLD_HOURS: Record<SlotType, number> = {
-  tattoo: 4,
-  consultation: 2,
-};
+// Политика мастера — два РАЗНЫХ правила отдыха после записи из Дневника:
+//   1. Длинная тату-сессия (≥4ч) "съедает" весь день целиком — после такой
+//      работы мастеру нужен полный отдых, бот в этот день вообще не
+//      предлагает клиентам новые открытые слоты, даже если по времени
+//      формально нет пересечения.
+//   2. Консультация НЕ блокирует весь день — только 2-часовой буфer сразу
+//      после её окончания (короткий перерыв на отдых), дальше день как
+//      обычно открыт для новых предложений.
+const TATTOO_DAY_BLOCK_HOURS = 4;
+const CONSULTATION_BUFFER_HOURS = 2;
 
 export function jerusalemDayKey(iso: string): string {
   return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 }
 
-// Дни, в которые уже стоит достаточно длинная запись из Дневника (маркер
-// "ЗАНЯТО" — см. buildDiaryEventSummary), чтобы блокировать весь день
-// целиком для НОВЫХ предложений клиентам.
-export function computeDayBlockedSet(items: any[]): Set<string> {
-  const blocked = new Set<string>();
+export interface DayBlockInfo {
+  blockedDays: Set<string>; // дни, целиком заблокированные длинной тату-сессией
+  bufferIntervals: Array<{ startMs: number; endMs: number }>; // 2ч после консультаций
+}
+
+// Разбирает события с маркером "ЗАНЯТО" (это ТОЛЬКО свои записи из
+// Дневника — buildDiaryEventSummary, не брони бота) на два списка выше.
+export function computeDayBlockInfo(items: any[]): DayBlockInfo {
+  const blockedDays = new Set<string>();
+  const bufferIntervals: Array<{ startMs: number; endMs: number }> = [];
   for (const event of items) {
     const summary: string = event.summary ?? '';
-    if (!summary.includes('ЗАНЯТО')) continue; // блокирует день только своя запись из Дневника
+    if (!summary.includes('ЗАНЯТО')) continue; // не своя запись из Дневника — не считается
     const eventTag = tagOf(summary);
-    const eventType: SlotType | null =
-      eventTag === '[ТАТУ]' ? 'tattoo' : eventTag === '[КОНС]' ? 'consultation' : null;
-    if (!eventType) continue;
     const startIso: string | undefined = event.start?.dateTime;
     const endIso: string | undefined = event.end?.dateTime;
     if (!startIso || !endIso) continue;
-    const hours = (new Date(endIso).getTime() - new Date(startIso).getTime()) / 3_600_000;
-    if (hours >= DAY_BLOCK_THRESHOLD_HOURS[eventType]) {
-      blocked.add(jerusalemDayKey(startIso));
+    const startMs = new Date(startIso).getTime();
+    const endMs = new Date(endIso).getTime();
+    if (eventTag === '[ТАТУ]') {
+      const hours = (endMs - startMs) / 3_600_000;
+      if (hours >= TATTOO_DAY_BLOCK_HOURS) blockedDays.add(jerusalemDayKey(startIso));
+    } else if (eventTag === '[КОНС]') {
+      bufferIntervals.push({ startMs: endMs, endMs: endMs + CONSULTATION_BUFFER_HOURS * 3_600_000 });
     }
   }
-  return blocked;
+  return { blockedDays, bufferIntervals };
+}
+
+function isInConsultationBuffer(candidateStartMs: number, intervals: Array<{ startMs: number; endMs: number }>): boolean {
+  return intervals.some((iv) => candidateStartMs >= iv.startMs && candidateStartMs < iv.endMs);
 }
 
 export async function getAvailableSlots(
@@ -378,7 +390,7 @@ export async function getAvailableSlots(
     items.map((e) => e.summary)
   );
 
-  const blockedDays = computeDayBlockedSet(items);
+  const { blockedDays, bufferIntervals } = computeDayBlockInfo(items);
 
   const freeSlots: AvailableSlot[] = items
     .filter((event) => {
@@ -387,7 +399,10 @@ export async function getAvailableSlots(
       const isBusy = BUSY_MARKERS.some((marker) => summary.includes(marker));
       if (eventTag === null || !wantedTags.includes(eventTag) || isBusy) return false;
       const startIso: string | undefined = event.start?.dateTime;
-      if (startIso && blockedDays.has(jerusalemDayKey(startIso))) return false;
+      if (startIso) {
+        if (blockedDays.has(jerusalemDayKey(startIso))) return false;
+        if (isInConsultationBuffer(new Date(startIso).getTime(), bufferIntervals)) return false;
+      }
       return true;
     })
     .map((event) => ({

@@ -31,7 +31,7 @@ import {
   busyMarkerForTag,
   formatSlotForDisplay,
   isBotBooking,
-  computeDayBlockedSet,
+  computeDayBlockInfo,
   type AvailableSlot,
 } from '../lib/calendar';
 import { formatInvoice, isScheduleRequest } from '../lib/admin';
@@ -307,49 +307,60 @@ ok('открытый пустой слот — не бронь', !isBotBooking('
 ok('личное событие без тега — не бронь', !isBotBooking('Стоматолог 15:00'));
 ok('пустая строка — не бронь', !isBotBooking(''));
 
-console.log('\n▶ computeDayBlockedSet — длинная запись из Дневника блокирует весь день (политика мастера)');
+console.log('\n▶ computeDayBlockInfo — политика мастера: длинное тату блокирует день, конса — только 2ч буфер после');
 function fakeEvent(summary: string, startIso: string, endIso: string) {
   return { summary, start: { dateTime: startIso }, end: { dateTime: endIso } };
 }
-// Тату ≥4ч из Дневника — блокирует день.
+// Тату ≥4ч из Дневника — блокирует весь день.
 {
   const items = [fakeEvent(buildDiaryEventSummary('tattoo', 'Мария', 'большая'), '2026-07-20T09:00:00+03:00', '2026-07-20T13:00:00+03:00')];
-  ok('тату 4ч из Дневника блокирует свой день', computeDayBlockedSet(items).has('2026-07-20'));
+  ok('тату 4ч из Дневника блокирует свой день', computeDayBlockInfo(items).blockedDays.has('2026-07-20'));
 }
-// Тату <4ч — не блокирует.
+// Тату <4ч — не блокирует день.
 {
   const items = [fakeEvent(buildDiaryEventSummary('tattoo', 'Мария', 'маленькая'), '2026-07-21T09:00:00+03:00', '2026-07-21T12:30:00+03:00')];
-  ok('тату 3.5ч из Дневника НЕ блокирует день', !computeDayBlockedSet(items).has('2026-07-21'));
+  ok('тату 3.5ч из Дневника НЕ блокирует день', !computeDayBlockInfo(items).blockedDays.has('2026-07-21'));
 }
-// Конс ≥2ч из Дневника — блокирует день (свой, более низкий порог).
+// Конс из Дневника НЕ блокирует день целиком, вообще любой длительности.
 {
   const items = [fakeEvent(buildDiaryEventSummary('consultation', 'Олег', null), '2026-07-22T10:00:00+03:00', '2026-07-22T12:00:00+03:00')];
-  ok('конс 2ч из Дневника блокирует свой день', computeDayBlockedSet(items).has('2026-07-22'));
+  ok('конс 2ч из Дневника НЕ блокирует весь день', !computeDayBlockInfo(items).blockedDays.has('2026-07-22'));
 }
-// Конс <2ч — не блокирует.
+// Конс создаёт 2ч буфер СРАЗУ ПОСЛЕ своего окончания.
 {
-  const items = [fakeEvent(buildDiaryEventSummary('consultation', 'Олег', null), '2026-07-23T10:00:00+03:00', '2026-07-23T11:00:00+03:00')];
-  ok('конс 1ч из Дневника НЕ блокирует день', !computeDayBlockedSet(items).has('2026-07-23'));
+  const items = [fakeEvent(buildDiaryEventSummary('consultation', 'Олег', null), '2026-07-22T10:00:00+03:00', '2026-07-22T12:00:00+03:00')];
+  const { bufferIntervals } = computeDayBlockInfo(items);
+  const startOfBuffer = new Date('2026-07-22T12:00:00+03:00').getTime();
+  const insideBuffer = new Date('2026-07-22T13:30:00+03:00').getTime(); // конс закончилась в 12:00, буфер до 14:00
+  const afterBuffer = new Date('2026-07-22T14:30:00+03:00').getTime();
+  ok('слот сразу после консы (в буфере) заблокирован', bufferIntervals.some((iv) => insideBuffer >= iv.startMs && insideBuffer < iv.endMs));
+  ok('слот ровно на конце консы (начало буфера) заблокирован', bufferIntervals.some((iv) => startOfBuffer >= iv.startMs && startOfBuffer < iv.endMs));
+  ok('слот через 2.5ч после консы (вне буфера) НЕ заблокирован', !bufferIntervals.some((iv) => afterBuffer >= iv.startMs && afterBuffer < iv.endMs));
 }
-// Долгая БРОНЬ БОТА (не Дневник) — не блокирует день, правило только про "ЗАНЯТО".
+// Долгая БРОНЬ БОТА (не Дневник) — не влияет ни на день, ни на буфер.
 {
   const items = [fakeEvent('[ТАТУ] ОЖИДАЕТ ПРЕДОПЛАТЫ — Игорь', '2026-07-24T09:00:00+03:00', '2026-07-24T15:00:00+03:00')];
-  ok('долгая бронь бота (не Дневник) НЕ блокирует день', !computeDayBlockedSet(items).has('2026-07-24'));
+  const info = computeDayBlockInfo(items);
+  ok('долгая бронь бота (не Дневник) НЕ блокирует день', !info.blockedDays.has('2026-07-24'));
+  ok('долгая бронь бота (не Дневник) не создаёт буфер', info.bufferIntervals.length === 0);
 }
-// Пустой открытый слот — не блокирует, каким бы длинным ни был.
+// Пустой открытый слот — ничего не блокирует.
 {
   const items = [fakeEvent('[ТАТУ]', '2026-07-25T09:00:00+03:00', '2026-07-25T18:00:00+03:00')];
-  ok('открытый пустой слот НЕ блокирует день', !computeDayBlockedSet(items).has('2026-07-25'));
+  const info = computeDayBlockInfo(items);
+  ok('открытый пустой слот НЕ блокирует день', !info.blockedDays.has('2026-07-25'));
+  ok('открытый пустой слот не создаёт буфер', info.bufferIntervals.length === 0);
 }
-// Два дня — блокируется только тот, где реально длинная запись.
+// Два разных дня — блокируется только тот, где реально длинное тату.
 {
   const items = [
     fakeEvent(buildDiaryEventSummary('tattoo', 'Мария', 'большая'), '2026-07-26T09:00:00+03:00', '2026-07-26T14:00:00+03:00'),
     fakeEvent(buildDiaryEventSummary('consultation', 'Олег', null), '2026-07-27T10:00:00+03:00', '2026-07-27T11:00:00+03:00'),
   ];
-  const blocked = computeDayBlockedSet(items);
-  ok('день с длинным тату заблокирован', blocked.has('2026-07-26'));
-  ok('день с короткой консой не заблокирован', !blocked.has('2026-07-27'));
+  const info = computeDayBlockInfo(items);
+  ok('день с длинным тату заблокирован целиком', info.blockedDays.has('2026-07-26'));
+  ok('день с консой не заблокирован целиком', !info.blockedDays.has('2026-07-27'));
+  ok('у дня с консой есть только буфер, не весь день', info.bufferIntervals.length === 1);
 }
 
 // ================= ИТОГ =================
