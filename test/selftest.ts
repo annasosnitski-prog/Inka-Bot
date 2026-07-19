@@ -31,6 +31,7 @@ import {
   busyMarkerForTag,
   formatSlotForDisplay,
   isBotBooking,
+  computeDayBlockedSet,
   type AvailableSlot,
 } from '../lib/calendar';
 import { formatInvoice, isScheduleRequest } from '../lib/admin';
@@ -305,6 +306,51 @@ ok('конс из Дневника — не бронь бота', !isBotBooking(
 ok('открытый пустой слот — не бронь', !isBotBooking('[КОНС]'));
 ok('личное событие без тега — не бронь', !isBotBooking('Стоматолог 15:00'));
 ok('пустая строка — не бронь', !isBotBooking(''));
+
+console.log('\n▶ computeDayBlockedSet — длинная запись из Дневника блокирует весь день (политика мастера)');
+function fakeEvent(summary: string, startIso: string, endIso: string) {
+  return { summary, start: { dateTime: startIso }, end: { dateTime: endIso } };
+}
+// Тату ≥4ч из Дневника — блокирует день.
+{
+  const items = [fakeEvent(buildDiaryEventSummary('tattoo', 'Мария', 'большая'), '2026-07-20T09:00:00+03:00', '2026-07-20T13:00:00+03:00')];
+  ok('тату 4ч из Дневника блокирует свой день', computeDayBlockedSet(items).has('2026-07-20'));
+}
+// Тату <4ч — не блокирует.
+{
+  const items = [fakeEvent(buildDiaryEventSummary('tattoo', 'Мария', 'маленькая'), '2026-07-21T09:00:00+03:00', '2026-07-21T12:30:00+03:00')];
+  ok('тату 3.5ч из Дневника НЕ блокирует день', !computeDayBlockedSet(items).has('2026-07-21'));
+}
+// Конс ≥2ч из Дневника — блокирует день (свой, более низкий порог).
+{
+  const items = [fakeEvent(buildDiaryEventSummary('consultation', 'Олег', null), '2026-07-22T10:00:00+03:00', '2026-07-22T12:00:00+03:00')];
+  ok('конс 2ч из Дневника блокирует свой день', computeDayBlockedSet(items).has('2026-07-22'));
+}
+// Конс <2ч — не блокирует.
+{
+  const items = [fakeEvent(buildDiaryEventSummary('consultation', 'Олег', null), '2026-07-23T10:00:00+03:00', '2026-07-23T11:00:00+03:00')];
+  ok('конс 1ч из Дневника НЕ блокирует день', !computeDayBlockedSet(items).has('2026-07-23'));
+}
+// Долгая БРОНЬ БОТА (не Дневник) — не блокирует день, правило только про "ЗАНЯТО".
+{
+  const items = [fakeEvent('[ТАТУ] ОЖИДАЕТ ПРЕДОПЛАТЫ — Игорь', '2026-07-24T09:00:00+03:00', '2026-07-24T15:00:00+03:00')];
+  ok('долгая бронь бота (не Дневник) НЕ блокирует день', !computeDayBlockedSet(items).has('2026-07-24'));
+}
+// Пустой открытый слот — не блокирует, каким бы длинным ни был.
+{
+  const items = [fakeEvent('[ТАТУ]', '2026-07-25T09:00:00+03:00', '2026-07-25T18:00:00+03:00')];
+  ok('открытый пустой слот НЕ блокирует день', !computeDayBlockedSet(items).has('2026-07-25'));
+}
+// Два дня — блокируется только тот, где реально длинная запись.
+{
+  const items = [
+    fakeEvent(buildDiaryEventSummary('tattoo', 'Мария', 'большая'), '2026-07-26T09:00:00+03:00', '2026-07-26T14:00:00+03:00'),
+    fakeEvent(buildDiaryEventSummary('consultation', 'Олег', null), '2026-07-27T10:00:00+03:00', '2026-07-27T11:00:00+03:00'),
+  ];
+  const blocked = computeDayBlockedSet(items);
+  ok('день с длинным тату заблокирован', blocked.has('2026-07-26'));
+  ok('день с короткой консой не заблокирован', !blocked.has('2026-07-27'));
+}
 
 // ================= ИТОГ =================
 console.log(`\n${'='.repeat(40)}`);
