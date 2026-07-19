@@ -1,15 +1,23 @@
 // ============================================================
 // INKA-BOT — Calendar
-// Работа с Google Calendar по принципу из мастер-промпта:
-// "два типа слотов: [КОНС] и [ТАТУ]. мастер ставит их сама."
 //
-// Мастер ВРУЧНУЮ создаёт события с тегом [КОНС] или [ТАТУ] в начале
-// названия — это и есть способ выставить свободный слот. Бот НЕ
-// генерирует и не вычисляет время сам. Он только:
-//   1. ищет такие события без маркера занятости в названии
-//      (getAvailableSlots) — это будущие slot_options;
-//   2. при выборе клиентом — переименовывает то же событие, добавляя
-//      маркер занятости (bookSlot) — событие выходит из пула свободных.
+// ЧЕТЫРЕ тега, ДВА разных источника — это разделение важно понимать
+// перед тем, как трогать этот файл:
+//   [ТАТУ] / [КОНС] — ставит МАСТЕР ВРУЧНУЮ или через синк Дневника
+//     (см. buildDiaryEventSummary). Это её реальные, уже согласованные
+//     сессии с конкретным клиентом — маркер "ЗАНЯТО" сразу, бот НИКОГДА
+//     не предлагает эти слоты по чату, они только для его собственной
+//     ориентации в расписании (getSchedule, /расписание, day-block).
+//   [WALKIN] / [ONLINE] — единственные теги, которые бот вообще может
+//     ПРЕДЛОЖИТЬ клиенту в чате (см. tagsForRequest). Мастер создаёт их
+//     пустыми заранее (через /добавить) как открытый пул для новых
+//     клиентов; после брони событие остаётся тем же тегом с маркером
+//     занятости — это конкретная бронь, не Дневник-сессия.
+// Иными словами: ТАТУ/КОНС = "я лично веду этого клиента", WALKIN/ONLINE
+// = "бот сам приводит нового клиента". Бот НЕ генерирует и не вычисляет
+// время сам — только ищет уже созданные события без маркера занятости
+// (getAvailableSlots) и при выборе клиентом переименовывает их же,
+// добавляя маркер (bookSlot).
 //
 // Аутентификация: JWT service account, прямой REST-вызов (без пакета
 // googleapis — легче и предсказуемее в серверless-среде Vercel).
@@ -27,23 +35,22 @@ const SLOT_TAG = {
 
 export type SlotType = keyof typeof SLOT_TAG; // 'consultation' | 'tattoo'
 
-// ЧЕТЫРЕ вида тегов в календаре мастера. [КОНС]/[ТАТУ] — базовые (как в
-// мастер-промпте), [ONLINE] — онлайн-консультация, [WALKIN] — окно для
-// маленьких тату (до ~2ч). Правила бота (промпты, state machine) при
-// добавлении ONLINE/WALKIN НЕ менялись — вся логика "какому клиенту какой
-// тег" живёт здесь, в слое подбора слотов, на уже существующих полях
-// карточки (category mini/small).
+// ЧЕТЫРЕ вида тегов в календаре мастера — см. разбор источников в шапке
+// файла. [ТАТУ]/[КОНС] сюда входят как тип для Дневник-событий (день-блок,
+// /расписание, /закрой по семье), но НЕ как то, что бот предлагает клиенту.
 export type SlotTag = '[ТАТУ]' | '[КОНС]' | '[ONLINE]' | '[WALKIN]';
 const ALL_TAGS: SlotTag[] = ['[ТАТУ]', '[КОНС]', '[ONLINE]', '[WALKIN]'];
 
-// Какие теги подходят под запрос клиента. Walk-in добавляется к тату
-// ТОЛЬКО когда работа маленькая (category mini/small — заведомо ≤2ч);
-// консультация всегда предлагает оба формата — онлайн и в студии.
-export function tagsForRequest(type: SlotType, opts?: { smallTattoo?: boolean }): SlotTag[] {
-  if (type === 'tattoo') {
-    return opts?.smallTattoo ? ['[ТАТУ]', '[WALKIN]'] : ['[ТАТУ]'];
-  }
-  return ['[КОНС]', '[ONLINE]'];
+// Какой тег бот вообще может предложить клиенту. Единственный — WALKIN
+// для тату, ONLINE для консультации; [ТАТУ]/[КОНС] сюда не попадают
+// никогда (это Дневник-сессии, см. шапку файла). Раньше был доп.
+// параметр smallTattoo, разделявший маленькое/большое тату на два
+// разных тега — Аня решила, что это одно и то же по смыслу (любая
+// прямая тату-бронь через бота — это WALKIN, независимо от размера);
+// какие заявки вообще доходят до прямой брони, уже отфильтровано выше
+// по цепочке, в Extractor-е (direct_tattoo_allowed).
+export function tagsForRequest(type: SlotType): SlotTag[] {
+  return type === 'tattoo' ? ['[WALKIN]'] : ['[ONLINE]'];
 }
 
 // Тег события по началу названия (или null — личное событие без тега).
@@ -75,9 +82,16 @@ export function busyMarkerForTag(tag: SlotTag | null, type: SlotType): string {
   return tag === '[КОНС]' ? 'КОНС ЗАПИСЬ' : 'КОНС ОНЛАЙН';
 }
 
+// Маркер для блокировок, которые мастер ставит САМА через бот-команду
+// /закрой (см. lib/admin.ts) — быстро закрыть день/окно, не открывая
+// Дневник прямо сейчас. У такой записи нет реального клиента за ней —
+// это просто "сюда пока не бронировать", в отличие от "ЗАНЯТО" (реальная
+// запись из Дневника с клиентом) и маркеров брони бота (реальный клиент).
+export const MASTER_CLOSED_MARKER = 'ЗАКРЫТО МАСТЕРОМ';
+
 // Маркеры занятости — если они уже есть в названии события, слот
 // считается занятым и не попадает в свободные.
-const BUSY_MARKERS = ['ОЖИДАЕТ ПРЕДОПЛАТЫ', 'КОНС ОНЛАЙН', 'КОНС ЗАПИСЬ', 'ЗАНЯТО'];
+const BUSY_MARKERS = ['ОЖИДАЕТ ПРЕДОПЛАТЫ', 'КОНС ОНЛАЙН', 'КОНС ЗАПИСЬ', 'ЗАНЯТО', MASTER_CLOSED_MARKER];
 
 // Маркер "ЗАНЯТО" — особый: им помечаются ТОЛЬКО события из Дневника
 // (buildDiaryEventSummary), а не брони, которые оформил сам бот. Разница
@@ -85,11 +99,26 @@ const BUSY_MARKERS = ['ОЖИДАЕТ ПРЕДОПЛАТЫ', 'КОНС ОНЛА�
 // сделал бот — независимо от тега [ТАТУ]/[КОНС]/[ONLINE]/[WALKIN] — это
 // то, чего у мастера ещё нет в Дневнике и стоит показать. А её же
 // собственные события из Дневника показывать ей обратно не нужно.
+// Блокировки /закрой (MASTER_CLOSED_MARKER) — это тоже действие бота
+// (не Дневника), поэтому isBotBooking для них тоже true — Дневник должен
+// их увидеть, просто с пометкой "без данных клиента" (см. bot-bookings.ts).
 export function isBotBooking(summary: string): boolean {
   const s = summary ?? '';
   if (!tagOf(s)) return false;
   if (!BUSY_MARKERS.some((m) => s.includes(m))) return false;
   return !s.includes('ЗАНЯТО');
+}
+
+// Семья тега — для /закрой и /удалить: закрывая "тату" мастер имеет в
+// виду и обычную запись, и walk-in-окно; закрывая "консультацию" — и
+// очную, и онлайн. Совпадает с тем, как tagsForRequest группирует теги
+// под один клиентский запрос.
+export type SlotFamily = 'tattoo' | 'consultation';
+export function familyOfTag(tag: SlotTag): SlotFamily {
+  return tag === '[ТАТУ]' || tag === '[WALKIN]' ? 'tattoo' : 'consultation';
+}
+export function tagsInFamily(family: SlotFamily): SlotTag[] {
+  return family === 'tattoo' ? ['[ТАТУ]', '[WALKIN]'] : ['[КОНС]', '[ONLINE]'];
 }
 
 export interface AvailableSlot {
@@ -300,13 +329,93 @@ async function buildSignedJwt(email: string, privateKey: string): Promise<string
 // ПОИСК СВОБОДНЫХ СЛОТОВ
 // ----------------------------------------------------------
 
-export async function getAvailableSlots(
-  type: SlotType,
-  maxResults = 3,
-  opts?: { smallTattoo?: boolean }
-): Promise<AvailableSlot[]> {
+// Политика мастера — правила отдыха/блокировки поверх уже существующих
+// открытых слотов. Источники: свои записи из Дневника ("ЗАНЯТО") и её
+// собственные блокировки через бот-команду /закрой (MASTER_CLOSED_MARKER,
+// см. lib/admin.ts) — оба считаются одинаково для длительности-зависимых
+// правил, дальше расходятся:
+//   1. Длинная тату-сессия (≥4ч, из Дневника ИЛИ через /закрой) "съедает"
+//      весь день целиком, для ЛЮБОГО типа — после такой работы мастеру
+//      нужен полный отдых.
+//   2. Консультация из Дневника НЕ блокирует весь день — только
+//      2-часовой буфer сразу после её окончания.
+//   3. /закрой консультация — "весь день" для консультации не бывает
+//      (максимум встречи — 2ч, см. MAX_CONSULTATION_HOURS), поэтому
+//      блокирует ТОЛЬКО указанное окно, только консультации (КОНС+ONLINE).
+//   4. /закрой тату короче 4ч — блокирует ТОЛЬКО это окно времени, ТОЛЬКО
+//      для тату-семьи (ТАТУ+WALKIN).
+export const TATTOO_DAY_BLOCK_HOURS = 4;
+const CONSULTATION_BUFFER_HOURS = 2;
+// Реальный потолок длительности консультации — используется и парсером
+// /закрой (не дать закрыть "консультацию" на 5 часов — это не консультация),
+// и порогом WALKIN (см. lib/telegram.ts): маленькая работа = короче этого.
+export const MAX_CONSULTATION_HOURS = 2;
+// Минимальный запас перед WALKIN/ONLINE-бронью — бот не предлагает клиенту
+// слот этих тегов, если до его начала осталось меньше суток (не хочет
+// просыпаться утром с неожиданной консультацией/walk-in на сегодня).
+export const LEAD_TIME_HOURS = 24;
+
+export function jerusalemDayKey(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+}
+
+export interface DayBlockInfo {
+  blockedDays: Set<string>; // дни, целиком заблокированные (любой тип) длинной тату-сессией
+  bufferIntervals: Array<{ startMs: number; endMs: number }>; // 2ч после консультаций из Дневника
+  blockedConsultationIntervals: Array<{ startMs: number; endMs: number }>; // /закрой конс — только это окно, только КОНС+ONLINE
+  blockedTattooIntervals: Array<{ startMs: number; endMs: number }>; // /закрой тату <4ч — только это окно, только ТАТУ+WALKIN
+}
+
+function overlapsInterval(startMs: number, endMs: number, intervals: Array<{ startMs: number; endMs: number }>): boolean {
+  return intervals.some((iv) => startMs < iv.endMs && endMs > iv.startMs);
+}
+
+// Разбирает события с маркером "ЗАНЯТО" (свои записи из Дневника) и
+// MASTER_CLOSED_MARKER (блокировки через /закрой) на правила выше.
+export function computeDayBlockInfo(items: any[]): DayBlockInfo {
+  const blockedDays = new Set<string>();
+  const bufferIntervals: Array<{ startMs: number; endMs: number }> = [];
+  const blockedConsultationIntervals: Array<{ startMs: number; endMs: number }> = [];
+  const blockedTattooIntervals: Array<{ startMs: number; endMs: number }> = [];
+
+  for (const event of items) {
+    const summary: string = event.summary ?? '';
+    const isDiary = summary.includes('ЗАНЯТО');
+    const isMasterClose = summary.includes(MASTER_CLOSED_MARKER);
+    if (!isDiary && !isMasterClose) continue;
+
+    const eventTag = tagOf(summary);
+    if (!eventTag) continue;
+    const family = familyOfTag(eventTag);
+
+    const startIso: string | undefined = event.start?.dateTime;
+    const endIso: string | undefined = event.end?.dateTime;
+    if (!startIso || !endIso) continue;
+    const startMs = new Date(startIso).getTime();
+    const endMs = new Date(endIso).getTime();
+    const hours = (endMs - startMs) / 3_600_000;
+
+    if (family === 'tattoo') {
+      if (hours >= TATTOO_DAY_BLOCK_HOURS) {
+        blockedDays.add(jerusalemDayKey(startIso));
+      } else if (isMasterClose) {
+        blockedTattooIntervals.push({ startMs, endMs });
+      }
+    } else if (family === 'consultation') {
+      if (isDiary) {
+        bufferIntervals.push({ startMs: endMs, endMs: endMs + CONSULTATION_BUFFER_HOURS * 3_600_000 });
+      } else if (isMasterClose) {
+        blockedConsultationIntervals.push({ startMs, endMs });
+      }
+    }
+  }
+
+  return { blockedDays, bufferIntervals, blockedConsultationIntervals, blockedTattooIntervals };
+}
+
+export async function getAvailableSlots(type: SlotType, maxResults = 3): Promise<AvailableSlot[]> {
   const token = await getAccessToken();
-  const wantedTags = tagsForRequest(type, opts);
+  const wantedTags = tagsForRequest(type);
 
   // НЕ используем q= — полнотекстовый поиск Google Calendar API
   // ненадёжно работает с квадратными скобками [ТАТУ]/[КОНС] (это
@@ -342,12 +451,32 @@ export async function getAvailableSlots(
     items.map((e) => e.summary)
   );
 
+  const { blockedDays, bufferIntervals, blockedConsultationIntervals, blockedTattooIntervals } = computeDayBlockInfo(items);
+  const leadTimeMs = Date.now() + LEAD_TIME_HOURS * 3_600_000;
+
   const freeSlots: AvailableSlot[] = items
     .filter((event) => {
       const summary: string = event.summary ?? '';
       const eventTag = tagOf(summary);
       const isBusy = BUSY_MARKERS.some((marker) => summary.includes(marker));
-      return eventTag !== null && wantedTags.includes(eventTag) && !isBusy;
+      if (eventTag === null || !wantedTags.includes(eventTag) || isBusy) return false;
+
+      const startIso: string | undefined = event.start?.dateTime;
+      const endIso: string | undefined = event.end?.dateTime;
+      if (startIso) {
+        const startMs = new Date(startIso).getTime();
+        const endMs = endIso ? new Date(endIso).getTime() : startMs;
+        if (blockedDays.has(jerusalemDayKey(startIso))) return false;
+        if (overlapsInterval(startMs, endMs, bufferIntervals)) return false;
+
+        const family = familyOfTag(eventTag);
+        if (family === 'consultation' && overlapsInterval(startMs, endMs, blockedConsultationIntervals)) return false;
+        if (family === 'tattoo' && overlapsInterval(startMs, endMs, blockedTattooIntervals)) return false;
+
+        // Лаг 24ч — только для WALKIN/ONLINE (см. LEAD_TIME_HOURS).
+        if ((eventTag === '[WALKIN]' || eventTag === '[ONLINE]') && startMs < leadTimeMs) return false;
+      }
+      return true;
     })
     .map((event) => ({
       id: event.id,
@@ -803,4 +932,79 @@ export async function createOpenSlot(
     resolvedStart: ev.start?.dateTime,
     resolvedEnd: ev.end?.dateTime,
   };
+}
+
+// ----------------------------------------------------------
+// БЛОКИРОВКА /закрой И ПОИСК/УДАЛЕНИЕ /удалить — admin-команды, чтобы
+// быстро закрыть день/окно или снять существующую запись из бота, не
+// открывая Дневник прямо сейчас (потом мастер сама пересоздаст нужную
+// карточку клиента в Дневнике руками, если понадобится).
+// ----------------------------------------------------------
+
+// Время всегда обязательно — "закрыть весь день" для консультации не
+// бывает (максимум встречи — MAX_CONSULTATION_HOURS), а для тату "весь
+// день" получается не явным флагом, а следствием: ≥TATTOO_DAY_BLOCK_HOURS
+// в диапазоне дальше подхватит тот же порог в computeDayBlockInfo и
+// заблокирует весь день целиком (для любого типа), короче — только это
+// окно (только тату-семья).
+export async function createMasterCloseBlock(
+  family: SlotFamily,
+  timeRange: { startNaive: string; endNaive: string },
+  name: string | null
+): Promise<CreateSlotResult> {
+  const token = await getAccessToken();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CALENDAR_ID)}/events`;
+
+  const tag: SlotTag = family === 'tattoo' ? '[ТАТУ]' : '[КОНС]';
+  const summary = name ? `${tag} ${MASTER_CLOSED_MARKER} — ${name}` : `${tag} ${MASTER_CLOSED_MARKER}`;
+
+  const body: Record<string, unknown> = {
+    summary,
+    start: { dateTime: timeRange.startNaive, timeZone: 'Asia/Jerusalem' },
+    end: { dateTime: timeRange.endNaive, timeZone: 'Asia/Jerusalem' },
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    return { ok: false, error: `createMasterCloseBlock events.insert failed: ${res.status} ${await res.text()}` };
+  }
+
+  const ev = await res.json();
+  return {
+    ok: true,
+    eventId: ev.id,
+    resolvedStart: ev.start?.dateTime ?? ev.start?.date,
+    resolvedEnd: ev.end?.dateTime ?? ev.end?.date,
+  };
+}
+
+export interface CloseTargetEvent {
+  id: string;
+  summary: string;
+  start: string;
+  end: string;
+  tag: SlotTag;
+}
+
+// Ищет существующие события нужной семьи тегов на конкретную дату — и
+// для /закрой (не дублировать блок, если уже есть — хотя дубли и не
+// страшны сами по себе), и для /удалить (найти, что снимать).
+export async function findEventsOnDate(date: string, family: SlotFamily): Promise<CloseTargetEvent[]> {
+  const today = jerusalemDayKey(new Date().toISOString());
+  const daysAhead = Math.max(
+    2,
+    Math.round((new Date(`${date}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86_400_000) + 2
+  );
+  const events = await getSchedule(daysAhead);
+  const wanted = tagsInFamily(family);
+  return events
+    .filter((e) => (e.allDay ? e.start === date : jerusalemDayKey(e.start) === date))
+    .map((e) => ({ ...e, parsedTag: tagOf(e.summary) }))
+    .filter((e): e is typeof e & { parsedTag: SlotTag } => e.parsedTag !== null && wanted.includes(e.parsedTag))
+    .map((e) => ({ id: e.id, summary: e.summary, start: e.start, end: e.end, tag: e.parsedTag }));
 }

@@ -24,7 +24,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { timingSafeEqual } from 'crypto';
-import { getSchedule, tagOf, isBotBooking } from '../../lib/calendar';
+import { getSchedule, tagOf, isBotBooking, MASTER_CLOSED_MARKER } from '../../lib/calendar';
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -61,7 +61,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const events = await getSchedule(30); // ближайшие 30 дней
     const bookings = events
       .filter((e) => isBotBooking(e.summary))
-      .map((e) => ({ id: e.id, tag: tagOf(e.summary), summary: e.summary, start: e.start, end: e.end }));
+      .map((e) => ({
+        id: e.id,
+        tag: tagOf(e.summary),
+        summary: e.summary,
+        start: e.start,
+        end: e.end,
+        // 'master_block' — мастер закрыла день/окно через /закрой, без
+        // реального клиента за этим (см. MASTER_CLOSED_MARKER); Дневник
+        // должен показать это отдельно от настоящих броней с клиентом.
+        kind: e.summary.includes(MASTER_CLOSED_MARKER) ? 'master_block' : 'booking',
+      }));
 
     return res.status(200).json({ ok: true, bookings });
   } catch (err) {

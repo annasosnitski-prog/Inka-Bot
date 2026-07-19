@@ -7,7 +7,8 @@
 // просим переформулировать, а не гадаем.
 // ============================================================
 
-import type { SlotTag } from './calendar';
+import type { SlotTag, SlotFamily } from './calendar';
+import { familyOfTag, MAX_CONSULTATION_HOURS } from './calendar';
 
 export interface ParsedAddSlot {
   ok: true;
@@ -61,7 +62,7 @@ const TAG_PATTERNS: { re: RegExp; tag: SlotTag }[] = [
   { re: /конс|студи|очн/i, tag: '[КОНС]' },
 ];
 
-function findTag(text: string): SlotTag | null {
+export function findTag(text: string): SlotTag | null {
   for (const { re, tag } of TAG_PATTERNS) {
     if (re.test(text)) return tag;
   }
@@ -111,7 +112,7 @@ const MONTH_NAMES: Record<string, number> = {
   дек: 12, декабря: 12, декабрь: 12,
 };
 
-function findDate(text: string, now: Date): string | null {
+export function findDate(text: string, now: Date): string | null {
   const lower = text.toLowerCase();
 
   if (/послезавтра/.test(lower)) return addDays(jerusalemToday(now), 2);
@@ -171,7 +172,7 @@ function findDate(text: string, now: Date): string | null {
 // "с 12:00 до 14:00".
 const TIME_RANGE_RE = /(?:с\s*)?(\d{1,2})(?::(\d{2}))?\s*(?:-|–|—|до)\s*(\d{1,2})(?::(\d{2}))?/;
 
-function findTimeRange(text: string): { startTime: string; endTime: string } | ParseFailure {
+export function findTimeRange(text: string): { startTime: string; endTime: string } | ParseFailure {
   const m = text.match(TIME_RANGE_RE);
   if (!m) {
     return { ok: false, error: 'не поняла время. формат: 12:00-14:00 (или «с 12 до 14»).' };
@@ -195,7 +196,16 @@ function findTimeRange(text: string): { startTime: string; endTime: string } | P
 export function parseAddSlotCommand(text: string, now: Date): ParsedAddSlot | ParseFailure {
   const tag = findTag(text);
   if (!tag) {
-    return { ok: false, error: 'не поняла тип слота. напиши: тату / конс / онлайн / walkin.' };
+    return { ok: false, error: 'не поняла тип слота. напиши: online / walkin.' };
+  }
+  // [ТАТУ]/[КОНС] — это Дневник-сессии мастера с реальным клиентом, бот их
+  // никогда не предлагает в чате (см. tagsForRequest в lib/calendar.ts).
+  // /добавить создаёт ТОЛЬКО открытый пул для новых клиентов — WALKIN/ONLINE.
+  if (tag === '[ТАТУ]' || tag === '[КОНС]') {
+    return {
+      ok: false,
+      error: `${tag} — это Дневник-сессия с конкретным клиентом, бот такое не предлагает. Для открытого слота новому клиенту напиши: walkin (тату) или online (конс).`,
+    };
   }
 
   const time = findTimeRange(text);
@@ -210,4 +220,92 @@ export function parseAddSlotCommand(text: string, now: Date): ParsedAddSlot | Pa
   }
 
   return { ok: true, tag, date, startTime: time.startTime, endTime: time.endTime };
+}
+
+const DATE_ERROR = 'не поняла дату. напиши день недели («пятница»), «завтра» или число («20.07» / «20 июля»).';
+
+// Лучшее усилие: вычищает из текста уже распознанные тег/дату/время —
+// то, что осталось (если что-то осталось) считаем именем "для памяти".
+// Не критично для /закрой (просто подпись в календаре), для /удалить
+// используется как доп. фильтр — при неудачном вычищении просто найдётся
+// больше кандидатов и бот попросит уточнить, а не удалит не то.
+function extractName(text: string, tag: SlotTag, timeRange: { startTime: string; endTime: string } | null): string | null {
+  let s = text;
+  const tagPattern = TAG_PATTERNS.find((p) => p.tag === tag);
+  if (tagPattern) s = s.replace(tagPattern.re, ' ');
+  s = s.replace(/послезавтра/i, ' ');
+  s = s.replace(cyrWord('завтра'), ' ');
+  s = s.replace(cyrWord('сегодня'), ' ');
+  for (const { re } of WEEKDAYS) s = s.replace(re, ' ');
+  s = s.replace(/\b\d{1,2}\.\d{1,2}(?:\.\d{2,4})?\b/, ' ');
+  s = s.replace(/\b\d{1,2}\s+[а-яё]+\b/i, ' ');
+  if (timeRange) s = s.replace(TIME_RANGE_RE, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s || null;
+}
+
+// ---- /закрой ----
+// Время ОБЯЗАТЕЛЬНО для обоих типов — "весь день" для консультации не
+// бывает (максимум встречи — MAX_CONSULTATION_HOURS, дальше ошибка).
+// Для тату "весь день" получается не флагом, а следствием: ≥4ч в
+// диапазоне дальше подхватит TATTOO_DAY_BLOCK_HOURS в computeDayBlockInfo
+// (lib/calendar.ts) и заблокирует весь день целиком, короче — только
+// это окно.
+export interface ParsedClose {
+  ok: true;
+  family: SlotFamily;
+  date: string;
+  timeRange: { startTime: string; endTime: string };
+  name: string | null;
+}
+
+export function parseCloseCommand(text: string, now: Date): ParsedClose | ParseFailure {
+  const tag = findTag(text);
+  if (!tag) {
+    return { ok: false, error: 'не поняла что закрыть. напиши: тату или конс (можно и online/walkin).' };
+  }
+  const family = familyOfTag(tag);
+
+  const date = findDate(text, now);
+  if (!date) return { ok: false, error: DATE_ERROR };
+
+  const time = findTimeRange(text);
+  if ('error' in time) return time;
+
+  if (family === 'consultation') {
+    const [h1, m1] = time.startTime.split(':').map(Number);
+    const [h2, m2] = time.endTime.split(':').map(Number);
+    const hours = (h2 * 60 + m2 - (h1 * 60 + m1)) / 60;
+    if (hours > MAX_CONSULTATION_HOURS) {
+      return { ok: false, error: `консультация не бывает длиннее ${MAX_CONSULTATION_HOURS}ч — проверь время.` };
+    }
+  }
+
+  const name = extractName(text, tag, time);
+  return { ok: true, family, date, timeRange: time, name };
+}
+
+// ---- /удалить ----
+// Дата+семья находят кандидатов через findEventsOnDate (lib/calendar.ts);
+// имя (если распозналось) дополнительно фильтрует. Найдётся больше одной
+// записи — просим уточнить, ничего не удаляем вслепую.
+export interface ParsedDelete {
+  ok: true;
+  family: SlotFamily;
+  date: string;
+  name: string | null;
+}
+
+export function parseDeleteCommand(text: string, now: Date): ParsedDelete | ParseFailure {
+  const tag = findTag(text);
+  if (!tag) {
+    return { ok: false, error: 'не поняла что удалить. напиши: тату или конс (можно и online/walkin).' };
+  }
+  const family = familyOfTag(tag);
+
+  const date = findDate(text, now);
+  if (!date) return { ok: false, error: DATE_ERROR };
+
+  const name = extractName(text, tag, null);
+  return { ok: true, family, date, name };
 }
