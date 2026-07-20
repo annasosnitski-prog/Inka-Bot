@@ -314,15 +314,15 @@ function humanDate(ymd: string): string {
 async function handleAddSlot(arg: string): Promise<string> {
   if (!arg.trim()) {
     return (
-      'что и когда поставить (только walkin/online — открытый слот для нового клиента)? например:\n' +
-      '/добавить walkin пятница 12:00-14:00\n' +
-      '/добавить online завтра 10:00-10:30'
+      'что и когда поставить (только окно/видео — открытый слот для нового клиента)? например:\n' +
+      '/добавить окно пятница 12:00-14:00\n' +
+      '/добавить видео завтра 10:00-10:30'
     );
   }
 
   const parsed = parseAddSlotCommand(arg, new Date());
   if (!parsed.ok) {
-    return `${parsed.error}\nпример: /добавить walkin пятница 12:00-14:00`;
+    return `${parsed.error}\nпример: /добавить окно пятница 12:00-14:00`;
   }
 
   const startNaive = `${parsed.date}T${parsed.startTime}:00`;
@@ -356,7 +356,7 @@ async function handleAddSlot(arg: string): Promise<string> {
 
 // ----------------------------------------------------------
 // /закрой — быстро заблокировать день/окно, не открывая Дневник прямо
-// сейчас. Конс — весь день (только консультации). Тату — время
+// сейчас. Приём — весь день (только консультации). Тату — время
 // обязательно; ≥4ч блокирует весь день целиком (как реальная сессия из
 // Дневника), короче — только это окно (только тату).
 // ----------------------------------------------------------
@@ -369,14 +369,14 @@ async function handleCloseSlot(arg: string): Promise<string> {
   if (!arg.trim()) {
     return (
       'что и когда закрыть? например:\n' +
-      '/закрой конс 20.07 10:00-12:00 [имя]\n' +
+      '/закрой приём 20.07 10:00-12:00 [имя]\n' +
       '/закрой тату 20.07 09:00-14:00 [имя]'
     );
   }
 
   const parsed = parseCloseCommand(arg, new Date());
   if (!parsed.ok) {
-    return `${parsed.error}\nпример: /закрой конс 20.07 10:00-12:00 [имя] или /закрой тату 20.07 09:00-14:00 [имя]`;
+    return `${parsed.error}\nпример: /закрой приём 20.07 10:00-12:00 [имя] или /закрой тату 20.07 09:00-14:00 [имя]`;
   }
 
   const timeRangeNaive = {
@@ -415,12 +415,12 @@ async function handleCloseSlot(arg: string): Promise<string> {
 
 async function handleDeleteSlot(arg: string): Promise<string> {
   if (!arg.trim()) {
-    return 'что и когда удалить? например:\n/удалить конс 20.07 [имя]\n/удалить тату 20.07 [имя]';
+    return 'что и когда удалить? например:\n/удалить приём 20.07 [имя]\n/удалить тату 20.07 [имя]';
   }
 
   const parsed = parseDeleteCommand(arg, new Date());
   if (!parsed.ok) {
-    return `${parsed.error}\nпример: /удалить конс 20.07 [имя]`;
+    return `${parsed.error}\nпример: /удалить приём 20.07 [имя]`;
   }
 
   let candidates;

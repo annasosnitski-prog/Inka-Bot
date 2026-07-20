@@ -52,14 +52,18 @@ function nextWeekday(now: Date, targetDay: number): string {
 }
 
 // ---- Тег слота ----
-// Порядок важен: WALKIN и ONLINE — более специфичные слова, проверяются
-// раньше общих "тату"/"конс" (иначе "консультация онлайн" ушла бы в
-// обычную [КОНС] вместо [ONLINE]).
+// Канонические теги в календаре — [ОКНО]/[ВИДЕО] (см. lib/calendar.ts,
+// удобны для голосового ввода). Старые слова WALKIN/ONLINE/конс остаются
+// РАСПОЗНАВАЕМЫМИ синонимами при вводе команды — Аня к ним привыкла,
+// переучивать не нужно, они просто мапятся на новый тег.
+// Порядок важен: окно/walkin и видео/online — более специфичные слова,
+// проверяются раньше общих "тату"/"приём" (иначе "консультация онлайн"
+// ушла бы в обычную [ПРИЁМ] вместо [ВИДЕО]).
 const TAG_PATTERNS: { re: RegExp; tag: SlotTag }[] = [
-  { re: /walk[\s-]?in|вок[\s-]?ин|волк[\s-]?ин|уок[\s-]?ин/i, tag: '[WALKIN]' },
-  { re: /online|онлайн/i, tag: '[ONLINE]' },
+  { re: /окно|walk[\s-]?in|вок[\s-]?ин|волк[\s-]?ин|уок[\s-]?ин|олкин/i, tag: '[ОКНО]' },
+  { re: /видео|online|онлайн/i, tag: '[ВИДЕО]' },
   { re: /тату|tattoo/i, tag: '[ТАТУ]' },
-  { re: /конс|студи|очн/i, tag: '[КОНС]' },
+  { re: /приём|прием|конс|студи|очн/i, tag: '[ПРИЁМ]' },
 ];
 
 export function findTag(text: string): SlotTag | null {
@@ -196,15 +200,15 @@ export function findTimeRange(text: string): { startTime: string; endTime: strin
 export function parseAddSlotCommand(text: string, now: Date): ParsedAddSlot | ParseFailure {
   const tag = findTag(text);
   if (!tag) {
-    return { ok: false, error: 'не поняла тип слота. напиши: online / walkin.' };
+    return { ok: false, error: 'не поняла тип слота. напиши: видео / окно.' };
   }
-  // [ТАТУ]/[КОНС] — это Дневник-сессии мастера с реальным клиентом, бот их
+  // [ТАТУ]/[ПРИЁМ] — это Дневник-сессии мастера с реальным клиентом, бот их
   // никогда не предлагает в чате (см. tagsForRequest в lib/calendar.ts).
-  // /добавить создаёт ТОЛЬКО открытый пул для новых клиентов — WALKIN/ONLINE.
-  if (tag === '[ТАТУ]' || tag === '[КОНС]') {
+  // /добавить создаёт ТОЛЬКО открытый пул для новых клиентов — ОКНО/ВИДЕО.
+  if (tag === '[ТАТУ]' || tag === '[ПРИЁМ]') {
     return {
       ok: false,
-      error: `${tag} — это Дневник-сессия с конкретным клиентом, бот такое не предлагает. Для открытого слота новому клиенту напиши: walkin (тату) или online (конс).`,
+      error: `${tag} — это Дневник-сессия с конкретным клиентом, бот такое не предлагает. Для открытого слота новому клиенту напиши: окно (тату) или видео (приём).`,
     };
   }
 
@@ -262,7 +266,7 @@ export interface ParsedClose {
 export function parseCloseCommand(text: string, now: Date): ParsedClose | ParseFailure {
   const tag = findTag(text);
   if (!tag) {
-    return { ok: false, error: 'не поняла что закрыть. напиши: тату или конс (можно и online/walkin).' };
+    return { ok: false, error: 'не поняла что закрыть. напиши: тату или приём (можно и видео/окно).' };
   }
   const family = familyOfTag(tag);
 
@@ -299,7 +303,7 @@ export interface ParsedDelete {
 export function parseDeleteCommand(text: string, now: Date): ParsedDelete | ParseFailure {
   const tag = findTag(text);
   if (!tag) {
-    return { ok: false, error: 'не поняла что удалить. напиши: тату или конс (можно и online/walkin).' };
+    return { ok: false, error: 'не поняла что удалить. напиши: тату или приём (можно и видео/окно).' };
   }
   const family = familyOfTag(tag);
 
