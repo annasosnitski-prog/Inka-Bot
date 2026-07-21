@@ -65,7 +65,7 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     idea: 'роза', size: '10см', placement: 'предплечье', first_tattoo: 'yes',
     existing_tattoo: 'no', direct_tattoo_allowed: 'yes', consultation_needed: 'no',
     active_work_time_estimate: '<=3h', price_quoted: '800₪', price_explained: 'yes',
-    wants_to_book: 'yes', contact_preference: null, contact_value: null, phone: null,
+    wants_to_book: 'yes', phone: null,
     payment_status: null, client_type: '2_reference', skin_notes: null, spam_count: 0,
     chosen_slot_id: null, slot_options: ['ev1', 'ev2'], booked_slot_display: null,
     booked_slot_start_iso: null, payment_reminder_sent: null, photos_count: 0,

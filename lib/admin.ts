@@ -36,6 +36,7 @@ import {
   TATTOO_DAY_BLOCK_HOURS,
 } from './calendar';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from './addSlotParser';
+import { callOpenAIChat } from './openai';
 
 export interface AdminMessage {
   text: string | null;
@@ -470,33 +471,16 @@ function getAdminPrompt(): string {
 async function callAdminLLM(userContent: string, history: DialogTurn[] = []): Promise<string> {
   const systemPrompt = getAdminPrompt();
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-5.4',
-      temperature: 0.6,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...history.map((h) => ({ role: h.role, content: h.content })),
-        { role: 'user', content: userContent },
-      ],
-    }),
+  const text = await callOpenAIChat({
+    model: 'gpt-5.4',
+    temperature: 0.6,
+    label: 'Admin',
+    messages: [
+      { role: 'system', content: systemPrompt },
+      ...history.map((h) => ({ role: h.role, content: h.content })),
+      { role: 'user', content: userContent },
+    ],
   });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Admin OpenAI call failed: ${response.status} ${errText}`);
-  }
-
-  const data = await response.json();
-  const text = data.choices?.[0]?.message?.content;
-  if (!text) {
-    throw new Error('Admin: empty response from OpenAI');
-  }
   return text.trim();
 }
 
