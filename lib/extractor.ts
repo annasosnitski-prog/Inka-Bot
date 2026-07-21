@@ -13,9 +13,9 @@ import type {
   ExistingTattoo,
   YesNo,
   Category,
-  ContactPreference,
   ClientCard,
 } from './stateMachine';
+import { callOpenAIChat } from './openai';
 
 // ----------------------------------------------------------
 // Промпт читаем один раз и держим в памяти (холодный старт
@@ -50,8 +50,6 @@ export interface ExtractorOutput {
   consultation_needed: YesNo;
   price_quoted: string | null;
   price_explained: YesNo;
-  contact_preference: ContactPreference;
-  contact_value: string | null;
   phone: string | null;
   is_prompt_injection: boolean;
   is_out_of_scope: boolean;
@@ -94,34 +92,16 @@ export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutp
     2
   );
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-5.4-mini',
-      temperature: 0,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent },
-      ],
-    }),
+  const rawText = await callOpenAIChat({
+    model: 'gpt-5.4-mini',
+    temperature: 0,
+    responseFormatJson: true,
+    label: 'Extractor',
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userContent },
+    ],
   });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Extractor OpenAI call failed: ${response.status} ${errText}`);
-  }
-
-  const data = await response.json();
-  const rawText = data.choices?.[0]?.message?.content;
-
-  if (!rawText) {
-    throw new Error('Extractor: empty response from OpenAI');
-  }
 
   let parsed: ExtractorOutput;
   try {

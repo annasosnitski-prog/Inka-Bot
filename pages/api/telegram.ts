@@ -8,7 +8,7 @@ import { runAdmin } from '../../lib/admin';
 import { mirrorDialog } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { SlotType, AvailableSlot } from '../../lib/calendar';
-import { sendTelegramMessage } from '../../lib/telegramApi';
+import { sendTelegramMessage, forwardTelegramMessage } from '../../lib/telegramApi';
 
 // Master's own Telegram ID — admin/test mode detection.
 // ЗАГЛУШКА на шаге 3-4: admin_mode сейчас просто отвечает заглушкой,
@@ -245,12 +245,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Слоты подгружаем, когда направление выбрано И у нас уже есть
     // телефон клиента (по бизнес-правилу телефон обязателен перед
-    // показом дат — см. ask_phone в state machine). Раньше здесь был
-    // гейт по contact_preference; теперь единый гейт — телефон.
+    // показом дат — см. ask_phone в state machine).
     const hasPhone = !!mergedCard.phone;
     const routeChosen =
       mergedCard.direct_tattoo_allowed === 'yes' || mergedCard.consultation_needed === 'yes';
     const needsFreshSlots = routeChosen && hasPhone;
+
+    // Если первый проход (шаг 4) уже валидно подтвердил бронь по списку,
+    // который РЕАЛЬНО показывали клиенту (mergedCard.slot_options из
+    // Airtable) — не пересчитываем nextStep по свежему топ-3 ниже. Свежий
+    // список мог сдвинуться (конкурентная бронь, новый слот через
+    // /добавить, истёкший lead-time) и случайно не включать тот же самый,
+    // всё ещё свободный слот — тогда getNextStep() на свежем списке ложно
+    // вернул бы slot_taken_pick_again, и bookSlot() ниже вообще не
+    // вызвался бы, хотя слот на деле свободен. Настоящую проверку
+    // занятости делает bookSlot() по конкретному event id, не присутствие
+    // в топ-N. slot_options/slotsDisplay/rawSlots из свежего фетча всё
+    // равно используются ниже (шаг 6) для человекочитаемой даты/времени
+    // брони — если пикнутого id там не найдётся, booked_slot_display
+    // просто останется пустым (Responder уже умеет с этим работать).
+    const alreadyConfirmed =
+      nextStep === 'confirm_slot_awaiting_payment' || nextStep === 'confirm_consultation_booked';
 
     if (needsFreshSlots) {
       const slotType: SlotType = mergedCard.direct_tattoo_allowed === 'yes' ? 'tattoo' : 'consultation';
@@ -259,11 +274,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         liveCard = { ...mergedCard, slot_options: slots.map((s) => s.id) };
         slotsDisplay = slots.map(formatSlotForDisplay);
         rawSlots = slots;
-        nextStep = getNextStep(liveCard, signals);
+        if (!alreadyConfirmed) {
+          nextStep = getNextStep(liveCard, signals);
+        }
       } catch (calErr) {
         console.error('Calendar lookup failed, falling back to no slots:', calErr);
-        liveCard = { ...mergedCard, slot_options: null };
-        nextStep = getNextStep(liveCard, signals);
+        if (!alreadyConfirmed) {
+          liveCard = { ...mergedCard, slot_options: null };
+          nextStep = getNextStep(liveCard, signals);
+        }
       }
     }
 
@@ -442,8 +461,6 @@ function recordToClientCard(
     price_quoted: fields.price_quoted ?? null,
     price_explained: fields.price_explained ?? null,
     wants_to_book: fields.wants_to_book ?? null,
-    contact_preference: fields.contact_preference ?? null,
-    contact_value: fields.contact_value ?? null,
     phone: fields.phone ?? null,
     payment_status: fields.deposit_status ?? null, // колонка в Airtable зовётся deposit_status
     client_type: fields.client_type ?? null,
@@ -486,8 +503,6 @@ function mergeCard(
     consultation_needed: ClientCard['consultation_needed'];
     price_quoted: string | null;
     price_explained: ClientCard['price_explained'];
-    contact_preference: ClientCard['contact_preference'];
-    contact_value: string | null;
     phone: string | null;
   },
   messageFlags: { hasPhotoThisMessage: boolean; photoHasCaption: boolean }
@@ -510,9 +525,6 @@ function mergeCard(
       extracted.consultation_needed ?? current.consultation_needed,
     price_quoted: extracted.price_quoted ?? current.price_quoted,
     price_explained: extracted.price_explained ?? current.price_explained,
-    contact_preference:
-      extracted.contact_preference ?? current.contact_preference,
-    contact_value: extracted.contact_value ?? current.contact_value,
     phone: extracted.phone ?? current.phone,
     has_photo_this_message: messageFlags.hasPhotoThisMessage,
     photo_has_caption: messageFlags.photoHasCaption,
@@ -546,8 +558,6 @@ function clientCardToAirtableFields(
     price_quoted: card.price_quoted,
     price_explained: card.price_explained,
     wants_to_book: card.wants_to_book,
-    contact_preference: card.contact_preference,
-    contact_value: card.contact_value,
     phone: card.phone,
     deposit_status: card.payment_status, // колонка в Airtable зовётся deposit_status
     skin_notes: card.skin_notes,
@@ -586,28 +596,6 @@ function buildMasterNotification(
     default:
       return null;
   }
-}
-
-async function forwardTelegramMessage(
-  toChatId: number,
-  fromChatId: number,
-  messageId: number
-) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) {
-    console.error('TELEGRAM_BOT_TOKEN not set');
-    return;
-  }
-  const url = `https://api.telegram.org/bot${token}/forwardMessage`;
-  await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: toChatId,
-      from_chat_id: fromChatId,
-      message_id: messageId,
-    }),
-  });
 }
 
 // Блок реквизитов предоплаты, собранный из env-переменных. Клиенту

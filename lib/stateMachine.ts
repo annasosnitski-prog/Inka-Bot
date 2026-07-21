@@ -49,7 +49,6 @@ export type Category =
 
 export type YesNo = 'yes' | 'no' | null;
 export type ExistingTattoo = 'no' | 'cover' | 'modification' | 'scar_work' | null;
-export type ContactPreference = 'telegram' | 'whatsapp' | null;
 // waiting_prepayment — слот закреплён, ждём скрин оплаты от клиента.
 // waiting_confirmation — клиент прислал скрин, ждём, что мастер сверит
 //   сумму и подтвердит (бот НЕ подтверждает оплату сам — не может
@@ -86,8 +85,6 @@ export interface ClientCard {
   price_quoted: string | null;
   price_explained: YesNo;
   wants_to_book: YesNo; // явное подтверждение клиента "да, хочу записаться" после цены
-  contact_preference: ContactPreference;
-  contact_value: string | null;
   phone: string | null; // номер телефона клиента для подтверждения брони — спрашивается перед показом дат
   payment_status: PaymentStatus;
   client_type: ClientType;
@@ -135,7 +132,6 @@ export type NextStep =
   | 'quote_price'
   | 'ask_wants_to_book'
   | 'ask_first_tattoo'
-  | 'ask_contact'
   | 'ask_phone'
   | 'show_tattoo_slots'
   | 'show_consultation_slots'

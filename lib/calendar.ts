@@ -452,11 +452,18 @@ export async function getAvailableSlots(type: SlotType, maxResults = 3): Promise
   const data = await response.json();
   const items: any[] = data.items ?? [];
 
-  // Диагностика: логируем что реально вернул календарь, чтобы видеть
-  // в Vercel Logs точные названия событий при отладке несовпадений.
+  // Диагностика: логируем структуру ответа календаря (тег/время/занятость),
+  // чтобы видеть в Vercel Logs причину несовпадений при отладке. НЕ логируем
+  // полный summary — у забронированных слотов туда дописаны имя и телефон
+  // клиента (см. bookSlot), а это письменный лог, не место для персональных
+  // данных.
   console.log(
-    'Calendar events.list raw summaries:',
-    items.map((e) => e.summary)
+    'Calendar events.list raw tags:',
+    items.map((e) => ({
+      tag: tagOf(e.summary ?? ''),
+      start: e.start?.dateTime ?? e.start?.date,
+      busy: BUSY_MARKERS.some((m) => (e.summary ?? '').includes(m)),
+    }))
   );
 
   const { blockedDays, bufferIntervals, blockedConsultationIntervals, blockedTattooIntervals } = computeDayBlockInfo(items);
