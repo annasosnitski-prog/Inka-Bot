@@ -86,6 +86,8 @@ export interface ClientCard {
   price_explained: YesNo;
   wants_to_book: YesNo; // явное подтверждение клиента "да, хочу записаться" после цены
   phone: string | null; // номер телефона клиента для подтверждения брони — спрашивается перед показом дат
+  social_link: string | null; // инста/фейсбук/что угодно, где можно увидеть клиента — необязательно
+  social_asked: YesNo; // уже спрашивали соцсеть? спрашивается ОДИН раз, сразу после телефона, независимо от ответа — не блокирует запись
   payment_status: PaymentStatus;
   client_type: ClientType;
   skin_notes: string | null;
@@ -133,6 +135,7 @@ export type NextStep =
   | 'ask_wants_to_book'
   | 'ask_first_tattoo'
   | 'ask_phone'
+  | 'ask_social'
   | 'show_tattoo_slots'
   | 'show_consultation_slots'
   | 'slot_taken_pick_again'
@@ -346,6 +349,14 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     if (!card.phone) {
       return 'ask_phone';
     }
+    // СОЦСЕТЬ — необязательно, спрашиваем ОДИН раз сразу после телефона
+    // (см. getCardPatchForStep: social_asked проставляется сразу же, как
+    // только этот шаг отдан клиенту, независимо от того, что он ответит
+    // на СЛЕДУЮЩЕМ сообщении). Не блокирует запись, если клиент не
+    // ответил или соцсети нет.
+    if (card.social_asked !== 'yes') {
+      return 'ask_social';
+    }
     if (card.slot_options && card.slot_options.length > 0) {
       return 'show_tattoo_slots';
     }
@@ -358,6 +369,9 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     // запрос на даты брони.
     if (!card.phone) {
       return 'ask_phone';
+    }
+    if (card.social_asked !== 'yes') {
+      return 'ask_social';
     }
     if (card.slot_options && card.slot_options.length > 0) {
       return 'show_consultation_slots';
@@ -385,6 +399,7 @@ export interface CardPatch {
   wants_to_book?: YesNo;
   slot_options?: string[] | null;
   payment_status?: PaymentStatus;
+  social_asked?: YesNo;
 }
 
 export function getCardPatchForStep(
@@ -412,6 +427,11 @@ export function getCardPatchForStep(
     case 'slot_change_requested_waiting':
     case 'no_more_slots_waiting':
       return { ...patch, chosen_slot_id: null, lead_status: 'waiting_slots' };
+    case 'ask_social':
+      // Проставляется СРАЗУ, как только шаг отдан клиенту — не на его
+      // ответ. Спрашиваем ровно один раз: следующее сообщение уже уходит
+      // дальше по воронке независимо от того, дал клиент соцсеть или нет.
+      return { ...patch, social_asked: 'yes' };
     case 'show_tattoo_slots':
     case 'show_consultation_slots':
       return { ...patch, lead_status: 'slots_shown' };

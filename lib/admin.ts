@@ -230,6 +230,7 @@ export function formatInvoice(f: Record<string, any>): string {
   const lines = [
     `🧾 ${who}`,
     f.phone ? `телефон: ${f.phone}` : null,
+    f.social_link ? `соцсеть: ${f.social_link}` : null,
     f.idea ? `идея: ${f.idea}` : null,
     f.size || f.placement ? `размер/место: ${f.size ?? '—'} / ${f.placement ?? '—'}` : null,
     f.category ? `категория: ${f.category}` : null,

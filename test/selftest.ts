@@ -66,6 +66,10 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     existing_tattoo: 'no', direct_tattoo_allowed: 'yes', consultation_needed: 'no',
     active_work_time_estimate: '<=3h', price_quoted: '800₪', price_explained: 'yes',
     wants_to_book: 'yes', phone: null,
+    // social_asked по умолчанию 'yes' в тестовой фабрике — большинство
+    // существующих тестов ходит воронку ПОСЛЕ шага ask_social и не должно
+    // об него спотыкаться; тесты именно на ask_social переопределяют явно.
+    social_link: null, social_asked: 'yes',
     payment_status: null, client_type: '2_reference', skin_notes: null, spam_count: 0,
     chosen_slot_id: null, slot_options: ['ev1', 'ev2'], booked_slot_display: null,
     booked_slot_start_iso: null, payment_reminder_sent: null, photos_count: 0,
@@ -100,6 +104,24 @@ eq('цена есть, wants_to_book null → ask_wants_to_book',
 eq('явный отказ → all_done', step({ wants_to_book: 'no' }), 'all_done');
 eq('первое тату неизвестно → ask_first_tattoo',
   step({ phone: '05011', first_tattoo: null }), 'ask_first_tattoo');
+
+console.log('\n▶ getNextStep — ask_social (соцсеть, необязательно, один раз, сразу после телефона)');
+eq('тату: телефон есть, соцсеть ещё не спрашивали → ask_social',
+  step({ phone: '05011', social_asked: null }), 'ask_social');
+eq('тату: телефон есть, соцсеть уже спрашивали → show_tattoo_slots (не зацикливается)',
+  step({ phone: '05011', social_asked: 'yes' }), 'show_tattoo_slots');
+eq('тату: соцсеть не отвечена (social_link=null), но спрошена → всё равно show_tattoo_slots',
+  step({ phone: '05011', social_asked: 'yes', social_link: null }), 'show_tattoo_slots');
+eq('консультация: телефон есть, соцсеть ещё не спрашивали → ask_social',
+  step({ direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: '05011', social_asked: null }),
+  'ask_social');
+eq('консультация: телефон есть, соцсеть уже спрашивали → show_consultation_slots',
+  step({ direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: '05011', social_asked: 'yes' }),
+  'show_consultation_slots');
+{
+  const patch = getCardPatchForStep('ask_social', baseCard(), sig());
+  eq('патч ask_social: social_asked=yes сразу (fire-and-forget, не ждём ответа)', patch.social_asked, 'yes');
+}
 
 console.log('\n▶ getNextStep — slots shown');
 eq('валидный выбор + телефон → confirm_slot_awaiting_payment',
@@ -163,12 +185,15 @@ ok('расписание: 🔴 занятый', sched.includes('🔴 19:00'));
 ok('расписание: пусто', formatSchedule([]).includes('пусто'));
 
 console.log('\n▶ formatInvoice');
-const inv = formatInvoice({ name: 'Маша', username: 'masha', phone: '0501112233', idea: 'роза', price_quoted: '800₪', deposit_status: 'waiting_confirmation', lead_status: 'tattoo_booked_waiting_payment' });
+const inv = formatInvoice({ name: 'Маша', username: 'masha', phone: '0501112233', social_link: '@masha.tattoo', idea: 'роза', price_quoted: '800₪', deposit_status: 'waiting_confirmation', lead_status: 'tattoo_booked_waiting_payment' });
 ok('счёт: имя+username', inv.includes('Маша') && inv.includes('@masha'));
 ok('счёт: телефон', inv.includes('0501112233'));
+ok('счёт: соцсеть', inv.includes('@masha.tattoo'));
 ok('счёт: цена', inv.includes('800₪'));
 ok('счёт: депозит расшифрован', inv.includes('нужно подтвердить'));
 ok('счёт: статус расшифрован', inv.includes('ждёт предоплату'));
+ok('счёт без соцсети: строка "соцсеть" отсутствует',
+  !formatInvoice({ name: 'Олег', phone: '050', price_quoted: '500₪', lead_status: 'estimated' }).includes('соцсеть'));
 
 console.log('\n▶ isScheduleRequest (естественные фразы про расписание)');
 ok('«что по записям» → true', isScheduleRequest('что по записям'));
