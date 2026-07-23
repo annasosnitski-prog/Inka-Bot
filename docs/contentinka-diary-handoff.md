@@ -148,14 +148,17 @@ ContentINKA могла бы сама скачать фото. **Фото пер�
 
 **Ответ (`source_type: "consultation"`)** — без `role`/`quality_score`/
 `cover_candidate`/`format`/`order_index` (не применимо к референсам, см.
-дизайн-документ):
+дизайн-документ). Значения archetype-полей ниже — условный пример формата
+полей, НЕ результат реального разбора конкретного случая (см. предупреждение
+о повторе тройки в conversation history — за архетипы для каждого
+материала отвечает конкретное содержимое, не шаблон):
 ```json
 {
   "media": [{
     "id": "ref-0",
     "technical_status": "kept",
-    "visual_archetype": "trickster",
-    "text_triad": { "opens": "explorer", "leads": "sage", "closes": "creator" },
+    "visual_archetype": "<один из 7 — по содержимому конкретного кадра>",
+    "text_triad": { "opens": "<...>", "leads": "<...>", "closes": "<...>" },
     "text_draft": "...",
     "master_decision": "pending"
   }]
