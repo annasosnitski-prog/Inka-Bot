@@ -462,6 +462,8 @@ function recordToClientCard(
     price_explained: fields.price_explained ?? null,
     wants_to_book: fields.wants_to_book ?? null,
     phone: fields.phone ?? null,
+    social_link: fields.social_link ?? null,
+    social_asked: fields.social_asked ?? null,
     payment_status: fields.deposit_status ?? null, // колонка в Airtable зовётся deposit_status
     client_type: fields.client_type ?? null,
     skin_notes: fields.skin_notes ?? null,
@@ -504,6 +506,7 @@ function mergeCard(
     price_quoted: string | null;
     price_explained: ClientCard['price_explained'];
     phone: string | null;
+    social_link: string | null;
   },
   messageFlags: { hasPhotoThisMessage: boolean; photoHasCaption: boolean }
 ): ClientCard {
@@ -526,6 +529,7 @@ function mergeCard(
     price_quoted: extracted.price_quoted ?? current.price_quoted,
     price_explained: extracted.price_explained ?? current.price_explained,
     phone: extracted.phone ?? current.phone,
+    social_link: extracted.social_link ?? current.social_link,
     has_photo_this_message: messageFlags.hasPhotoThisMessage,
     photo_has_caption: messageFlags.photoHasCaption,
   };
@@ -559,6 +563,8 @@ function clientCardToAirtableFields(
     price_explained: card.price_explained,
     wants_to_book: card.wants_to_book,
     phone: card.phone,
+    social_link: card.social_link,
+    social_asked: card.social_asked,
     deposit_status: card.payment_status, // колонка в Airtable зовётся deposit_status
     skin_notes: card.skin_notes,
     spam_count: card.spam_count,

@@ -51,6 +51,7 @@ export interface ExtractorOutput {
   price_quoted: string | null;
   price_explained: YesNo;
   phone: string | null;
+  social_link: string | null;
   is_prompt_injection: boolean;
   is_out_of_scope: boolean;
   is_wrong_layout: boolean;
