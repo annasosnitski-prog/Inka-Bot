@@ -12,20 +12,28 @@ localStorage и открытым CORS на принимающей стороне
 
 ## Что уже есть в Дневнике и не нужно строить заново
 
-- **Фото уже загружаются.** `Session.photos: string[]` — компонент
+- **Фото уже загружаются — и у сессий, и у консультаций.**
+  `Session.photos: string[]` и `Consultation.photos: string[]` — компонент
   `SessionPhotos` (`TattoDiary.tsx`), фото читаются через `FileReader` и
   хранятся как **base64 data URL**, не файлы на диске и не URL. Апдейтит их
-  `updateSessionPhotos(sessionId, photos)`. Новую загрузку изобретать не
-  нужно — ContentINKA цепляется к этому же полю.
-- **Триггер «сессия завершена» уже есть.** `Session.done: boolean`. Логичная
-  точка для вызова ContentINKA — переход `done: false → true` (или отдельная
-  кнопка «отправить в контент», решается по месту).
-- **Контекст сессии — реальные поля**, не абстракция:
-  - `client` = `${client.name} ${client.surname}` (из родительского `Client`);
-  - `work` = `session.name`;
-  - `zone` = `session.area`;
-  - `style` = `session.style`;
-  - `description` = `session.note`.
+  `updateSessionPhotos(sessionId, photos)` (и аналог для консультаций).
+  Новую загрузку изобретать не нужно — ContentINKA цепляется к этому же полю.
+- **Триггер — кнопка «Отправить в контент», не флаг.** У `Session.done`
+  нет эквивалента у `Consultation` (запланированная консультация — тоже
+  валидный источник контента, «вот что мы придумываем», не только
+  прошедшая). Единая кнопка в карточке обоих типов, независимо от `done`.
+- **Контекст — два разных маппинга, есть `source_type`:**
+  - `session`: `client` = `${client.name} ${client.surname}`,
+    `work` = `session.name`, `zone` = `session.area`,
+    `style` = `session.style`, `description` = `session.note`.
+  - `consultation`: `client` — тот же, `zone` = `consultation.area`,
+    `style` = `consultation.style`, `description` — конкатенация
+    `generalNotes` + `feeling` + `creative` + `inspirationSources` (полей
+    больше и они конкретнее, чем `note` у сессии).
+  - `generalNotes`/`creative` консультации — сырой личный черновик мастера
+    (поток сознания, может быть с матом), не готовый текст для зрителя.
+    В промпте это нужно явно пометить: извлекать смысл (тему, метафору),
+    не цитировать дословно.
 
 ## Что нужно добавить
 
@@ -34,13 +42,15 @@ localStorage и открытым CORS на принимающей стороне
    своём ключе localStorage (не `inka-calendar-sync`, отдельный — например
    `inka-content-sync`), fetch к ContentINKA с `Authorization: Bearer
    <секрет>`.
-2. **Вызов при завершении сессии** — отправка `session.photos` +
-   контекст (см. выше) в ContentINKA.
-3. **Хранение ответа** — новое поле на `Session` (например
+2. **Кнопка «Отправить в контент»** — в карточке `Session` и в карточке
+   `Consultation`, не привязана к `done`. Отправляет `photos` + контекст +
+   `source_type: "session" | "consultation"` (маппинг полей см. выше).
+3. **Хранение ответа** — новое поле на `Session`/`Consultation` (например
    `contentDraft: ContentMedia[] | null`) для результата классификации;
-   рисуется как окно/вкладка «Контент» внутри карточки сессии (готовый
-   пакет по роли/качеству, ручная панель, строка коммуникации с моделью —
-   см. `contentinka-design.md`).
+   рисуется как окно/вкладка «Контент» внутри карточки (готовый пакет по
+   роли/качеству для сессии, упрощённый — без role/format — для
+   консультации; ручная панель, строка коммуникации с моделью — см.
+   `contentinka-design.md`).
 4. **Отправка инструкций мастера** — при вводе текста в строку
    коммуникации у материала — вызов на ContentINKA с ссылкой на конкретный
    `media.id`.
@@ -72,13 +82,14 @@ ContentINKA могла бы сама скачать фото. **Фото пер�
 
 ## Эндпоинт 1 — `POST /ingest`
 
-Вызывается один раз при завершении сессии (`session.done`), со всеми
-превью сразу.
+Вызывается по кнопке «Отправить в контент» в карточке сессии или
+консультации, со всеми превью сразу.
 
-**Запрос:**
+**Запрос (сессия):**
 ```json
 {
   "session_id": "diary-session-id",
+  "source_type": "session",
   "session": {
     "client": "Александра",
     "work": "Голубика",
@@ -92,14 +103,30 @@ ContentINKA могла бы сама скачать фото. **Фото пер�
   ]
 }
 ```
-- `session_id` — id сессии в Дневнике, сквозной идентификатор (ContentINKA
-  сессию не хранит между вызовами).
+
+**Запрос (консультация)** — тот же эндпоинт, другой `source_type` и другой
+набор полей в `session`:
+```json
+{
+  "session_id": "diary-consultation-id",
+  "source_type": "consultation",
+  "session": {
+    "client": "Валерия",
+    "zone": "Спина",
+    "style": "...",
+    "description": "generalNotes + feeling + creative + inspirationSources, склеенные вместе"
+  },
+  "media": [{ "id": "ref-0", "preview_data_url": "data:image/jpeg;base64,..." }]
+}
+```
+- `session_id` — id записи в Дневнике, сквозной идентификатор (ContentINKA
+  ничего не хранит между вызовами).
 - `media[].id` — стабильный идентификатор фото на стороне Дневника
-  (индекс в `session.photos` или хэш), чтобы сопоставить ответ с
+  (индекс в массиве `photos` или хэш), чтобы сопоставить ответ с
   конкретным элементом массива.
 - `media[].preview_data_url` — сжатое превью (см. выше), не оригинал.
 
-**Ответ:**
+**Ответ (`source_type: "session"`):**
 ```json
 {
   "media": [{
@@ -113,6 +140,22 @@ ContentINKA могла бы сама скачать фото. **Фото пер�
     "order_index": 3,
     "visual_archetype": "lover",
     "text_triad": { "opens": "explorer", "leads": "sage", "closes": "fool" },
+    "text_draft": "...",
+    "master_decision": "pending"
+  }]
+}
+```
+
+**Ответ (`source_type: "consultation"`)** — без `role`/`quality_score`/
+`cover_candidate`/`format`/`order_index` (не применимо к референсам, см.
+дизайн-документ):
+```json
+{
+  "media": [{
+    "id": "ref-0",
+    "technical_status": "kept",
+    "visual_archetype": "trickster",
+    "text_triad": { "opens": "explorer", "leads": "sage", "closes": "creator" },
     "text_draft": "...",
     "master_decision": "pending"
   }]
