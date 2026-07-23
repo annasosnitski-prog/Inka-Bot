@@ -161,8 +161,13 @@ ContentINKA могла бы сама скачать фото. **Фото пер�
 
 ## Глоссарий полей (для UI Дневника)
 
-- `technical_status` — `kept` / `rejected` (дубль или расфокус).
-- `role` — `overview` / `detail` / `process` / `final`.
+- `technical_status` — `kept` (в основной пайплайн) / `background` (смазан,
+  но эстетично — кандидат в фон под текст/подложку, не мусор) / `rejected`
+  (дубль, UI-мусор, или брак настолько сильный, что не годится даже как
+  фон). У `background`-кадров нет `role`/`text_triad` — их отдельно можно
+  показать в Дневнике как «фоны» рядом с основным пакетом.
+- `role` — `overview` / `detail` / `process` / `final` (только для
+  `technical_status: "kept"`).
 - `quality_score` — 0–1, визуальное качество кадра.
 - `has_depth_data` — есть depth/Portrait-данные (iPhone) — кадр гибче.
 - `cover_candidate` — годится в обложку.
