@@ -345,7 +345,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const patch = getCardPatchForStep(nextStep, liveCard, signals);
     const finalCard: ClientCard = { ...liveCard, ...patch };
 
-    // 8. Сохранить в Airtable.
+    // 8. Сохранить в Airtable. Обёрнуто в свой try/catch — тот же принцип,
+    // что уже у календаря (шаг 5) и пинга мастеру (шаг 11): сбой
+    // вторичного шага не должен стоить клиенту ответа. Раньше падение
+    // здесь (например код ссылается на поле, которого ещё нет в таблице —
+    // так и вышло 2026-08-09 с social_link) улетало в общий catch внизу
+    // файла, и клиент не получал вообще ничего. Теперь клиент всё равно
+    // получит ответ на это сообщение — просто состояние карточки не
+    // сохранится и на следующем сообщении подтянется по старым данным.
     const photosCountIncrement = hasPhoto ? 1 : 0;
     const fieldsToSave = clientCardToAirtableFields(finalCard, {
       username,
@@ -354,13 +361,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       photos_count: currentCard.photos_count + photosCountIncrement,
     });
 
-    const { record } = await upsertClient(
-      telegramId,
-      fieldsToSave,
-      { lead_status: finalCard.lead_status, spam_count: 0 }
-    );
-
-    console.log('Airtable saved:', { recordId: record.id, nextStep });
+    try {
+      const { record } = await upsertClient(
+        telegramId,
+        fieldsToSave,
+        { lead_status: finalCard.lead_status, spam_count: 0 }
+      );
+      console.log('Airtable saved:', { recordId: record.id, nextStep });
+    } catch (saveErr) {
+      console.error('Airtable save failed (non-fatal — client still gets a reply for this turn):', saveErr);
+    }
 
     // 9. RESPONDER — написать живой ответ клиенту.
     const replyText = await runResponder({
