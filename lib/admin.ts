@@ -244,6 +244,17 @@ async function handleHistory(msg: AdminMessage, nameArg: string): Promise<string
   return `📜 история переписки — ${who}${note}\n\n${body}`;
 }
 
+function contactChannelLabel(channel: any): string {
+  switch (channel) {
+    case 'telegram':
+      return 'телеграм';
+    case 'whatsapp':
+      return 'вотсап';
+    default:
+      return String(channel);
+  }
+}
+
 function depositLabel(status: any): string {
   switch (status) {
     case 'waiting_prepayment':
@@ -294,6 +305,7 @@ export function formatInvoice(f: Record<string, any>): string {
   const lines = [
     `🧾 ${who}`,
     f.phone ? `телефон: ${f.phone}` : null,
+    f.contact_channel ? `канал связи: ${contactChannelLabel(f.contact_channel)}` : null,
     f.social_link ? `соцсеть: ${f.social_link}` : null,
     f.idea ? `идея: ${f.idea}` : null,
     f.size || f.placement ? `размер/место: ${f.size ?? '—'} / ${f.placement ?? '—'}` : null,
@@ -380,9 +392,9 @@ function humanDate(ymd: string): string {
 async function handleAddSlot(arg: string): Promise<string> {
   if (!arg.trim()) {
     return (
-      'что и когда поставить (только окно/видео — открытый слот для нового клиента)? например:\n' +
+      'что и когда поставить (только окно/чат — открытый слот для нового клиента)? например:\n' +
       '/добавить окно пятница 12:00-14:00\n' +
-      '/добавить видео завтра 10:00-10:30'
+      '/добавить чат завтра 10:00-10:30'
     );
   }
 

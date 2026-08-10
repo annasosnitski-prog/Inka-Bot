@@ -299,7 +299,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const result = await bookSlot(
         signals.client_picked_slot_id,
         slotType,
-        clientLabel,
+        liveCard.client_name || clientLabel,
         liveCard.phone
       );
 
@@ -423,7 +423,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // был лишним и неверным, убран.
     // Обёрнуто в свой try/catch: сбой пинга не должен ломать ответ клиенту.
     try {
-      const masterNote = buildMasterNotification(nextStep, clientLabel, username);
+      const notifyLabel = finalCard.client_name || clientLabel;
+      const masterNote = buildMasterNotification(nextStep, notifyLabel, username);
       if (masterNote) {
         await sendTelegramMessage(MASTER_TELEGRAM_ID, masterNote);
         // Скрин оплаты пересылаем Ане целиком — ей нужно видеть саму
@@ -443,7 +444,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // когда funnel-пинга не было (masterNote = null), чтобы не дублировать.
         await sendTelegramMessage(
           MASTER_TELEGRAM_ID,
-          buildGenericMessagePing(clientLabel, username, lastMessageForRecord)
+          buildGenericMessagePing(notifyLabel, username, lastMessageForRecord)
         );
       }
     } catch (notifyErr) {
@@ -482,6 +483,8 @@ function recordToClientCard(
     price_shown: fields.price_shown ?? null,
     wants_to_book: fields.wants_to_book ?? null,
     phone: fields.phone ?? null,
+    client_name: fields.client_name ?? null,
+    contact_channel: fields.contact_channel ?? null,
     social_link: fields.social_link ?? null,
     social_asked: fields.social_asked ?? null,
     payment_status: fields.deposit_status ?? null, // колонка в Airtable зовётся deposit_status
@@ -526,6 +529,8 @@ function mergeCard(
     price_quoted: string | null;
     price_explained: ClientCard['price_explained'];
     phone: string | null;
+    client_name: string | null;
+    contact_channel: ClientCard['contact_channel'];
     social_link: string | null;
   },
   messageFlags: { hasPhotoThisMessage: boolean; photoHasCaption: boolean }
@@ -549,6 +554,8 @@ function mergeCard(
     price_quoted: extracted.price_quoted ?? current.price_quoted,
     price_explained: extracted.price_explained ?? current.price_explained,
     phone: extracted.phone ?? current.phone,
+    client_name: extracted.client_name ?? current.client_name,
+    contact_channel: extracted.contact_channel ?? current.contact_channel,
     social_link: extracted.social_link ?? current.social_link,
     has_photo_this_message: messageFlags.hasPhotoThisMessage,
     photo_has_caption: messageFlags.photoHasCaption,
@@ -566,7 +573,15 @@ function clientCardToAirtableFields(
 ): Record<string, any> {
   return {
     username: extra.username,
-    name: extra.name,
+    // name — отображаемое имя (используется в /счёт, пингах мастеру,
+    // календаре). Пока клиент сам не назвал имя (client_name), берём
+    // Telegram-профиль как и раньше; как только client_name известно —
+    // оно ПОДМЕНЯЕТ собой отображаемое имя (Telegram first_name не всегда
+    // настоящее). client_name хранится отдельной колонкой — это флаг
+    // "клиент сам подтвердил", не переиспользуем name для этой цели,
+    // иначе ask_name решил бы, что имя уже назвали (см. lib/stateMachine.ts).
+    name: card.client_name || extra.name,
+    client_name: card.client_name,
     last_message: extra.last_message,
     updated_at: new Date().toISOString(),
     intent: card.intent,
@@ -584,6 +599,7 @@ function clientCardToAirtableFields(
     price_shown: card.price_shown,
     wants_to_book: card.wants_to_book,
     phone: card.phone,
+    contact_channel: card.contact_channel,
     social_link: card.social_link,
     social_asked: card.social_asked,
     deposit_status: card.payment_status, // колонка в Airtable зовётся deposit_status

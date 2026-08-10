@@ -49,6 +49,12 @@ export type Category =
 
 export type YesNo = 'yes' | 'no' | null;
 export type ExistingTattoo = 'no' | 'cover' | 'modification' | 'scar_work' | null;
+// Канал, которым мастер будет писать клиенту для чат-консультации ([ЧАТ]-
+// слоты) — спрашивается один раз, сразу после телефона, обязательно (не
+// пропускается, в отличие от social_link). Правило Ани: телефон клиента
+// нужен ВСЕГДА для подтверждения записи, а после него — явно уточнить,
+// в телеграме (том же чате) или в вотсапе (на этот номер) писать.
+export type ContactChannel = 'telegram' | 'whatsapp' | null;
 // waiting_prepayment — слот закреплён, ждём скрин оплаты от клиента.
 // waiting_confirmation — клиент прислал скрин, ждём, что мастер сверит
 //   сумму и подтвердит (бот НЕ подтверждает оплату сам — не может
@@ -87,6 +93,13 @@ export interface ClientCard {
   price_shown: YesNo; // цену реально ПОКАЗАЛИ клиенту (шаг quote_price отработал), не просто посчитали внутри
   wants_to_book: YesNo; // явное подтверждение клиента "да, хочу записаться" после цены
   phone: string | null; // номер телефона клиента для подтверждения брони — спрашивается перед показом дат
+  // Имя, которое клиент НАЗВАЛ САМ — отдельно от Telegram-профиля (first_name
+  // там не всегда настоящее имя: ники, эмодзи, название бизнеса и т.п.).
+  // Обязательно для тату И консультации, спрашивается вместе с телефоном,
+  // если можно — одним сообщением. См. clientCardToAirtableFields — как
+  // только известно, ОНО заменяет собой отображаемое имя (колонка name).
+  client_name: string | null;
+  contact_channel: ContactChannel; // телеграм/вотсап — только для консультации ([ЧАТ]), обязательно, спрашивается сразу после телефона
   social_link: string | null; // инста/фейсбук/что угодно, где можно увидеть клиента — необязательно
   social_asked: YesNo; // уже спрашивали соцсеть? спрашивается ОДИН раз, сразу после телефона, независимо от ответа — не блокирует запись
   payment_status: PaymentStatus;
@@ -136,6 +149,8 @@ export type NextStep =
   | 'ask_wants_to_book'
   | 'ask_first_tattoo'
   | 'ask_phone'
+  | 'ask_name'
+  | 'ask_contact_channel'
   | 'ask_social'
   | 'show_tattoo_slots'
   | 'show_consultation_slots'
@@ -359,6 +374,12 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     if (!card.phone) {
       return 'ask_phone';
     }
+    // ИМЯ — обязательно, как и телефон (Telegram-профиль не годится, см.
+    // ClientCard.client_name). Спрашиваем сразу после телефона, в идеале
+    // одним сообщением с ним (см. responderPrompt.txt: ask_phone).
+    if (!card.client_name) {
+      return 'ask_name';
+    }
     // СОЦСЕТЬ — необязательно, спрашиваем ОДИН раз сразу после телефона
     // (см. getCardPatchForStep: social_asked проставляется сразу же, как
     // только этот шаг отдан клиенту, независимо от того, что он ответит
@@ -379,6 +400,17 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     // запрос на даты брони.
     if (!card.phone) {
       return 'ask_phone';
+    }
+    // ИМЯ — обязательно, как и для тату (см. комментарий в 11a).
+    if (!card.client_name) {
+      return 'ask_name';
+    }
+    // КАНАЛ СВЯЗИ — только для консультации (это [ЧАТ]-слот: мастер сама
+    // пишет клиенту в назначенное время, а не наоборот, как с тату). В
+    // отличие от social_asked это ОБЯЗАТЕЛЬНЫЙ шаг, не пропускается —
+    // без канала мастер не знает, куда писать.
+    if (!card.contact_channel) {
+      return 'ask_contact_channel';
     }
     if (card.social_asked !== 'yes') {
       return 'ask_social';
