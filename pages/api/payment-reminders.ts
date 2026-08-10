@@ -17,6 +17,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { timingSafeEqual } from 'crypto';
 import { findClientsAwaitingPayment, updateClient } from '../../lib/airtable';
 import { sendTelegramMessage } from '../../lib/telegramApi';
+import { getDepositAmount } from '../../lib/paymentConfig';
 
 const MASTER_TELEGRAM_ID = 457343487;
 const REMINDER_WINDOW_HOURS = 36;
@@ -69,7 +70,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         : 'клиент';
       const when = f.booked_slot_display ? f.booked_slot_display : startIso;
 
-      const text = `⏰ ${who} — тату ${when}, а предоплата 200₪ ещё не пришла (осталось ~${Math.round(hoursRemaining)}ч).`;
+      const text = `⏰ ${who} — тату ${when}, а предоплата ${getDepositAmount()}₪ ещё не пришла (осталось ~${Math.round(hoursRemaining)}ч).`;
 
       try {
         await sendTelegramMessage(MASTER_TELEGRAM_ID, text);

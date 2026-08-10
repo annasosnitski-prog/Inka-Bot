@@ -10,13 +10,15 @@ import fs from 'fs';
 import path from 'path';
 import type { ClientCard, NextStep } from './stateMachine';
 import { callOpenAIChat } from './openai';
+import { getDepositAmount } from './paymentConfig';
 
 let cachedPrompt: string | null = null;
 
 function getResponderPrompt(): string {
   if (cachedPrompt) return cachedPrompt;
   const promptPath = path.join(process.cwd(), 'lib', 'responderPrompt.txt');
-  cachedPrompt = fs.readFileSync(promptPath, 'utf-8');
+  const raw = fs.readFileSync(promptPath, 'utf-8');
+  cachedPrompt = raw.replace(/\{\{DEPOSIT\}\}/g, getDepositAmount());
   return cachedPrompt;
 }
 

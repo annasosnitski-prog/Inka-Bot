@@ -42,6 +42,7 @@ import {
 } from './calendar';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from './addSlotParser';
 import { callOpenAIChat } from './openai';
+import { getDepositAmount } from './paymentConfig';
 
 export interface AdminMessage {
   text: string | null;
@@ -246,7 +247,7 @@ async function handleHistory(msg: AdminMessage, nameArg: string): Promise<string
 function depositLabel(status: any): string {
   switch (status) {
     case 'waiting_prepayment':
-      return 'ожидает предоплату 200₪';
+      return `ожидает предоплату ${getDepositAmount()}₪`;
     case 'waiting_confirmation':
       return 'прислал скрин — нужно подтвердить';
     case 'paid':
