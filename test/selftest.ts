@@ -71,6 +71,11 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     // об него спотыкаться; тесты именно на price_shown переопределяют явно.
     price_shown: 'yes',
     wants_to_book: 'yes', phone: null,
+    // contact_channel по умолчанию 'telegram' в тестовой фабрике — та же
+    // причина, что и у social_asked ниже: большинство тестов (в т.ч.
+    // консультационных) ходит воронку ПОСЛЕ этого шага и не должно об него
+    // спотыкаться; тесты именно на ask_contact_channel переопределяют явно.
+    contact_channel: 'telegram',
     // social_asked по умолчанию 'yes' в тестовой фабрике — большинство
     // существующих тестов ходит воронку ПОСЛЕ шага ask_social и не должно
     // об него спотыкаться; тесты именно на ask_social переопределяют явно.
@@ -120,6 +125,16 @@ eq('цена вычислена И показана → едет дальше п
   const patch = getCardPatchForStep('quote_price', baseCard(), sig());
   eq('патч quote_price: price_shown=yes', patch.price_shown, 'yes');
 }
+
+console.log('\n▶ getNextStep — ask_contact_channel (только консультация, обязательно, сразу после телефона)');
+eq('консультация: телефон есть, канал не указан → ask_contact_channel',
+  step({ direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: '05011', contact_channel: null }),
+  'ask_contact_channel');
+eq('консультация: телефон и канал есть → show_consultation_slots (не тормозит на ask_social/канале)',
+  step({ direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: '05011', contact_channel: 'whatsapp' }),
+  'show_consultation_slots');
+eq('тату: канал не указан — НЕ спрашиваем (контакт-канал только для консультации)',
+  step({ phone: '05011', contact_channel: null }), 'show_tattoo_slots');
 
 console.log('\n▶ getNextStep — ask_social (соцсеть, необязательно, один раз, сразу после телефона)');
 eq('тату: телефон есть, соцсеть ещё не спрашивали → ask_social',

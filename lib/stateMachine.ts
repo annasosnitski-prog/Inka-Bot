@@ -49,6 +49,12 @@ export type Category =
 
 export type YesNo = 'yes' | 'no' | null;
 export type ExistingTattoo = 'no' | 'cover' | 'modification' | 'scar_work' | null;
+// Канал, которым мастер будет писать клиенту для чат-консультации ([ЧАТ]-
+// слоты) — спрашивается один раз, сразу после телефона, обязательно (не
+// пропускается, в отличие от social_link). Правило Ани: телефон клиента
+// нужен ВСЕГДА для подтверждения записи, а после него — явно уточнить,
+// в телеграме (том же чате) или в вотсапе (на этот номер) писать.
+export type ContactChannel = 'telegram' | 'whatsapp' | null;
 // waiting_prepayment — слот закреплён, ждём скрин оплаты от клиента.
 // waiting_confirmation — клиент прислал скрин, ждём, что мастер сверит
 //   сумму и подтвердит (бот НЕ подтверждает оплату сам — не может
@@ -87,6 +93,7 @@ export interface ClientCard {
   price_shown: YesNo; // цену реально ПОКАЗАЛИ клиенту (шаг quote_price отработал), не просто посчитали внутри
   wants_to_book: YesNo; // явное подтверждение клиента "да, хочу записаться" после цены
   phone: string | null; // номер телефона клиента для подтверждения брони — спрашивается перед показом дат
+  contact_channel: ContactChannel; // телеграм/вотсап — только для консультации ([ЧАТ]), обязательно, спрашивается сразу после телефона
   social_link: string | null; // инста/фейсбук/что угодно, где можно увидеть клиента — необязательно
   social_asked: YesNo; // уже спрашивали соцсеть? спрашивается ОДИН раз, сразу после телефона, независимо от ответа — не блокирует запись
   payment_status: PaymentStatus;
@@ -136,6 +143,7 @@ export type NextStep =
   | 'ask_wants_to_book'
   | 'ask_first_tattoo'
   | 'ask_phone'
+  | 'ask_contact_channel'
   | 'ask_social'
   | 'show_tattoo_slots'
   | 'show_consultation_slots'
@@ -379,6 +387,13 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     // запрос на даты брони.
     if (!card.phone) {
       return 'ask_phone';
+    }
+    // КАНАЛ СВЯЗИ — только для консультации (это [ЧАТ]-слот: мастер сама
+    // пишет клиенту в назначенное время, а не наоборот, как с тату). В
+    // отличие от social_asked это ОБЯЗАТЕЛЬНЫЙ шаг, не пропускается —
+    // без канала мастер не знает, куда писать.
+    if (!card.contact_channel) {
+      return 'ask_contact_channel';
     }
     if (card.social_asked !== 'yes') {
       return 'ask_social';
