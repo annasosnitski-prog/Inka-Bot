@@ -84,6 +84,7 @@ export interface ClientCard {
   active_work_time_estimate: string | null; // "<=3h" | ">3h" | "unknown" | null
   price_quoted: string | null;
   price_explained: YesNo;
+  price_shown: YesNo; // цену реально ПОКАЗАЛИ клиенту (шаг quote_price отработал), не просто посчитали внутри
   wants_to_book: YesNo; // явное подтверждение клиента "да, хочу записаться" после цены
   phone: string | null; // номер телефона клиента для подтверждения брони — спрашивается перед показом дат
   social_link: string | null; // инста/фейсбук/что угодно, где можно увидеть клиента — необязательно
@@ -314,8 +315,17 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   // category/direct_tattoo_allowed/consultation_needed к этому моменту
   // уже должны быть посчитаны Extractor-ом (по правилам PRICE v1.2) —
   // state machine их не пересчитывает, только проверяет наличие цены.
+  //
+  // ВАЖНО: price_quoted/price_explained Extractor может заполнить "молча"
+  // тем же сообщением, что закрыло idea/placement/size/existing_tattoo —
+  // цена посчитана внутри, но клиенту её ещё никто не называл. Раньше
+  // hasPrice засчитывался сразу и шаг quote_price пропускался целиком —
+  // клиент попадал прямо на "хочешь записаться?", ни разу не услышав
+  // цифру. price_shown отдельно фиксирует, что quote_price реально
+  // отработал (см. getCardPatchForStep) — без него не пропускаем шаг,
+  // даже если цена уже вычислена.
   const hasPrice = !!card.price_quoted || card.price_explained === 'yes';
-  if (!hasPrice) {
+  if (!hasPrice || card.price_shown !== 'yes') {
     return 'quote_price';
   }
 
@@ -400,6 +410,7 @@ export interface CardPatch {
   slot_options?: string[] | null;
   payment_status?: PaymentStatus;
   social_asked?: YesNo;
+  price_shown?: YesNo;
 }
 
 export function getCardPatchForStep(
@@ -432,6 +443,8 @@ export function getCardPatchForStep(
       // ответ. Спрашиваем ровно один раз: следующее сообщение уже уходит
       // дальше по воронке независимо от того, дал клиент соцсеть или нет.
       return { ...patch, social_asked: 'yes' };
+    case 'quote_price':
+      return { ...patch, price_shown: 'yes' };
     case 'show_tattoo_slots':
     case 'show_consultation_slots':
       return { ...patch, lead_status: 'slots_shown' };

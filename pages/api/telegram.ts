@@ -5,7 +5,7 @@ import { getNextStep, getCardPatchForStep } from '../../lib/stateMachine';
 import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
 import { runAdmin } from '../../lib/admin';
-import { mirrorDialog } from '../../lib/dialogLog';
+import { appendDialogTurn } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { SlotType, AvailableSlot } from '../../lib/calendar';
 import { sendTelegramMessage, forwardTelegramMessage } from '../../lib/telegramApi';
@@ -399,13 +399,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       await sendTelegramMessage(chatId, finalReply);
     }
 
-    // 10b. ЖИВОЙ ЛОГ ДИАЛОГА. Зеркалим этот обмен репликами (клиент + Инка)
-    // в топик супергруппы мастера — Аня видит переписку в реальном времени
-    // отдельно от рабочего чата с ботом. Вызывается ПОСЛЕ отправки ответа
-    // клиенту, чтобы задержка логирования не влияла на его получение.
-    // Полностью опционально (без TELEGRAM_LOG_GROUP_ID — no-op) и никогда
-    // не бросает исключение.
-    await mirrorDialog(existing, clientLabel, lastMessageForRecord, finalReply);
+    // 10b. ЛОГ ДИАЛОГА. Дописываем этот обмен репликами (клиент + Инка) в
+    // историю клиента в Airtable — Аня поднимает её командой /история.
+    // Вызывается ПОСЛЕ отправки ответа клиенту, чтобы задержка логирования
+    // не влияла на его получение. Никогда не бросает исключение.
+    await appendDialogTurn(existing, lastMessageForRecord, finalReply);
 
     // 11. ПИНГ МАСТЕРУ. Некоторые шаги обещают клиенту "передала мастеру"
     // или требуют действия Ани (подтвердить оплату, назначить перенос,
@@ -470,6 +468,7 @@ function recordToClientCard(
     active_work_time_estimate: fields.active_work_time_estimate ?? null,
     price_quoted: fields.price_quoted ?? null,
     price_explained: fields.price_explained ?? null,
+    price_shown: fields.price_shown ?? null,
     wants_to_book: fields.wants_to_book ?? null,
     phone: fields.phone ?? null,
     social_link: fields.social_link ?? null,
@@ -571,6 +570,7 @@ function clientCardToAirtableFields(
     consultation_needed: card.consultation_needed,
     price_quoted: card.price_quoted,
     price_explained: card.price_explained,
+    price_shown: card.price_shown,
     wants_to_book: card.wants_to_book,
     phone: card.phone,
     social_link: card.social_link,
