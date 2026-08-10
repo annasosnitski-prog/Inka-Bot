@@ -434,6 +434,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ) {
           await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
         }
+      } else if (pingOnEveryMessage()) {
+        // 11b. РЕЖИМ ПЕРВЫХ ЖИВЫХ ТЕСТОВ (env PING_MASTER_ON_ALL_MESSAGES=1).
+        // Аня хочет знать про КАЖДОЕ сообщение клиента, а не только про
+        // шаги воронки из buildMasterNotification — чтобы следить за
+        // диалогом в реальном времени, не сидя в Airtable. Шлём только
+        // когда funnel-пинга не было (masterNote = null), чтобы не дублировать.
+        await sendTelegramMessage(
+          MASTER_TELEGRAM_ID,
+          buildGenericMessagePing(clientLabel, username, lastMessageForRecord)
+        );
       }
     } catch (notifyErr) {
       console.error('Master notification failed:', notifyErr);
@@ -612,6 +622,22 @@ function buildMasterNotification(
     default:
       return null;
   }
+}
+
+// Включён ли режим "пинговать мастера на каждое сообщение клиента" —
+// для первых живых тестов, пока Аня хочет следить за всеми диалогами,
+// а не только за шагами воронки. Управляется env-переменной, чтобы
+// включать/выключать без деплоя кода: PING_MASTER_ON_ALL_MESSAGES=1.
+function pingOnEveryMessage(): boolean {
+  return process.env.PING_MASTER_ON_ALL_MESSAGES === '1';
+}
+
+// Короткий пинг "пришло сообщение от клиента" — для режима первых живых
+// тестов (см. pingOnEveryMessage). Не заменяет buildMasterNotification,
+// а дополняет его на шагах, которые сами по себе внимания не требуют.
+function buildGenericMessagePing(clientLabel: string, username: string, messageText: string): string {
+  const who = username ? `${clientLabel} (@${username})` : clientLabel;
+  return `📩 ${who}: ${messageText}`;
 }
 
 // Блок реквизитов предоплаты, собранный из env-переменных. Клиенту
