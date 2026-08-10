@@ -9,6 +9,7 @@
 // Возможности v1:
 //   /счёт  [имя|пересылка]  — сводка по клиенту: идея, цена, предоплата
 //   /портрет [имя|пересылка] — психологический портрет + подготовка (LLM)
+//   /история [имя|пересылка] — вся переписка клиент↔Инка текстом
 //   /расписание [сегодня|неделя|месяц] — календарь Ани из Google
 //   всё остальное — свободный диалог (LLM-ассистент)
 //
@@ -25,6 +26,7 @@ import {
   upsertClient,
   type ClientRecord,
 } from './airtable';
+import { parseDialogHistory, formatDialogHistory } from './dialogLog';
 import {
   getSchedule,
   formatSchedule,
@@ -55,6 +57,7 @@ export interface AdminResult {
 
 const INVOICE_CMDS = ['/счёт', '/счет', '/invoice', 'счёт', 'счет'];
 const PORTRAIT_CMDS = ['/портрет', '/portrait', 'портрет'];
+const HISTORY_CMDS = ['/история', '/history', 'история'];
 const SCHEDULE_CMDS = ['/расписание', '/schedule', 'расписание'];
 const ADD_SLOT_CMDS = ['/добавить', '/добавь', '/add', 'добавить', 'добавь'];
 const CLOSE_SLOT_CMDS = ['/закрой', '/закрыть', 'закрой', 'закрыть', '/close', 'close'];
@@ -98,6 +101,9 @@ export async function runAdmin(msg: AdminMessage): Promise<AdminResult> {
   }
   if (PORTRAIT_CMDS.includes(firstWord)) {
     return { reply: await handlePortrait(msg, rest) };
+  }
+  if (HISTORY_CMDS.includes(firstWord)) {
+    return { reply: await handleHistory(msg, rest) };
   }
   if (SCHEDULE_CMDS.includes(firstWord)) {
     return { reply: await handleSchedule(rest) };
@@ -188,6 +194,47 @@ async function handleInvoice(msg: AdminMessage, nameArg: string): Promise<string
     return ambiguousList(t.records);
   }
   return formatInvoice(t.record.fields);
+}
+
+// ----------------------------------------------------------
+// /история — вся переписка клиент↔Инка текстом (из Airtable, не из
+// Telegram — не зависит от того, состоит ли Аня в каких-либо группах).
+// ----------------------------------------------------------
+
+// Telegram режет исходящие сообщения длиннее 4096 символов молча (см.
+// telegramApi.ts) — запас берём с учётом заголовка/пометки об обрезке и
+// того, что 👤/🤖 считаются двумя UTF-16 юнитами каждый.
+const HISTORY_TEXT_SAFE_LIMIT = 3800;
+
+async function handleHistory(msg: AdminMessage, nameArg: string): Promise<string> {
+  const t = await resolveTarget(msg, nameArg);
+  if (t.kind === 'no_query') {
+    return 'чью историю показать? перешли сообщение клиента боту или напиши: /история Имя';
+  }
+  if (t.kind === 'none') {
+    return 'не нашла такого клиента в базе. проверь имя или перешли его сообщение боту.';
+  }
+  if (t.kind === 'ambiguous') {
+    return ambiguousList(t.records);
+  }
+  const entries = parseDialogHistory(t.record);
+  if (entries.length === 0) {
+    return 'переписки с этим клиентом пока нет.';
+  }
+
+  // Если вся история не влезает в одно сообщение Telegram — показываем
+  // хвост (последние реплики), явно пометив, что старые обрезаны, а не
+  // молча теряем часть текста где попало.
+  let shown = entries;
+  let body = formatDialogHistory(shown);
+  while (body.length > HISTORY_TEXT_SAFE_LIMIT && shown.length > 1) {
+    shown = shown.slice(1);
+    body = formatDialogHistory(shown);
+  }
+
+  const who = t.record.fields.name ?? t.record.fields.username ?? 'клиент';
+  const note = shown.length < entries.length ? ` (последние ${shown.length} из ${entries.length})` : '';
+  return `📜 история переписки — ${who}${note}\n\n${body}`;
 }
 
 function depositLabel(status: any): string {

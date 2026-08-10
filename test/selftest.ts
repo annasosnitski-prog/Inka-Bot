@@ -38,7 +38,7 @@ import {
   type AvailableSlot,
 } from '../lib/calendar';
 import { formatInvoice, isScheduleRequest } from '../lib/admin';
-import { buildMirrorText } from '../lib/dialogLog';
+import { formatDialogHistory, type DialogEntry } from '../lib/dialogLog';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from '../lib/addSlotParser';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
 
@@ -65,6 +65,10 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     idea: 'роза', size: '10см', placement: 'предплечье', first_tattoo: 'yes',
     existing_tattoo: 'no', direct_tattoo_allowed: 'yes', consultation_needed: 'no',
     active_work_time_estimate: '<=3h', price_quoted: '800₪', price_explained: 'yes',
+    // price_shown по умолчанию 'yes' в тестовой фабрике, как и social_asked
+    // ниже — большинство тестов ходит воронку ПОСЛЕ quote_price и не должно
+    // об него спотыкаться; тесты именно на price_shown переопределяют явно.
+    price_shown: 'yes',
     wants_to_book: 'yes', phone: null,
     // social_asked по умолчанию 'yes' в тестовой фабрике — большинство
     // существующих тестов ходит воронку ПОСЛЕ шага ask_social и не должно
@@ -104,6 +108,17 @@ eq('цена есть, wants_to_book null → ask_wants_to_book',
 eq('явный отказ → all_done', step({ wants_to_book: 'no' }), 'all_done');
 eq('первое тату неизвестно → ask_first_tattoo',
   step({ phone: '05011', first_tattoo: null }), 'ask_first_tattoo');
+
+console.log('\n▶ getNextStep — price_shown (цену Extractor мог посчитать молча в этом же сообщении,');
+console.log('  но клиенту её ещё никто не называл — баг из реальной переписки, 09.08.2026)');
+eq('цена вычислена, но не показана → quote_price (не пропускаем шаг)',
+  step({ price_shown: null }), 'quote_price');
+eq('цена вычислена И показана → едет дальше по воронке как раньше',
+  step({ price_shown: 'yes', phone: null }), 'ask_phone');
+{
+  const patch = getCardPatchForStep('quote_price', baseCard(), sig());
+  eq('патч quote_price: price_shown=yes', patch.price_shown, 'yes');
+}
 
 console.log('\n▶ getNextStep — ask_social (соцсеть, необязательно, один раз, сразу после телефона)');
 eq('тату: телефон есть, соцсеть ещё не спрашивали → ask_social',
@@ -211,15 +226,15 @@ ok(
   )
 );
 
-console.log('\n▶ buildMirrorText (лог живого диалога)');
-eq('оба есть → 👤+🤖 через пустую строку',
-  buildMirrorText('хочу тату', 'супер, расскажи подробнее'),
+console.log('\n▶ formatDialogHistory (история диалога для /история)');
+const histEntries: DialogEntry[] = [
+  { from: 'client', text: 'хочу тату', ts: '2026-08-09T20:00:00.000Z' },
+  { from: 'inka', text: 'супер, расскажи подробнее', ts: '2026-08-09T20:00:01.000Z' },
+];
+eq('клиент + инка через пустую строку',
+  formatDialogHistory(histEntries),
   '👤 хочу тату\n\n🤖 супер, расскажи подробнее');
-eq('только клиент (Инка ещё не ответила)',
-  buildMirrorText('хочу тату', null), '👤 хочу тату');
-eq('только Инка (silence_blocked — клиент промолчал)',
-  buildMirrorText(null, 'привет!'), '🤖 привет!');
-eq('оба пустые → null', buildMirrorText(null, null), null as any);
+eq('пустая история → пустая строка', formatDialogHistory([]), '');
 
 console.log('\n▶ parseAddSlotCommand (Шаг 3 — /добавить, детерминированный разбор)');
 // "сейчас" зафиксировано на понедельник 13.07.2026, 13:00 Israel time
