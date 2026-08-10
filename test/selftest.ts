@@ -257,20 +257,21 @@ function expectFail(name: string, text: string) {
 }
 
 // Старые слова (walkin/online) остаются синонимами при ВВОДЕ, но теперь
-// мапятся на новые голосо-удобные канонические теги [ОКНО]/[ВИДЕО].
+// мапятся на новые голосо-удобные канонические теги [ОКНО]/[ЧАТ].
 expectOk('walkin пятница (старое слово → новый тег)', 'walkin пятница 12:00-14:00', { tag: '[ОКНО]', date: '2026-07-17', startTime: '12:00', endTime: '14:00' });
 expectOk('вокин через дефис', 'вок-ин пятница 12-14', { tag: '[ОКНО]', date: '2026-07-17', startTime: '12:00', endTime: '14:00' });
 expectOk('олкин (гарантированная опечатка диктовки)', 'олкин пятница 12:00-14:00', { tag: '[ОКНО]', date: '2026-07-17', startTime: '12:00', endTime: '14:00' });
 expectOk('окно — новое канонич. слово', 'окно пятница 12:00-14:00', { tag: '[ОКНО]', date: '2026-07-17', startTime: '12:00', endTime: '14:00' });
-expectOk('online завтра (старое слово → новый тег)', 'online завтра 10:00-10:30', { tag: '[ВИДЕО]', date: '2026-07-14', startTime: '10:00', endTime: '10:30' });
-expectOk('видео — новое канонич. слово', 'видео завтра 10:00-10:30', { tag: '[ВИДЕО]', date: '2026-07-14', startTime: '10:00', endTime: '10:30' });
-expectOk('онлайн приоритетнее приём', 'консультация онлайн завтра 09:00-09:30', { tag: '[ВИДЕО]', date: '2026-07-14', startTime: '09:00', endTime: '09:30' });
+expectOk('online завтра (старое слово → новый тег)', 'online завтра 10:00-10:30', { tag: '[ЧАТ]', date: '2026-07-14', startTime: '10:00', endTime: '10:30' });
+expectOk('видео завтра (старое слово тега [ВИДЕО] → [ЧАТ])', 'видео завтра 10:00-10:30', { tag: '[ЧАТ]', date: '2026-07-14', startTime: '10:00', endTime: '10:30' });
+expectOk('чат — новое канонич. слово', 'чат завтра 10:00-10:30', { tag: '[ЧАТ]', date: '2026-07-14', startTime: '10:00', endTime: '10:30' });
+expectOk('онлайн приоритетнее приём', 'консультация онлайн завтра 09:00-09:30', { tag: '[ЧАТ]', date: '2026-07-14', startTime: '09:00', endTime: '09:30' });
 expectOk('walkin явная дата', 'walkin 20.07 15:00-18:00', { tag: '[ОКНО]', date: '2026-07-20', startTime: '15:00', endTime: '18:00' });
 expectOk('walkin дата словом', 'walkin 20 июля 15:00-18:00', { tag: '[ОКНО]', date: '2026-07-20', startTime: '15:00', endTime: '18:00' });
 expectOk('сегодня = день недели (понедельник)', 'walkin понедельник 12:00-13:00', { tag: '[ОКНО]', date: '2026-07-13', startTime: '12:00', endTime: '13:00' });
-expectOk('сегодня явно', 'online сегодня 18:00-18:30', { tag: '[ВИДЕО]', date: '2026-07-13', startTime: '18:00', endTime: '18:30' });
+expectOk('сегодня явно', 'online сегодня 18:00-18:30', { tag: '[ЧАТ]', date: '2026-07-13', startTime: '18:00', endTime: '18:30' });
 expectOk('послезавтра', 'walkin послезавтра 11-12', { tag: '[ОКНО]', date: '2026-07-15', startTime: '11:00', endTime: '12:00' });
-expectOk('воскресенье (после пятницы)', 'онлайн воскресенье 09:00-09:20', { tag: '[ВИДЕО]', date: '2026-07-19', startTime: '09:00', endTime: '09:20' });
+expectOk('воскресенье (после пятницы)', 'онлайн воскресенье 09:00-09:20', { tag: '[ЧАТ]', date: '2026-07-19', startTime: '09:00', endTime: '09:20' });
 expectOk('«с 12 до 14»', 'walkin пятница с 12 до 14', { tag: '[ОКНО]', date: '2026-07-17', startTime: '12:00', endTime: '14:00' });
 expectOk('явная дата в прошлом года без года → следующий год', 'walkin 01.01 10:00-11:00', { tag: '[ОКНО]', date: '2027-01-01', startTime: '10:00', endTime: '11:00' });
 
@@ -278,7 +279,7 @@ expectOk('явная дата в прошлом года без года → с�
 // короткие 2-буквенные аббревиатуры дней недели остались непроверенными
 // в первой версии тестов и не поймали баг сразу.
 expectOk('короткая аббревиатура «вт» (вторник)', 'walkin вт 09:00-10:00', { tag: '[ОКНО]', date: '2026-07-14', startTime: '09:00', endTime: '10:00' });
-expectOk('короткая аббревиатура «сб» (суббота)', 'online сб 11:00-11:30', { tag: '[ВИДЕО]', date: '2026-07-18', startTime: '11:00', endTime: '11:30' });
+expectOk('короткая аббревиатура «сб» (суббота)', 'online сб 11:00-11:30', { tag: '[ЧАТ]', date: '2026-07-18', startTime: '11:00', endTime: '11:30' });
 // "послезавтра" содержит подстроку "завтра" — не должно её перебивать.
 expectOk('послезавтра не путается с завтра', 'walkin послезавтра 08:00-09:00', { tag: '[ОКНО]', date: '2026-07-15', startTime: '08:00', endTime: '09:00' });
 
@@ -366,17 +367,17 @@ ok('блок: банк', block.includes('Hapoalim 12-345-678901'));
 ok('блок: просьба скрина', block.toLowerCase().includes('скрин'));
 
 console.log('\n▶ 4 тега слотов — подбор / распознавание / маркеры');
-// tagsForRequest: боту клиенту можно предложить ТОЛЬКО ОКНО/ВИДЕО —
+// tagsForRequest: боту клиенту можно предложить ТОЛЬКО ОКНО/ЧАТ —
 // [ТАТУ]/[ПРИЁМ] это Дневник-сессии мастера, никогда не оффер клиенту.
 ok('тату → только [ОКНО]', JSON.stringify(tagsForRequest('tattoo')) === JSON.stringify(['[ОКНО]']));
-ok('консультация → только [ВИДЕО]', JSON.stringify(tagsForRequest('consultation')) === JSON.stringify(['[ВИДЕО]']));
+ok('консультация → только [ЧАТ]', JSON.stringify(tagsForRequest('consultation')) === JSON.stringify(['[ЧАТ]']));
 // tagOf: распознавание тега по названию события
 eq('tagOf [ОКНО]', tagOf('[ОКНО] окно с 12'), '[ОКНО]');
-eq('tagOf [ВИДЕО]', tagOf(' [ВИДЕО] вечер'), '[ВИДЕО]');
+eq('tagOf [ЧАТ]', tagOf(' [ЧАТ] вечер'), '[ЧАТ]');
 eq('tagOf личное событие → null', tagOf('зубной'), null as any);
 eq('tagOf [ПРИЁМ ОНЛАЙН... ≠ [ПРИЁМ]', tagOf('[ПРИЁМ ОНЛАЙН] старое'), null as any);
 // подписи формата для клиента
-eq('label видео', tagDisplayLabel('[ВИДЕО]'), ' (онлайн)');
+eq('label чат', tagDisplayLabel('[ЧАТ]'), ' (по переписке)');
 eq('label приём', tagDisplayLabel('[ПРИЁМ]'), ' (в студии)');
 eq('label окно', tagDisplayLabel('[ОКНО]'), ' (walk-in)');
 eq('label тату — пусто', tagDisplayLabel('[ТАТУ]'), '');
@@ -387,7 +388,7 @@ ok('дисплей слота содержит (walk-in)', formatSlotForDisplay(
 // объёма переименования тегов, остаются как есть).
 eq('бронь [ТАТУ] → ОЖИДАЕТ ПРЕДОПЛАТЫ', busyMarkerForTag('[ТАТУ]', 'tattoo'), 'ОЖИДАЕТ ПРЕДОПЛАТЫ');
 eq('бронь [ОКНО] → ОЖИДАЕТ ПРЕДОПЛАТЫ', busyMarkerForTag('[ОКНО]', 'tattoo'), 'ОЖИДАЕТ ПРЕДОПЛАТЫ');
-eq('бронь [ВИДЕО] → КОНС ОНЛАЙН', busyMarkerForTag('[ВИДЕО]', 'consultation'), 'КОНС ОНЛАЙН');
+eq('бронь [ЧАТ] → КОНС ЧАТ', busyMarkerForTag('[ЧАТ]', 'consultation'), 'КОНС ЧАТ');
 eq('бронь очного [ПРИЁМ] → КОНС ЗАПИСЬ', busyMarkerForTag('[ПРИЁМ]', 'consultation'), 'КОНС ЗАПИСЬ');
 
 console.log('\n▶ diary sync — event id / summary / description / end time');
@@ -415,10 +416,10 @@ eq('конец: 14:30 + 120 мин = 16:30', computeEndNaive('2026-07-08', '14:3
 eq('конец: 23:30 + 60 мин = 00:30 след. дня', computeEndNaive('2026-07-08', '23:30', 60), '2026-07-09T00:30:00');
 
 console.log('\n▶ isBotBooking — обратный поток в Дневник: бронь от бота vs своя из Дневника');
-// Реальная бронь бота — любой тег, не только ВИДЕО/ОКНО.
+// Реальная бронь бота — любой тег, не только ЧАТ/ОКНО.
 ok('тату-бронь бота (через /добавить + клиент) — бот', isBotBooking('[ТАТУ] ОЖИДАЕТ ПРЕДОПЛАТЫ — Мария, +972501234567'));
 ok('приём-бронь бота очная — бот', isBotBooking('[ПРИЁМ] КОНС ЗАПИСЬ — Олег'));
-ok('видео-приём бота — бот', isBotBooking('[ВИДЕО] КОНС ОНЛАЙН — Оля'));
+ok('чат-приём бота — бот', isBotBooking('[ЧАТ] КОНС ЧАТ — Оля'));
 ok('окно-бронь бота — бот', isBotBooking('[ОКНО] ОЖИДАЕТ ПРЕДОПЛАТЫ — Игорь'));
 // Свои события из Дневника (маркер ЗАНЯТО) — не бронь бота, не дублируем обратно.
 ok('тату из Дневника — не бронь бота', !isBotBooking(buildDiaryEventSummary('tattoo', 'Мария', 'большая')));
@@ -488,9 +489,9 @@ console.log('\n▶ familyOfTag / tagsInFamily — группировка тег�
 eq('ТАТУ → tattoo', familyOfTag('[ТАТУ]'), 'tattoo');
 eq('ОКНО → tattoo', familyOfTag('[ОКНО]'), 'tattoo');
 eq('ПРИЁМ → consultation', familyOfTag('[ПРИЁМ]'), 'consultation');
-eq('ВИДЕО → consultation', familyOfTag('[ВИДЕО]'), 'consultation');
+eq('ЧАТ → consultation', familyOfTag('[ЧАТ]'), 'consultation');
 ok('tagsInFamily(tattoo) содержит оба', tagsInFamily('tattoo').includes('[ТАТУ]') && tagsInFamily('tattoo').includes('[ОКНО]'));
-ok('tagsInFamily(consultation) содержит оба', tagsInFamily('consultation').includes('[ПРИЁМ]') && tagsInFamily('consultation').includes('[ВИДЕО]'));
+ok('tagsInFamily(consultation) содержит оба', tagsInFamily('consultation').includes('[ПРИЁМ]') && tagsInFamily('consultation').includes('[ЧАТ]'));
 
 console.log('\n▶ computeDayBlockInfo — блокировки мастера через /закрой (MASTER_CLOSED_MARKER)');
 // /закрой конс — только указанное окно, только консультация (не весь день).
