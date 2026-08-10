@@ -41,6 +41,7 @@ import { formatInvoice, isScheduleRequest } from '../lib/admin';
 import { formatDialogHistory, type DialogEntry } from '../lib/dialogLog';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from '../lib/addSlotParser';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
+import { getDepositAmount } from '../lib/paymentConfig';
 
 let passed = 0;
 let failed = 0;
@@ -345,6 +346,13 @@ console.log('\n▶ parseDeleteCommand (/удалить)');
 }
 ok('нет тега вообще: fail', parseDeleteCommand('20.07', NOW).ok === false);
 ok('нет даты: fail', parseDeleteCommand('тату', NOW).ok === false);
+
+console.log('\n▶ getDepositAmount');
+delete process.env.PAYMENT_DEPOSIT_AMOUNT;
+ok('нет env → дефолт 200', getDepositAmount() === '200');
+process.env.PAYMENT_DEPOSIT_AMOUNT = '350';
+ok('env задан → берёт из env', getDepositAmount() === '350');
+delete process.env.PAYMENT_DEPOSIT_AMOUNT;
 
 console.log('\n▶ buildPaymentDetailsBlock');
 delete process.env.PAYMENT_BIT; delete process.env.PAYMENT_BANK;

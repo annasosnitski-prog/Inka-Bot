@@ -9,6 +9,7 @@ import { appendDialogTurn } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { SlotType, AvailableSlot } from '../../lib/calendar';
 import { sendTelegramMessage, forwardTelegramMessage } from '../../lib/telegramApi';
+import { getDepositAmount } from '../../lib/paymentConfig';
 
 // Master's own Telegram ID — admin/test mode detection.
 // ЗАГЛУШКА на шаге 3-4: admin_mode сейчас просто отвечает заглушкой,
@@ -609,7 +610,7 @@ function buildMasterNotification(
   const who = username ? `${clientLabel} (@${username})` : clientLabel;
   switch (step) {
     case 'confirm_slot_awaiting_payment':
-      return `🎨 Новая бронь ТАТУ — ${who}. Слот закреплён, клиент ждёт реквизиты для предоплаты 200₪.`;
+      return `🎨 Новая бронь ТАТУ — ${who}. Слот закреплён, клиент ждёт реквизиты для предоплаты ${getDepositAmount()}₪.`;
     case 'confirm_consultation_booked':
       return `🗓 Новая КОНСУЛЬТАЦИЯ — ${who}. Слот забронирован.`;
     case 'payment_screenshot_received':
@@ -653,7 +654,7 @@ export function buildPaymentDetailsBlock(): string | null {
     return null;
   }
 
-  const lines = ['реквизиты для предоплаты 200₪ (на выбор):'];
+  const lines = [`реквизиты для предоплаты ${getDepositAmount()}₪ (на выбор):`];
   if (bit) lines.push(`📱 Bit: ${bit}`);
   if (bank) lines.push(`🏦 банковский перевод: ${bank}`);
   lines.push('после оплаты пришли, пожалуйста, скрин 🙏');
