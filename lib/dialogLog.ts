@@ -37,6 +37,23 @@ export function parseDialogHistory(record: ClientRecord | null): DialogEntry[] {
   }
 }
 
+// Отличает «истории правда нет» от «поле dialog_history есть, но не
+// разбирается» (например кто-то вписал в Long text не-JSON вручную —
+// appendDialogTurn всегда пишет валидный JSON, значит проблема снаружи
+// обычного потока). parseDialogHistory в обоих случаях тихо отдаёт [] —
+// это ок для самого лога (появится валидный JSON со следующим обменом),
+// но команде /история важно не соврать мастеру, что переписки не было.
+export function hasUnparsableDialogHistory(record: ClientRecord | null): boolean {
+  const raw = record?.fields?.dialog_history;
+  if (!raw || typeof raw !== 'string') return false;
+  try {
+    const parsed = JSON.parse(raw);
+    return !Array.isArray(parsed);
+  } catch {
+    return true;
+  }
+}
+
 // Дописывает один обмен репликами (клиент + Инка) в историю и сохраняет
 // в Airtable. Вызывается ПОСЛЕ отправки ответа клиенту — никогда не
 // бросает исключение наружу, сбой логирования не должен ломать основной

@@ -29,7 +29,7 @@ import {
   upsertClient,
   type ClientRecord,
 } from './airtable';
-import { parseDialogHistory, formatDialogHistory } from './dialogLog';
+import { parseDialogHistory, formatDialogHistory, hasUnparsableDialogHistory } from './dialogLog';
 import {
   getSchedule,
   formatSchedule,
@@ -222,6 +222,9 @@ async function handleHistory(msg: AdminMessage, nameArg: string): Promise<string
   }
   const entries = parseDialogHistory(t.record);
   if (entries.length === 0) {
+    if (hasUnparsableDialogHistory(t.record)) {
+      return 'в dialog_history этого клиента что-то есть, но не в ожидаемом формате (не JSON) — глянь поле вручную в Airtable.';
+    }
     return 'переписки с этим клиентом пока нет.';
   }
 
