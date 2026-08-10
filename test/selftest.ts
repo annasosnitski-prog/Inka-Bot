@@ -71,6 +71,11 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     // об него спотыкаться; тесты именно на price_shown переопределяют явно.
     price_shown: 'yes',
     wants_to_book: 'yes', phone: null,
+    // client_name по умолчанию задано в тестовой фабрике — та же причина,
+    // что и у остальных "спрошено один раз" полей ниже: большинство тестов
+    // ходит воронку ПОСЛЕ ask_name и не должно об него спотыкаться; тесты
+    // именно на ask_name переопределяют явно.
+    client_name: 'Тест',
     // contact_channel по умолчанию 'telegram' в тестовой фабрике — та же
     // причина, что и у social_asked ниже: большинство тестов (в т.ч.
     // консультационных) ходит воронку ПОСЛЕ этого шага и не должно об него
@@ -125,6 +130,18 @@ eq('цена вычислена И показана → едет дальше п
   const patch = getCardPatchForStep('quote_price', baseCard(), sig());
   eq('патч quote_price: price_shown=yes', patch.price_shown, 'yes');
 }
+
+console.log('\n▶ getNextStep — ask_name (обязательно и для тату, и для консультации, сразу после телефона)');
+eq('тату: телефон есть, имя не названо → ask_name',
+  step({ phone: '05011', client_name: null }), 'ask_name');
+eq('тату: телефон и имя есть → show_tattoo_slots',
+  step({ phone: '05011', client_name: 'Маша' }), 'show_tattoo_slots');
+eq('консультация: телефон есть, имя не названо → ask_name (раньше канала связи)',
+  step({ direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: '05011', client_name: null }),
+  'ask_name');
+eq('консультация: имя есть, канал не указан → ask_contact_channel (не ask_name)',
+  step({ direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: '05011', client_name: 'Оля', contact_channel: null }),
+  'ask_contact_channel');
 
 console.log('\n▶ getNextStep — ask_contact_channel (только консультация, обязательно, сразу после телефона)');
 eq('консультация: телефон есть, канал не указан → ask_contact_channel',
