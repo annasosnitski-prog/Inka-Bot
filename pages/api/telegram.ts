@@ -378,7 +378,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       nextStep,
       clientCard: finalCard,
       lastClientMessage: messageText,
-      manualMode: false,
       slotsDisplay,
     });
 
