@@ -158,6 +158,7 @@ export type NextStep =
   | 'unclear_slot_choice'
   | 'slot_change_requested_waiting'
   | 'no_more_slots_waiting'
+  | 'waiting_slots_followup_chat'
   | 'reschedule_requested_ping_master'
   | 'confirm_slot_awaiting_payment'
   | 'confirm_consultation_booked'
@@ -255,6 +256,31 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
       return 'payment_screenshot_received';
     }
     return 'booked_followup_chat';
+  }
+
+  // 5b. КЛИЕНТ УЖЕ В ЛИСТЕ ОЖИДАНИЯ (waiting_slots/waiting_slots_pinged).
+  // Раньше любое следующее сообщение клиента (даже простое "ок спасибо")
+  // заново прогонялось по всей воронке и упиралось в тот же no_more_slots_
+  // waiting — бот дословно (или почти дословно) повторял "подходящих
+  // окошек нет" на каждую реплику, что выглядело как баг с зацикливанием
+  // (реальная жалоба с живых тестов). Три исхода:
+  //   - появились реальные слоты (telegram.ts уже подтянул свежий
+  //     slot_options к этому месту) → показываем их, это и есть тот
+  //     самый повторный заход, который лист ожидания должен обеспечить;
+  //   - клиент явно СНОВА спрашивает про варианты → можно ещё раз мягко
+  //     сказать "пока нет", это осознанный ответ на осознанный вопрос;
+  //   - иначе (просто "ок", "спасибо", любой другой разговор) → обычный
+  //     нейтральный чат, не повторяем весь спич заново.
+  const isWaitingForSlots =
+    card.lead_status === 'waiting_slots' || card.lead_status === 'waiting_slots_pinged';
+  if (isWaitingForSlots) {
+    if (card.slot_options && card.slot_options.length > 0) {
+      return card.direct_tattoo_allowed === 'yes' ? 'show_tattoo_slots' : 'show_consultation_slots';
+    }
+    if (signals.client_wants_other_slots || signals.client_asks_for_more_slots) {
+      return 'no_more_slots_waiting';
+    }
+    return 'waiting_slots_followup_chat';
   }
 
   // 6. ФОТО без подписи — отдельная ветка, один вопрос.
