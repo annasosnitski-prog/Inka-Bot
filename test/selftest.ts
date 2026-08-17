@@ -171,6 +171,20 @@ eq('консультация: телефон есть, соцсеть уже с�
   eq('патч ask_social: social_asked=yes сразу (fire-and-forget, не ждём ответа)', patch.social_asked, 'yes');
 }
 
+console.log('\n▶ getNextStep — waiting_slots (лист ожидания не должен повторять спич на каждую реплику)');
+eq('в листе ожидания, слотов всё ещё нет, просто "ок спасибо" → waiting_slots_followup_chat (не повтор)',
+  step({ lead_status: 'waiting_slots', phone: '05011', slot_options: [] }), 'waiting_slots_followup_chat');
+eq('в листе ожидания, явно снова спрашивает варианты → no_more_slots_waiting (осознанный повтор ок)',
+  step({ lead_status: 'waiting_slots', phone: '05011', slot_options: [] }, { client_asks_for_more_slots: true }),
+  'no_more_slots_waiting');
+eq('в листе ожидания, появились свежие слоты (тату) → show_tattoo_slots',
+  step({ lead_status: 'waiting_slots', phone: '05011', slot_options: ['ev1'] }), 'show_tattoo_slots');
+eq('в листе ожидания, появились свежие слоты (консультация) → show_consultation_slots',
+  step({ lead_status: 'waiting_slots', direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: '05011', slot_options: ['ev1'] }),
+  'show_consultation_slots');
+eq('waiting_slots_pinged ведёт себя так же, как waiting_slots',
+  step({ lead_status: 'waiting_slots_pinged', phone: '05011', slot_options: [] }), 'waiting_slots_followup_chat');
+
 console.log('\n▶ getNextStep — slots shown');
 eq('валидный выбор + телефон → confirm_slot_awaiting_payment',
   step({ lead_status: 'slots_shown', phone: '05011' }, { client_picked_slot_id: 'ev1' }),
