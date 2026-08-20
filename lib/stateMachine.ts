@@ -92,6 +92,7 @@ export interface ClientCard {
   price_explained: YesNo;
   price_shown: YesNo; // цену реально ПОКАЗАЛИ клиенту (шаг quote_price отработал), не просто посчитали внутри
   wants_to_book: YesNo; // явное подтверждение клиента "да, хочу записаться" после цены
+  decline_followup_asked: YesNo; // уже спрашивали "что останавливает" при отказе? спрашивается ОДИН раз (см. all_done/declined_followup_chat)
   phone: string | null; // номер телефона клиента для подтверждения брони — спрашивается перед показом дат
   // Имя, которое клиент НАЗВАЛ САМ — отдельно от Telegram-профиля (first_name
   // там не всегда настоящее имя: ники, эмодзи, название бизнеса и т.п.).
@@ -164,7 +165,8 @@ export type NextStep =
   | 'confirm_consultation_booked'
   | 'payment_screenshot_received'
   | 'booked_followup_chat'
-  | 'all_done';
+  | 'all_done'
+  | 'declined_followup_chat';
 
 // ----------------------------------------------------------
 // ГЛАВНАЯ ФУНКЦИЯ
@@ -376,11 +378,33 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   // спрашиваем отдельно и ждём подтверждения. effectiveWantsToBook
   // приоритизирует свежий сигнал из ТЕКУЩЕГО сообщения (signals) над
   // тем, что уже сохранено в карточке — клиент мог передумать.
-  const effectiveWantsToBook = signals.client_confirms_booking ?? card.wants_to_book;
+  //
+  // ИСКЛЮЧЕНИЕ: если card.wants_to_book УЖЕ "yes" — больше не даём
+  // свежему сигналу его перебить. У Extractor нет памяти переписки, он
+  // видит только последнее сообщение + карточку — короткое "нет" на
+  // СОВСЕМ ДРУГОЙ вопрос (например "скинь инстаграм?" на шаге ask_social,
+  // который идёт СРАЗУ ПОСЛЕ подтверждённого "да") легко принять за отказ
+  // от записи, и клиента на финишной прямой отбрасывает в all_done — было
+  // замечено вживую (клиент сказал "хочу", дал телефон/имя/канал, потом
+  // "нет" на инстаграм — и получил "что-то останавливает?"). Once yes,
+  // always yes: дальше по воронке signals.client_confirms_booking уже не
+  // используется для ЭТОГО решения, только для самого первого перехода
+  // null → yes/no.
+  const effectiveWantsToBook =
+    card.wants_to_book === 'yes' ? 'yes' : signals.client_confirms_booking ?? card.wants_to_book;
   if (effectiveWantsToBook === null) {
     return 'ask_wants_to_book';
   }
   if (effectiveWantsToBook === 'no') {
+    if (card.decline_followup_asked === 'yes') {
+      // Уже один раз мягко спросили "что останавливает" — правило
+      // Responder-а прямо запрещает повторять этот вопрос дальше
+      // ("БОЛЬШЕ не возвращаться к теме записи самой"), но без этой
+      // ветки код каждый раз заново решал all_done и Responder не мог
+      // узнать, что уже спрашивал (у него тоже нет памяти переписки) —
+      // вопрос повторялся дословно на каждую следующую реплику клиента.
+      return 'declined_followup_chat';
+    }
     return 'all_done';
   }
 
@@ -469,6 +493,7 @@ export interface CardPatch {
   payment_status?: PaymentStatus;
   social_asked?: YesNo;
   price_shown?: YesNo;
+  decline_followup_asked?: YesNo;
 }
 
 export function getCardPatchForStep(
@@ -479,12 +504,26 @@ export function getCardPatchForStep(
   // wants_to_book сохраняется в карточку НАВСЕГДА, в отличие от
   // большинства signals полей — это не разовый сигнал сообщения, а
   // факт про клиента, который должен помниться на следующих шагах.
+  //
+  // Once yes, always yes — та же защита, что и в getNextStep выше: если
+  // card.wants_to_book уже "yes", не даём случайному сигналу этого же
+  // сообщения (например Extractor принял "нет" на вопрос про инстаграм
+  // за отказ от записи — у него нет памяти переписки, чтобы знать, что
+  // на самом деле спросили) откатить его обратно в Airtable. Без этой
+  // защиты getNextStep выше принял бы верное решение НА ЭТОТ ход, но
+  // испорченное значение всё равно записалось бы и сломало бы СЛЕДУЮЩИЙ.
   const patch: CardPatch = {};
-  if (signals.client_confirms_booking !== null) {
+  if (signals.client_confirms_booking !== null && card.wants_to_book !== 'yes') {
     patch.wants_to_book = signals.client_confirms_booking;
   }
 
   switch (step) {
+    case 'all_done':
+      // Проставляется СРАЗУ, как только шаг отдан клиенту — не на его
+      // ответ (тот же паттерн, что и ask_social ниже). Со следующего
+      // сообщения, если клиент всё ещё не хочет записываться, дальше
+      // идёт declined_followup_chat, а не повтор этого же вопроса.
+      return { ...patch, decline_followup_asked: 'yes' };
     case 'handle_out_of_scope_warning_1':
       return { ...patch, spam_count: 1 };
     case 'handle_out_of_scope_warning_2':
