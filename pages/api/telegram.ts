@@ -5,7 +5,7 @@ import { getNextStep, getCardPatchForStep } from '../../lib/stateMachine';
 import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
 import { runAdmin } from '../../lib/admin';
-import { appendDialogTurn } from '../../lib/dialogLog';
+import { appendDialogTurn, parseDialogHistory, recentDialogForModel } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { SlotType, AvailableSlot } from '../../lib/calendar';
 import { sendTelegramMessage, forwardTelegramMessage } from '../../lib/telegramApi';
@@ -118,6 +118,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const existing = await findClientByTelegramId(telegramId);
     const currentCard = recordToClientCard(telegramId, existing?.fields ?? {});
 
+    // 1b. ПОСЛЕДНИЕ РЕПЛИКИ ПЕРЕПИСКИ — контекст этого хода для Extractor
+    // и Responder. Раньше оба видели только currentCard + голое последнее
+    // сообщение, без памяти "что я только что спросила" — короткий ответ
+    // клиента ("нет", "да", "думаю") нечем было привязать к вопросу, на
+    // который он отвечает. Отсюда живой баг: "нет" на "скинь инстаграм?"
+    // читалось как отказ от записи (см. lib/dialogLog.ts). dialog_history
+    // уже читается для существующего клиента, отдельного похода в Airtable
+    // не требует.
+    const recentHistory = recentDialogForModel(parseDialogHistory(existing));
+
     // 1a. ADMIN-РЕЖИМ (ШАГ 7). Мастер (isAdminSender), если она не
     // переключилась в клиентский путь командой /client (force_client_mode),
     // обрабатывается отдельным admin-модулем — БЕЗ клиентского Extractor /
@@ -155,6 +165,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       hasPhoto,
       photoCaption,
       isAdminSender,
+      recentHistory,
     });
 
     // 3. Слить новую карточку.
@@ -378,6 +389,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       nextStep,
       clientCard: finalCard,
       lastClientMessage: messageText,
+      recentHistory,
       slotsDisplay,
     });
 
