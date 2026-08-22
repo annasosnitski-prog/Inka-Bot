@@ -89,6 +89,7 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     chosen_slot_id: null, slot_options: ['ev1', 'ev2'], booked_slot_display: null,
     booked_slot_start_iso: null, payment_reminder_sent: null, photos_count: 0,
     has_photo_this_message: false, photo_has_caption: false, force_client_mode: null,
+    booked_at: null, payment_reminder_early_sent: null,
     ...over,
   };
 }

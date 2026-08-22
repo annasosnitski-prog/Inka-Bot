@@ -337,6 +337,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           booked_slot_display: pickedDisplay,
           booked_slot_start_iso: pickedStartIso,
           payment_reminder_sent: null, // новая бронь — сбрасываем гвард напоминания
+          booked_at: new Date().toISOString(), // для раннего напоминания о неоплате (см. pages/api/payment-reminders.ts)
+          payment_reminder_early_sent: null, // новая бронь — сбрасываем гвард раннего напоминания
         };
       }
     }
@@ -496,6 +498,8 @@ function recordToClientCard(
     booked_slot_display: fields.booked_slot_display ?? null,
     booked_slot_start_iso: fields.booked_slot_start_iso ?? null,
     payment_reminder_sent: fields.payment_reminder_sent ?? null,
+    booked_at: fields.booked_at ?? null,
+    payment_reminder_early_sent: fields.payment_reminder_early_sent ?? null,
     photos_count: fields.photos_count ?? 0,
     has_photo_this_message: false,
     photo_has_caption: false,
@@ -610,6 +614,8 @@ function clientCardToAirtableFields(
     booked_slot_display: card.booked_slot_display,
     booked_slot_start_iso: card.booked_slot_start_iso,
     payment_reminder_sent: card.payment_reminder_sent,
+    booked_at: card.booked_at,
+    payment_reminder_early_sent: card.payment_reminder_early_sent,
     photos_count: extra.photos_count,
     force_client_mode: card.force_client_mode,
   };
