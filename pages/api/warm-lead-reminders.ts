@@ -24,6 +24,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { timingSafeEqual } from 'crypto';
 import { findSilentQuotedLeads, updateClient } from '../../lib/airtable';
 import { sendTelegramMessage } from '../../lib/telegramApi';
+import { shouldSendWarmLeadReminder } from '../../lib/reminderWindows';
 
 const MASTER_TELEGRAM_ID = 457343487;
 const SILENCE_WINDOW_HOURS = 20;
@@ -61,7 +62,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (isNaN(updatedAt)) continue;
 
       const hoursSilent = (now - updatedAt) / (1000 * 60 * 60);
-      if (hoursSilent < SILENCE_WINDOW_HOURS) continue;
+      if (!shouldSendWarmLeadReminder(hoursSilent, SILENCE_WINDOW_HOURS)) continue;
 
       const who = f.name
         ? `${f.name}${f.username ? ` (@${f.username})` : ''}`

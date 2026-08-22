@@ -33,6 +33,7 @@ import { findClientsWaitingForSlots, updateClient } from '../../lib/airtable';
 import { getAvailableSlots, formatSlotForDisplay } from '../../lib/calendar';
 import type { SlotType, AvailableSlot } from '../../lib/calendar';
 import { sendTelegramMessage } from '../../lib/telegramApi';
+import { pickWaitingListSlotType } from '../../lib/reminderWindows';
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -68,16 +69,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ ok: true, checked: 0, notified: 0 });
     }
 
-    // Один запрос к календарю на тип слота, а не на клиента.
-    const slotsByType: Record<SlotType, AvailableSlot[]> = {
-      tattoo: await getAvailableSlots('tattoo', 3).catch((err) => {
+    // Один запрос к календарю на тип слота, а не на клиента — оба типа
+    // параллельно, не последовательно (независимые вызовы, нет причины
+    // ждать один, чтобы начать другой).
+    const [tattooSlots, consultationSlots] = await Promise.all([
+      getAvailableSlots('tattoo', 3).catch((err) => {
         console.error('waiting-list-check: tattoo slots lookup failed:', err);
-        return [];
+        return [] as AvailableSlot[];
       }),
-      consultation: await getAvailableSlots('consultation', 3).catch((err) => {
+      getAvailableSlots('consultation', 3).catch((err) => {
         console.error('waiting-list-check: consultation slots lookup failed:', err);
-        return [];
+        return [] as AvailableSlot[];
       }),
+    ]);
+    const slotsByType: Record<SlotType, AvailableSlot[]> = {
+      tattoo: tattooSlots,
+      consultation: consultationSlots,
     };
 
     let notified = 0;
@@ -87,12 +94,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const telegramId: number | undefined = f.telegram_id;
       if (!telegramId) continue;
 
-      const slotType: SlotType | null =
-        f.direct_tattoo_allowed === 'yes'
-          ? 'tattoo'
-          : f.consultation_needed === 'yes'
-          ? 'consultation'
-          : null;
+      const slotType = pickWaitingListSlotType(f.direct_tattoo_allowed, f.consultation_needed);
       if (!slotType) continue;
 
       const slots = slotsByType[slotType];

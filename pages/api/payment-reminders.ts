@@ -32,6 +32,7 @@ import {
 } from '../../lib/airtable';
 import { sendTelegramMessage } from '../../lib/telegramApi';
 import { getDepositAmount } from '../../lib/paymentConfig';
+import { shouldSendLatePaymentReminder, shouldSendEarlyPaymentReminder } from '../../lib/reminderWindows';
 
 const MASTER_TELEGRAM_ID = 457343487;
 const REMINDER_WINDOW_HOURS = 36;
@@ -73,10 +74,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (isNaN(start)) continue;
 
       const hoursRemaining = (start - now) / (1000 * 60 * 60);
-      // Слот ещё не наступил, но осталось не больше окна — само окно
-      // достаточно широкое, чтобы не зависеть от частоты запуска cron
-      // (раз в час или раз в день — сработает всё равно один раз).
-      if (hoursRemaining <= 0 || hoursRemaining > REMINDER_WINDOW_HOURS) continue;
+      // Окно достаточно широкое, чтобы не зависеть от частоты запуска
+      // cron (раз в час или раз в день — сработает всё равно один раз).
+      if (!shouldSendLatePaymentReminder(hoursRemaining, REMINDER_WINDOW_HOURS)) continue;
 
       const who = f.name
         ? `${f.name}${f.username ? ` (@${f.username})` : ''}`
@@ -112,17 +112,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (isNaN(bookedAt)) continue;
 
       const hoursSinceBooked = (now - bookedAt) / (1000 * 60 * 60);
-      if (hoursSinceBooked < EARLY_WINDOW_HOURS) continue;
 
       // Если до слота уже осталось ≤36ч — это зона позднего окна выше,
       // не дублируем один и тот же пинг мастеру дважды за один прогон.
       const startIso: string | undefined = f.booked_slot_start_iso;
+      let hoursRemaining: number | null = null;
       if (startIso) {
         const start = new Date(startIso).getTime();
-        if (!isNaN(start)) {
-          const hoursRemaining = (start - now) / (1000 * 60 * 60);
-          if (hoursRemaining <= REMINDER_WINDOW_HOURS) continue;
-        }
+        if (!isNaN(start)) hoursRemaining = (start - now) / (1000 * 60 * 60);
+      }
+      if (!shouldSendEarlyPaymentReminder(hoursSinceBooked, EARLY_WINDOW_HOURS, hoursRemaining, REMINDER_WINDOW_HOURS)) {
+        continue;
       }
 
       const who = f.name

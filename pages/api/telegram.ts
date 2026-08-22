@@ -324,21 +324,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // выбранного id находим соответствующую человекочитаемую строку.
         const pickedIndex = liveCard.slot_options?.indexOf(signals.client_picked_slot_id) ?? -1;
         const pickedDisplay = pickedIndex >= 0 ? slotsDisplay?.[pickedIndex] ?? null : null;
-        // ISO-время начала — только для тату (нужно исключительно для
-        // напоминания о неоплаченной предоплате, а предоплата есть только
-        // у тату-брони; консультации бесплатные, напоминание им не нужно).
+        // Только для тату (нужно исключительно для напоминаний о
+        // неоплаченной предоплате, а предоплата есть только у тату-брони;
+        // консультации бесплатные, напоминания им не нужны).
+        const isTattooBooking = nextStep === 'confirm_slot_awaiting_payment';
         const pickedStartIso =
-          nextStep === 'confirm_slot_awaiting_payment' && pickedIndex >= 0
-            ? rawSlots?.[pickedIndex]?.start ?? null
-            : null;
+          isTattooBooking && pickedIndex >= 0 ? rawSlots?.[pickedIndex]?.start ?? null : null;
         liveCard = {
           ...liveCard,
           chosen_slot_id: signals.client_picked_slot_id,
           booked_slot_display: pickedDisplay,
           booked_slot_start_iso: pickedStartIso,
           payment_reminder_sent: null, // новая бронь — сбрасываем гвард напоминания
-          booked_at: new Date().toISOString(), // для раннего напоминания о неоплате (см. pages/api/payment-reminders.ts)
-          payment_reminder_early_sent: null, // новая бронь — сбрасываем гвард раннего напоминания
+          booked_at: isTattooBooking ? new Date().toISOString() : liveCard.booked_at, // для раннего напоминания о неоплате (см. pages/api/payment-reminders.ts)
+          payment_reminder_early_sent: isTattooBooking ? null : liveCard.payment_reminder_early_sent, // новая бронь — сбрасываем гвард раннего напоминания
         };
       }
     }

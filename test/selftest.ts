@@ -42,6 +42,12 @@ import { formatDialogHistory, type DialogEntry } from '../lib/dialogLog';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from '../lib/addSlotParser';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
 import { getDepositAmount } from '../lib/paymentConfig';
+import {
+  shouldSendLatePaymentReminder,
+  shouldSendEarlyPaymentReminder,
+  shouldSendWarmLeadReminder,
+  pickWaitingListSlotType,
+} from '../lib/reminderWindows';
 
 let passed = 0;
 let failed = 0;
@@ -569,6 +575,34 @@ console.log('\n▶ computeDayBlockInfo — блокировки мастера �
 }
 // Закрытие бота — это тоже "бронь бота" для обратного потока в Дневник (не ЗАНЯТО).
 ok('закрытие /закрой — isBotBooking true (без данных клиента, но от бота)', isBotBooking(`[ТАТУ] ${MASTER_CLOSED_MARKER}`));
+
+console.log('\n▶ shouldSendLatePaymentReminder — окно ≤N часов до слота, слот ещё не наступил');
+ok('за 36ч ровно (граница) → true', shouldSendLatePaymentReminder(36, 36));
+ok('за 35.9ч → true', shouldSendLatePaymentReminder(35.9, 36));
+ok('за 36.1ч → false (ещё рано)', !shouldSendLatePaymentReminder(36.1, 36));
+ok('за 0.1ч → true', shouldSendLatePaymentReminder(0.1, 36));
+ok('ровно 0 (слот наступает сейчас) → false', !shouldSendLatePaymentReminder(0, 36));
+ok('отрицательное (слот уже прошёл) → false', !shouldSendLatePaymentReminder(-1, 36));
+
+console.log('\n▶ shouldSendEarlyPaymentReminder — ≥N часов с брони, но ещё не в зоне позднего окна');
+ok('24ч с брони, слот далеко (100ч) → true', shouldSendEarlyPaymentReminder(24, 24, 100, 36));
+ok('23.9ч с брони → false (ещё рано)', !shouldSendEarlyPaymentReminder(23.9, 24, 100, 36));
+ok('24ч с брони, слот уже в зоне позднего окна (20ч) → false (не дублируем)', !shouldSendEarlyPaymentReminder(24, 24, 20, 36));
+ok('24ч с брони, слот ровно на границе позднего окна (36ч) → false', !shouldSendEarlyPaymentReminder(24, 24, 36, 36));
+ok('24ч с брони, слот чуть за границей (36.1ч) → true', shouldSendEarlyPaymentReminder(24, 24, 36.1, 36));
+ok('нет booked_slot_start_iso (hoursRemaining=null), 24ч с брони → true', shouldSendEarlyPaymentReminder(24, 24, null, 36));
+
+console.log('\n▶ shouldSendWarmLeadReminder — тёплый лид молчит ≥N часов после цены');
+ok('20ч ровно (граница) → true', shouldSendWarmLeadReminder(20, 20));
+ok('19.9ч → false (ещё рано)', !shouldSendWarmLeadReminder(19.9, 20));
+ok('50ч → true', shouldSendWarmLeadReminder(50, 20));
+
+console.log('\n▶ pickWaitingListSlotType — приоритет тату над консультацией, как в state machine');
+eq('direct_tattoo_allowed=yes → tattoo', pickWaitingListSlotType('yes', 'no'), 'tattoo');
+eq('consultation_needed=yes, тату нет → consultation', pickWaitingListSlotType('no', 'yes'), 'consultation');
+eq('оба yes (не должно случаться) → tattoo (приоритет)', pickWaitingListSlotType('yes', 'yes'), 'tattoo');
+eq('оба null/no → null (маршрут ещё не выбран)', pickWaitingListSlotType(null, null), null);
+eq('мусорные значения → null, не падает', pickWaitingListSlotType(undefined, 'maybe'), null);
 
 // ================= ИТОГ =================
 console.log(`\n${'='.repeat(40)}`);
