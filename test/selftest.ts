@@ -71,6 +71,9 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     // об него спотыкаться; тесты именно на price_shown переопределяют явно.
     price_shown: 'yes',
     wants_to_book: 'yes', phone: null,
+    // decline_followup_asked по умолчанию null — тесты именно на
+    // all_done/declined_followup_chat переопределяют явно.
+    decline_followup_asked: null,
     // client_name по умолчанию задано в тестовой фабрике — та же причина,
     // что и у остальных "спрошено один раз" полей ниже: большинство тестов
     // ходит воронку ПОСЛЕ ask_name и не должно об него спотыкаться; тесты
@@ -119,6 +122,35 @@ eq('цена есть, wants_to_book null → ask_wants_to_book',
 eq('явный отказ → all_done', step({ wants_to_book: 'no' }), 'all_done');
 eq('первое тату неизвестно → ask_first_tattoo',
   step({ phone: '05011', first_tattoo: null }), 'ask_first_tattoo');
+
+console.log('\n▶ getNextStep — once yes, always yes (баг с живых тестов: "нет" на инстаграм после "хочу"');
+console.log('  свалило клиента в all_done — у Extractor нет памяти переписки, чтобы понять, на что отвечает "нет")');
+eq('wants_to_book уже yes, случайный сигнал "no" в ЭТОМ сообщении → всё равно едет дальше, не all_done',
+  step({ wants_to_book: 'yes', phone: '05011' }, { client_confirms_booking: 'no' }),
+  'show_tattoo_slots');
+eq('wants_to_book ещё null, сигнал "no" → всё-таки all_done (это настоящий первый отказ)',
+  step({ wants_to_book: null }, { client_confirms_booking: 'no' }), 'all_done');
+{
+  const patchSticky = getCardPatchForStep(
+    'show_tattoo_slots',
+    baseCard({ wants_to_book: 'yes' }),
+    sig({ client_confirms_booking: 'no' })
+  );
+  eq('патч тоже не даёт "no" перезаписать уже сохранённый "yes"', patchSticky.wants_to_book, undefined);
+}
+
+console.log('\n▶ getNextStep — declined_followup_chat (не повторять "что-то останавливает?" на каждую реплику)');
+eq('первый отказ → all_done',
+  step({ wants_to_book: null }, { client_confirms_booking: 'no' }), 'all_done');
+eq('уже спрашивали (decline_followup_asked=yes), клиент просто продолжает → declined_followup_chat',
+  step({ wants_to_book: 'no', decline_followup_asked: 'yes' }), 'declined_followup_chat');
+eq('уже спрашивали, но клиент явно передумал → едет дальше, не declined_followup_chat',
+  step({ wants_to_book: 'no', decline_followup_asked: 'yes', phone: '05011' }, { client_confirms_booking: 'yes' }),
+  'show_tattoo_slots');
+{
+  const patchAllDone = getCardPatchForStep('all_done', baseCard({ wants_to_book: 'no' }), sig());
+  eq('патч all_done: decline_followup_asked=yes сразу', patchAllDone.decline_followup_asked, 'yes');
+}
 
 console.log('\n▶ getNextStep — price_shown (цену Extractor мог посчитать молча в этом же сообщении,');
 console.log('  но клиенту её ещё никто не называл — баг из реальной переписки, 09.08.2026)');

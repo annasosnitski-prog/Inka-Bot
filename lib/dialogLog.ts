@@ -82,3 +82,25 @@ export async function appendDialogTurn(
 export function formatDialogHistory(entries: DialogEntry[]): string {
   return entries.map((e) => (e.from === 'client' ? `👤 ${e.text}` : `🤖 ${e.text}`)).join('\n\n');
 }
+
+// Сколько последних реплик (клиент+инка вместе) отдавать Extractor-у и
+// Responder-у как контекст этого хода — НЕ весь MAX_CLIENT_HISTORY_TURNS
+// (100), это раздуло бы токены на каждое сообщение. До этой правки оба
+// вызова видели только client_card + голое последнее сообщение — без
+// памяти "что я только что спросила", короткий ответ клиента ("нет",
+// "да", "думаю") нечем было привязать к вопросу, на который он отвечает.
+// Отсюда и живой баг: "нет" на "скинь инстаграм?" читалось как отказ от
+// записи. 12 реплик (~6 обменов) — достаточно, чтобы видеть последний
+// заданный вопрос и что было чуть раньше, не раздувая промпт целиком.
+export const RECENT_HISTORY_TURNS_FOR_MODEL = 12;
+
+export interface RecentDialogTurn {
+  from: 'client' | 'inka';
+  text: string;
+}
+
+// Урезанная версия истории для передачи в OpenAI — без ts (не нужен
+// модели для этой задачи, только лишние токены).
+export function recentDialogForModel(entries: DialogEntry[]): RecentDialogTurn[] {
+  return entries.slice(-RECENT_HISTORY_TURNS_FOR_MODEL).map((e) => ({ from: e.from, text: e.text }));
+}

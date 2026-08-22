@@ -11,6 +11,7 @@ import path from 'path';
 import type { ClientCard, NextStep } from './stateMachine';
 import { callOpenAIChat } from './openai';
 import { getDepositAmount } from './paymentConfig';
+import type { RecentDialogTurn } from './dialogLog';
 
 let cachedPrompt: string | null = null;
 
@@ -26,7 +27,7 @@ export interface ResponderInput {
   nextStep: NextStep;
   clientCard: ClientCard;
   lastClientMessage: string | null;
-  manualMode: boolean; // true = Аня сама пишет от первого лица
+  recentHistory: RecentDialogTurn[]; // последние ~6 обменов клиент↔Инка, БЕЗ текущего сообщения — для тона/непрерывности, не для новой логики (маршрут уже решён state machine)
   slotsDisplay: string[] | null; // человекочитаемые версии slot_options (дата+время), для показа клиенту
 }
 
@@ -44,7 +45,7 @@ export async function runResponder(input: ResponderInput): Promise<string> {
       next_step: input.nextStep,
       client_card: input.clientCard,
       last_client_message: input.lastClientMessage,
-      manual_mode: input.manualMode,
+      recent_history: input.recentHistory,
       slots_display: input.slotsDisplay,
     },
     null,

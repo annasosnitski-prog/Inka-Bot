@@ -17,6 +17,7 @@ import type {
   ContactChannel,
 } from './stateMachine';
 import { callOpenAIChat } from './openai';
+import type { RecentDialogTurn } from './dialogLog';
 
 // ----------------------------------------------------------
 // Промпт читаем один раз и держим в памяти (холодный старт
@@ -77,6 +78,7 @@ export interface ExtractorInput {
   hasPhoto: boolean;
   photoCaption: string | null; // подпись к фото, если есть
   isAdminSender: boolean;
+  recentHistory: RecentDialogTurn[]; // последние ~6 обменов клиент↔Инка, БЕЗ текущего сообщения — контекст, каким вопросом реально было последнее сообщение Инки
 }
 
 export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutput> {
@@ -86,6 +88,7 @@ export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutp
     {
       current_card: input.currentCard,
       is_admin_sender: input.isAdminSender,
+      recent_history: input.recentHistory,
       message: {
         text: input.messageText,
         has_photo: input.hasPhoto,
