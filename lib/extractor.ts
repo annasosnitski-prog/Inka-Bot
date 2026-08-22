@@ -78,7 +78,7 @@ export interface ExtractorInput {
   hasPhoto: boolean;
   photoCaption: string | null; // подпись к фото, если есть
   isAdminSender: boolean;
-  recentHistory: RecentDialogTurn[]; // последние ~6 обменов клиент↔Инка, БЕЗ текущего сообщения — контекст, каким вопросом реально было последнее сообщение Инки
+  recentHistory: RecentDialogTurn[]; // последние ~15 обменов клиент↔Инка, БЕЗ текущего сообщения — контекст, каким вопросом реально было последнее сообщение Инки
 }
 
 export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutput> {

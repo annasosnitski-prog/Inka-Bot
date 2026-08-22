@@ -27,7 +27,7 @@ export interface ResponderInput {
   nextStep: NextStep;
   clientCard: ClientCard;
   lastClientMessage: string | null;
-  recentHistory: RecentDialogTurn[]; // последние ~6 обменов клиент↔Инка, БЕЗ текущего сообщения — для тона/непрерывности, не для новой логики (маршрут уже решён state machine)
+  recentHistory: RecentDialogTurn[]; // последние ~15 обменов клиент↔Инка, БЕЗ текущего сообщения — для тона/непрерывности, не для новой логики (маршрут уже решён state machine)
   slotsDisplay: string[] | null; // человекочитаемые версии slot_options (дата+время), для показа клиенту
 }
 
