@@ -65,6 +65,11 @@ export type PaymentStatus =
   | 'waiting_confirmation'
   | 'paid'
   | null;
+// Момент, когда тату-бронь была подтверждена (confirm_slot_awaiting_payment) —
+// ISO-таймстамп. Нужен НЕ воронке (state machine его не читает), а cron-джобе
+// /api/payment-reminders для раннего напоминания мастеру ("бронь стоит уже
+// сутки без оплаты"), которое не привязано к времени ДО слота, в отличие от
+// уже существующего позднего окна (≤36ч до слота, см. booked_slot_start_iso).
 export type ClientType =
   | '1_undefined'
   | '2_reference'
@@ -112,6 +117,8 @@ export interface ClientCard {
   booked_slot_display: string | null; // читаемые дата+время подтверждённой брони (для follow-up вопросов "когда у меня запись")
   booked_slot_start_iso: string | null; // машиночитаемое время начала тату-брони (ISO) — для напоминания мастеру о неоплате за 36ч до слота
   payment_reminder_sent: YesNo; // уже пинговали мастера про неоплату этой брони? сбрасывается при новой брони
+  booked_at: string | null; // ISO-время подтверждения тату-брони — для раннего напоминания о неоплате, сбрасывается при новой брони
+  payment_reminder_early_sent: YesNo; // уже отправили РАННЕЕ напоминание (через сутки после брони, независимо от даты слота)? отдельный гвард от payment_reminder_sent, сбрасывается при новой брони
   photos_count: number;
   has_photo_this_message: boolean;
   photo_has_caption: boolean;

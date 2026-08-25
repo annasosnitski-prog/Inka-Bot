@@ -335,19 +335,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // выбранного id находим соответствующую человекочитаемую строку.
         const pickedIndex = liveCard.slot_options?.indexOf(signals.client_picked_slot_id) ?? -1;
         const pickedDisplay = pickedIndex >= 0 ? slotsDisplay?.[pickedIndex] ?? null : null;
-        // ISO-время начала — только для тату (нужно исключительно для
-        // напоминания о неоплаченной предоплате, а предоплата есть только
-        // у тату-брони; консультации бесплатные, напоминание им не нужно).
+        // Только для тату (нужно исключительно для напоминаний о
+        // неоплаченной предоплате, а предоплата есть только у тату-брони;
+        // консультации бесплатные, напоминания им не нужны).
+        const isTattooBooking = nextStep === 'confirm_slot_awaiting_payment';
         const pickedStartIso =
-          nextStep === 'confirm_slot_awaiting_payment' && pickedIndex >= 0
-            ? rawSlots?.[pickedIndex]?.start ?? null
-            : null;
+          isTattooBooking && pickedIndex >= 0 ? rawSlots?.[pickedIndex]?.start ?? null : null;
         liveCard = {
           ...liveCard,
           chosen_slot_id: signals.client_picked_slot_id,
           booked_slot_display: pickedDisplay,
           booked_slot_start_iso: pickedStartIso,
           payment_reminder_sent: null, // новая бронь — сбрасываем гвард напоминания
+          booked_at: isTattooBooking ? new Date().toISOString() : liveCard.booked_at, // для раннего напоминания о неоплате (см. pages/api/payment-reminders.ts)
+          payment_reminder_early_sent: isTattooBooking ? null : liveCard.payment_reminder_early_sent, // новая бронь — сбрасываем гвард раннего напоминания
         };
       }
     }
@@ -508,6 +509,8 @@ function recordToClientCard(
     booked_slot_display: fields.booked_slot_display ?? null,
     booked_slot_start_iso: fields.booked_slot_start_iso ?? null,
     payment_reminder_sent: fields.payment_reminder_sent ?? null,
+    booked_at: fields.booked_at ?? null,
+    payment_reminder_early_sent: fields.payment_reminder_early_sent ?? null,
     photos_count: fields.photos_count ?? 0,
     has_photo_this_message: false,
     photo_has_caption: false,
@@ -623,6 +626,8 @@ function clientCardToAirtableFields(
     booked_slot_display: card.booked_slot_display,
     booked_slot_start_iso: card.booked_slot_start_iso,
     payment_reminder_sent: card.payment_reminder_sent,
+    booked_at: card.booked_at,
+    payment_reminder_early_sent: card.payment_reminder_early_sent,
     photos_count: extra.photos_count,
     force_client_mode: card.force_client_mode,
   };

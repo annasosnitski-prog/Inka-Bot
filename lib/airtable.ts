@@ -87,6 +87,76 @@ export async function findClientsAwaitingPayment(): Promise<ClientRecord[]> {
   return data.records ?? [];
 }
 
+// Клиенты с тату-бронью, ожидающей предоплаты — та же выборка, что и
+// findClientsAwaitingPayment (deposit_status = "waiting_prepayment"), но БЕЗ
+// фильтра по payment_reminder_sent — источник для РАННЕГО окна напоминания
+// (см. pages/api/payment-reminders.ts), у которого свой отдельный гвард
+// payment_reminder_early_sent, не связанный с поздним (≤36ч до слота).
+// Фильтруем по booked_at, а не booked_slot_start_iso — раннее напоминание
+// считает время С МОМЕНТА БРОНИ, не время ДО слота.
+export async function findClientsAwaitingPaymentEarly(): Promise<ClientRecord[]> {
+  const formula =
+    `AND({deposit_status} = "waiting_prepayment", {payment_reminder_early_sent} != "yes", {booked_at} != "")`;
+  const url = `${AIRTABLE_API_URL}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=100`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Airtable early-payment-reminder search failed: ${res.status} ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  return data.records ?? [];
+}
+
+// Клиенты, которым уже показали цену, но которые ещё не ответили да/нет на
+// "хочешь записаться?" (wants_to_book пусто) — источник для cron-джобы
+// /api/warm-lead-reminders. lead_status = "new" отсекает тех, кто уже ушёл
+// дальше по воронке (slots_shown/booked/waiting_slots/blocked) — до этих
+// шагов lead_status ничем, кроме "new", не бывает выставлен (см.
+// lib/stateMachine.ts — 'diagnosing'/'estimated'/'wants_booking' в коде
+// нигде не присваиваются, это зарезервированные, но пока неиспользуемые
+// значения типа).
+export async function findSilentQuotedLeads(): Promise<ClientRecord[]> {
+  const formula =
+    `AND({price_shown} = "yes", {wants_to_book} = "", {lead_status} = "new", {warm_lead_reminder_sent} != "yes")`;
+  const url = `${AIRTABLE_API_URL}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=100`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Airtable silent-lead search failed: ${res.status} ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  return data.records ?? [];
+}
+
+// Клиенты в листе ожидания слотов (тату ИЛИ консультация) — источник для
+// cron-джобы /api/waiting-list-check, которая сама проверяет календарь и,
+// если появились варианты, пишет клиенту напрямую, не дожидаясь, пока он
+// снова напишет сам (раньше это работало только реактивно — см. state
+// machine п. 5b, isWaitingForSlots).
+export async function findClientsWaitingForSlots(): Promise<ClientRecord[]> {
+  const formula = `OR({lead_status} = "waiting_slots", {lead_status} = "waiting_slots_pinged")`;
+  const url = `${AIRTABLE_API_URL}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=100`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Airtable waiting-list search failed: ${res.status} ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  return data.records ?? [];
+}
+
 export async function createClient(fields: Record<string, any>): Promise<ClientRecord> {
   const res = await fetch(AIRTABLE_API_URL, {
     method: 'POST',
