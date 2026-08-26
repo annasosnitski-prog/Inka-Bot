@@ -42,6 +42,7 @@ import { formatDialogHistory, type DialogEntry } from '../lib/dialogLog';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from '../lib/addSlotParser';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
 import { getDepositAmount } from '../lib/paymentConfig';
+import { pickLargestTelegramPhoto } from '../lib/telegramApi';
 import {
   shouldSendLatePaymentReminder,
   shouldSendEarlyPaymentReminder,
@@ -635,6 +636,16 @@ eq('consultation_needed=yes, тату нет → consultation', pickWaitingListS
 eq('оба yes (не должно случаться) → tattoo (приоритет)', pickWaitingListSlotType('yes', 'yes'), 'tattoo');
 eq('оба null/no → null (маршрут ещё не выбран)', pickWaitingListSlotType(null, null), null);
 eq('мусорные значения → null, не падает', pickWaitingListSlotType(undefined, 'maybe'), null);
+
+console.log('\n▶ pickLargestTelegramPhoto — выбор самого большого размера для вижна');
+eq(
+  'берёт последний элемент (Telegram шлёт от меньшего к большему)',
+  pickLargestTelegramPhoto([{ file_id: 'small' }, { file_id: 'medium' }, { file_id: 'big' }])?.file_id,
+  'big'
+);
+eq('один размер → его и берёт', pickLargestTelegramPhoto([{ file_id: 'only' }])?.file_id, 'only');
+eq('пустой массив → null', pickLargestTelegramPhoto([]), null);
+eq('undefined → null (нет фото)', pickLargestTelegramPhoto(undefined), null);
 
 // ================= ИТОГ =================
 console.log(`\n${'='.repeat(40)}`);

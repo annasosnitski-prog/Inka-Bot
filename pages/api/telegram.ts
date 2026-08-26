@@ -8,7 +8,7 @@ import { runAdmin } from '../../lib/admin';
 import { appendDialogTurn, parseDialogHistory, recentDialogForModel } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { SlotType, AvailableSlot } from '../../lib/calendar';
-import { sendTelegramMessage, forwardTelegramMessage } from '../../lib/telegramApi';
+import { sendTelegramMessage, forwardTelegramMessage, pickLargestTelegramPhoto } from '../../lib/telegramApi';
 import { getDepositAmount } from '../../lib/paymentConfig';
 
 // Master's own Telegram ID — admin/test mode detection.
@@ -58,6 +58,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const username = message.from?.username ?? '';
   const firstName = message.from?.first_name ?? '';
   const hasPhoto = !!message.photo;
+  const photoFileId = hasPhoto ? pickLargestTelegramPhoto(message.photo)?.file_id ?? null : null;
   const photoCaption: string | null = message.caption ?? null;
   const messageText: string | null = message.text ?? message.caption ?? null;
   const lastMessageForRecord =
@@ -166,6 +167,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       photoCaption,
       isAdminSender,
       recentHistory,
+      photoFileId,
     });
 
     // 3. Слить новую карточку.

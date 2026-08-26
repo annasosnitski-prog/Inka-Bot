@@ -16,7 +16,8 @@ import type {
   ClientCard,
   ContactChannel,
 } from './stateMachine';
-import { callOpenAIChat } from './openai';
+import { callOpenAIChat, type ChatContentPart } from './openai';
+import { getTelegramFileDataUrl } from './telegramApi';
 import type { RecentDialogTurn } from './dialogLog';
 
 // ----------------------------------------------------------
@@ -79,6 +80,11 @@ export interface ExtractorInput {
   photoCaption: string | null; // подпись к фото, если есть
   isAdminSender: boolean;
   recentHistory: RecentDialogTurn[]; // последние ~15 обменов клиент↔Инка, БЕЗ текущего сообщения — контекст, каким вопросом реально было последнее сообщение Инки
+  // file_id самого большого размера фото из этого сообщения (см.
+  // lib/telegramApi.ts, pickLargestTelegramPhoto) — если задан, фото
+  // реально показывается модели (вижн), но СТРОГО как референс/дизайн,
+  // не как медицинский материал (см. extractorPrompt.txt, раздел 4).
+  photoFileId: string | null;
 }
 
 export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutput> {
@@ -99,6 +105,26 @@ export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutp
     2
   );
 
+  // Вижн подключаем, только если реально есть фото И карточка ещё не в
+  // состоянии подтверждённой брони — там фото почти всегда скрин
+  // предоплаты, а не референс дизайна, тратить на него вызов вижна
+  // бессмысленно (промпт всё равно велит игнорировать нереференсные фото,
+  // но так дешевле и предсказуемее).
+  const isAlreadyBooked =
+    input.currentCard.lead_status === 'tattoo_booked_waiting_payment' ||
+    input.currentCard.lead_status === 'consultation_booked';
+
+  let userMessageContent: string | ChatContentPart[] = userContent;
+  if (input.photoFileId && !isAlreadyBooked) {
+    const photoDataUrl = await getTelegramFileDataUrl(input.photoFileId);
+    if (photoDataUrl) {
+      userMessageContent = [
+        { type: 'text', text: userContent },
+        { type: 'image_url', image_url: { url: photoDataUrl } },
+      ];
+    }
+  }
+
   const rawText = await callOpenAIChat({
     model: 'gpt-5.4-mini',
     temperature: 0,
@@ -106,7 +132,7 @@ export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutp
     label: 'Extractor',
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: userContent },
+      { role: 'user', content: userMessageContent },
     ],
   });
 
