@@ -119,6 +119,7 @@ export interface ClientCard {
   payment_reminder_sent: YesNo; // уже пинговали мастера про неоплату этой брони? сбрасывается при новой брони
   booked_at: string | null; // ISO-время подтверждения тату-брони — для раннего напоминания о неоплате, сбрасывается при новой брони
   payment_reminder_early_sent: YesNo; // уже отправили РАННЕЕ напоминание (через сутки после брони, независимо от даты слота)? отдельный гвард от payment_reminder_sent, сбрасывается при новой брони
+  reference_asked: YesNo; // уже просили референс/фото-пример? спрашивается ОДИН раз, только если клиент за весь разговор ни разу не присылал фото — не блокирует запись, если фото так и не пришло
   photos_count: number;
   has_photo_this_message: boolean;
   photo_has_caption: boolean;
@@ -153,6 +154,7 @@ export type NextStep =
   | 'ask_size'
   | 'ask_existing_tattoo_or_skin'
   | 'ask_skin_notes_detail'
+  | 'ask_reference_photo'
   | 'quote_price'
   | 'ask_wants_to_book'
   | 'ask_first_tattoo'
@@ -361,6 +363,17 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     return 'ask_skin_notes_detail';
   }
 
+  // 9b. РЕФЕРЕНС — если клиент за весь разговор НИ РАЗУ не присылал фото,
+  // просим референс/пример ОДИН раз, до того как называть цену: фото
+  // сильно снижает неясность того, что именно клиент имеет в виду под
+  // идеей, и помогает точнее оценить сложность. Не блокирует воронку —
+  // спрашивается один раз (тот же паттерн, что и social_asked) и не
+  // требует ответа: если референса так и не будет, идём дальше на цене
+  // по тому, что клиент описал текстом.
+  if (card.photos_count === 0 && card.reference_asked !== 'yes') {
+    return 'ask_reference_photo';
+  }
+
   // 10. ЦЕНА ПЕРЕД ЛЮБЫМ СЛЕДУЮЩИМ ШАГОМ.
   // category/direct_tattoo_allowed/consultation_needed к этому моменту
   // уже должны быть посчитаны Extractor-ом (по правилам PRICE v1.2) —
@@ -501,6 +514,7 @@ export interface CardPatch {
   social_asked?: YesNo;
   price_shown?: YesNo;
   decline_followup_asked?: YesNo;
+  reference_asked?: YesNo;
 }
 
 export function getCardPatchForStep(
@@ -547,6 +561,11 @@ export function getCardPatchForStep(
       // ответ. Спрашиваем ровно один раз: следующее сообщение уже уходит
       // дальше по воронке независимо от того, дал клиент соцсеть или нет.
       return { ...patch, social_asked: 'yes' };
+    case 'ask_reference_photo':
+      // Тот же паттерн: проставляется сразу, как только шаг отдан
+      // клиенту, независимо от того, пришлёт он фото или нет — спрашиваем
+      // ровно один раз за разговор.
+      return { ...patch, reference_asked: 'yes' };
     case 'quote_price':
       return { ...patch, price_shown: 'yes' };
     case 'show_tattoo_slots':

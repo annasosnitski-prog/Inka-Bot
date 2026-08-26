@@ -513,6 +513,7 @@ function recordToClientCard(
     payment_reminder_sent: fields.payment_reminder_sent ?? null,
     booked_at: fields.booked_at ?? null,
     payment_reminder_early_sent: fields.payment_reminder_early_sent ?? null,
+    reference_asked: fields.reference_asked ?? null,
     photos_count: fields.photos_count ?? 0,
     has_photo_this_message: false,
     photo_has_caption: false,
@@ -630,6 +631,7 @@ function clientCardToAirtableFields(
     payment_reminder_sent: card.payment_reminder_sent,
     booked_at: card.booked_at,
     payment_reminder_early_sent: card.payment_reminder_early_sent,
+    reference_asked: card.reference_asked,
     photos_count: extra.photos_count,
     force_client_mode: card.force_client_mode,
   };

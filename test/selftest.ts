@@ -95,6 +95,12 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     // существующих тестов ходит воронку ПОСЛЕ шага ask_social и не должно
     // об него спотыкаться; тесты именно на ask_social переопределяют явно.
     social_link: null, social_asked: 'yes',
+    // reference_asked по умолчанию 'yes' в тестовой фабрике, той же причине,
+    // что и social_asked выше — большинство тестов ходит воронку ПОСЛЕ шага
+    // ask_reference_photo (а photos_count по умолчанию 0) и не должно об
+    // него спотыкаться; тесты именно на ask_reference_photo переопределяют
+    // явно.
+    reference_asked: 'yes',
     payment_status: null, client_type: '2_reference', skin_notes: null, spam_count: 0,
     chosen_slot_id: null, slot_options: ['ev1', 'ev2'], booked_slot_display: null,
     booked_slot_start_iso: null, payment_reminder_sent: null, photos_count: 0,
@@ -209,6 +215,18 @@ eq('консультация: телефон есть, соцсеть уже с�
 {
   const patch = getCardPatchForStep('ask_social', baseCard(), sig());
   eq('патч ask_social: social_asked=yes сразу (fire-and-forget, не ждём ответа)', patch.social_asked, 'yes');
+}
+
+console.log('\n▶ getNextStep — ask_reference_photo (референс, если ни разу не присылал фото, один раз, до цены)');
+eq('фото ни разу не было, референс ещё не спрашивали → ask_reference_photo (даже если цена уже известна)',
+  step({ photos_count: 0, reference_asked: null }), 'ask_reference_photo');
+eq('фото ни разу не было, референс уже спрашивали → едет дальше как обычно (не зацикливается)',
+  step({ photos_count: 0, reference_asked: 'yes' }), 'ask_phone');
+eq('фото уже присылал (photos_count>0), референс не спрашивали → не спрашиваем, едет дальше',
+  step({ photos_count: 1, reference_asked: null }), 'ask_phone');
+{
+  const patch = getCardPatchForStep('ask_reference_photo', baseCard(), sig());
+  eq('патч ask_reference_photo: reference_asked=yes сразу (fire-and-forget, не ждём ответа)', patch.reference_asked, 'yes');
 }
 
 console.log('\n▶ getNextStep — waiting_slots (лист ожидания не должен повторять спич на каждую реплику)');
