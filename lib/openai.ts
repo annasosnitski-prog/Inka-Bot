@@ -7,9 +7,16 @@
 // этот файл только про механику HTTP-вызова.
 // ============================================================
 
+// Мультимодальный контент (текст + картинка) — используется только
+// Extractor-ом для вижн-анализа референса (см. lib/extractor.ts).
+// Responder и Admin продолжают работать с обычной строкой.
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | ChatContentPart[];
 }
 
 export interface CallOpenAIChatOptions {
