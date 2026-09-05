@@ -73,6 +73,7 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     idea: 'роза', size: '10см', placement: 'предплечье', first_tattoo: 'yes',
     existing_tattoo: 'no', direct_tattoo_allowed: 'yes', consultation_needed: 'no',
     active_work_time_estimate: '<=3h', price_quoted: '800₪', price_explained: 'yes',
+    price_factors: null,
     // price_shown по умолчанию 'yes' в тестовой фабрике, как и social_asked
     // ниже — большинство тестов ходит воронку ПОСЛЕ quote_price и не должно
     // об него спотыкаться; тесты именно на price_shown переопределяют явно.

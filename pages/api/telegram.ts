@@ -494,6 +494,7 @@ function recordToClientCard(
     active_work_time_estimate: fields.active_work_time_estimate ?? null,
     price_quoted: fields.price_quoted ?? null,
     price_explained: fields.price_explained ?? null,
+    price_factors: fields.price_factors ?? null,
     price_shown: fields.price_shown ?? null,
     wants_to_book: fields.wants_to_book ?? null,
     decline_followup_asked: fields.decline_followup_asked ?? null,
@@ -546,6 +547,7 @@ function mergeCard(
     consultation_needed: ClientCard['consultation_needed'];
     price_quoted: string | null;
     price_explained: ClientCard['price_explained'];
+    price_factors: string | null;
     phone: string | null;
     client_name: string | null;
     contact_channel: ClientCard['contact_channel'];
@@ -571,6 +573,7 @@ function mergeCard(
       extracted.consultation_needed ?? current.consultation_needed,
     price_quoted: extracted.price_quoted ?? current.price_quoted,
     price_explained: extracted.price_explained ?? current.price_explained,
+    price_factors: extracted.price_factors ?? current.price_factors,
     phone: extracted.phone ?? current.phone,
     client_name: extracted.client_name ?? current.client_name,
     contact_channel: extracted.contact_channel ?? current.contact_channel,
@@ -614,6 +617,7 @@ function clientCardToAirtableFields(
     consultation_needed: card.consultation_needed,
     price_quoted: card.price_quoted,
     price_explained: card.price_explained,
+    price_factors: card.price_factors,
     price_shown: card.price_shown,
     wants_to_book: card.wants_to_book,
     decline_followup_asked: card.decline_followup_asked,
