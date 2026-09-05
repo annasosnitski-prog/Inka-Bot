@@ -53,6 +53,7 @@ export interface ExtractorOutput {
   consultation_needed: YesNo;
   price_quoted: string | null;
   price_explained: YesNo;
+  price_factors: string | null;
   phone: string | null;
   client_name: string | null;
   contact_channel: ContactChannel;

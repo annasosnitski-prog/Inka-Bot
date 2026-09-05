@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "tsc test/selftest.ts --outDir .test-build --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck --strict && node .test-build/test/selftest.js"
+    "test": "tsc test/selftest.ts --outDir .test-build --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck --strict && node .test-build/test/selftest.js",
+    "eval:price": "tsc scripts/priceEval.ts --outDir .eval-build --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck --strict && node .eval-build/scripts/priceEval.js"
   },
   "dependencies": {
     "next": "14.2.5",

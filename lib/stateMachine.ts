@@ -95,6 +95,7 @@ export interface ClientCard {
   active_work_time_estimate: string | null; // "<=3h" | ">3h" | "unknown" | null
   price_quoted: string | null;
   price_explained: YesNo;
+  price_factors: string | null; // внутренняя пометка Extractor-а, какие факторы трудоёмкости определили цену (см. extractorPrompt.txt, ШАГ 2b) — только для мастера, клиенту никогда не показывается
   price_shown: YesNo; // цену реально ПОКАЗАЛИ клиенту (шаг quote_price отработал), не просто посчитали внутри
   wants_to_book: YesNo; // явное подтверждение клиента "да, хочу записаться" после цены
   decline_followup_asked: YesNo; // уже спрашивали "что останавливает" при отказе? спрашивается ОДИН раз (см. all_done/declined_followup_chat)
