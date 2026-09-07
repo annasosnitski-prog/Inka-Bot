@@ -41,12 +41,14 @@ import {
   TATTOO_DAY_BLOCK_HOURS,
 } from './calendar';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from './addSlotParser';
-import { callOpenAIChat } from './openai';
+import { callOpenAIChat, type ChatContentPart } from './openai';
 import { getDepositAmount } from './paymentConfig';
+import { getTelegramFileDataUrl } from './telegramApi';
 
 export interface AdminMessage {
   text: string | null;
   masterTelegramId: number; // telegram_id самой Ани — для памяти диалога (её же запись в Airtable)
+  photoFileId: string | null; // фото в этом же сообщении (Telegram file_id) — для свободного диалога
   forwardFromId: number | null; // id исходного отправителя пересланного сообщения (если доступен)
   forwardName: string | null; // имя из пересылки (fallback, если id скрыт приватностью)
 }
@@ -136,11 +138,27 @@ export async function runAdmin(msg: AdminMessage): Promise<AdminResult> {
   // сообщение уходит в LLM изолированно и она "не помнит", о чём шла речь
   // минуту назад.
   const history = await loadDialogHistory(msg.masterTelegramId);
-  const userContent = JSON.stringify(
+  const userContentText = JSON.stringify(
     { mode: 'dialog', today: new Date().toISOString().slice(0, 10), message: raw },
     null,
     2
   );
+
+  // Фото в этом же сообщении (например "фото видишь?" с картинкой) —
+  // раньше admin-модуль вообще не получал photoFileId и отвечал "я
+  // ориентируюсь только на текст", хотя клиентский Extractor вижн уже
+  // умеет. Скачиваем и отдаём модели тем же способом, что Extractor.
+  let userContent: string | ChatContentPart[] = userContentText;
+  if (msg.photoFileId) {
+    const photoDataUrl = await getTelegramFileDataUrl(msg.photoFileId);
+    if (photoDataUrl) {
+      userContent = [
+        { type: 'text', text: userContentText },
+        { type: 'image_url', image_url: { url: photoDataUrl } },
+      ];
+    }
+  }
+
   const reply = await callAdminLLM(userContent, history);
   await saveDialogHistory(msg.masterTelegramId, history, raw, reply);
   return { reply };
@@ -545,7 +563,10 @@ function getAdminPrompt(): string {
   return cachedPrompt;
 }
 
-async function callAdminLLM(userContent: string, history: DialogTurn[] = []): Promise<string> {
+async function callAdminLLM(
+  userContent: string | ChatContentPart[],
+  history: DialogTurn[] = []
+): Promise<string> {
   const systemPrompt = getAdminPrompt();
 
   const text = await callOpenAIChat({

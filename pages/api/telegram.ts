@@ -139,6 +139,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const adminResult = await runAdmin({
           text: messageText,
           masterTelegramId: telegramId,
+          photoFileId,
           forwardFromId:
             message.forward_from?.id ?? message.forward_origin?.sender_user?.id ?? null,
           forwardName:
