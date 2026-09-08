@@ -44,6 +44,7 @@ import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from './ad
 import { callOpenAIChat, type ChatContentPart } from './openai';
 import { getDepositAmount } from './paymentConfig';
 import { getTelegramFileDataUrl } from './telegramApi';
+import { getPricingRules } from './pricingRules';
 
 export interface AdminMessage {
   text: string | null;
@@ -559,7 +560,8 @@ let cachedPrompt: string | null = null;
 function getAdminPrompt(): string {
   if (cachedPrompt) return cachedPrompt;
   const promptPath = path.join(process.cwd(), 'lib', 'adminPrompt.txt');
-  cachedPrompt = fs.readFileSync(promptPath, 'utf-8');
+  const template = fs.readFileSync(promptPath, 'utf-8');
+  cachedPrompt = template.replace('{{PRICING_RULES}}', getPricingRules());
   return cachedPrompt;
 }
 

@@ -19,17 +19,21 @@ import type {
 import { callOpenAIChat, type ChatContentPart } from './openai';
 import { getTelegramFileDataUrl } from './telegramApi';
 import type { RecentDialogTurn } from './dialogLog';
+import { getPricingRules } from './pricingRules';
 
 // ----------------------------------------------------------
 // Промпт читаем один раз и держим в памяти (холодный старт
 // serverless-функции прочитает файл, тёплые вызовы — нет).
+// {{PRICING_RULES}} в extractorPrompt.txt подставляется из
+// pricingRules.txt — общего источника правды с Admin-модулем.
 // ----------------------------------------------------------
 let cachedPrompt: string | null = null;
 
 function getExtractorPrompt(): string {
   if (cachedPrompt) return cachedPrompt;
   const promptPath = path.join(process.cwd(), 'lib', 'extractorPrompt.txt');
-  cachedPrompt = fs.readFileSync(promptPath, 'utf-8');
+  const template = fs.readFileSync(promptPath, 'utf-8');
+  cachedPrompt = template.replace('{{PRICING_RULES}}', getPricingRules());
   return cachedPrompt;
 }
 
