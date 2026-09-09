@@ -10,7 +10,8 @@
 // ============================================================
 
 import { runResponder } from '../lib/responder';
-import type { ClientCard } from '../lib/stateMachine';
+import type { ClientCard, NextStep } from '../lib/stateMachine';
+import type { RecentDialogTurn } from '../lib/dialogLog';
 
 function baseCard(over: Partial<ClientCard> = {}): ClientCard {
   return {
@@ -60,9 +61,31 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
 interface Case {
   name: string;
   card: ClientCard;
+  nextStep: NextStep;
   lastClientMessage: string;
-  expectPeriodWord: boolean; // ожидаем ли "сеанс"/"встреч" в ответе
+  recentHistory?: RecentDialogTurn[];
+  // Проверка ответа: либо "должно быть упоминание сеанса/встречи"
+  // (quote_price), либо произвольная функция для более сложных
+  // сценариев (например "ответ реально касается количества встреч").
+  check: (reply: string) => { ok: boolean; label: string };
 }
+
+const expectPeriodWord = (reply: string) => {
+  const hasPeriodWord = /сеанс|встреч/i.test(reply);
+  return { ok: hasPeriodWord, label: `упоминание "сеанс"/"встреча": ${hasPeriodWord ? 'есть' : 'НЕТ'}` };
+};
+
+const expectAnswersSessionCountQuestion = (reply: string) => {
+  // Клиент спросил "а что если нужно больше одной встречи" — ответ
+  // должен реально касаться темы (сеанс/встреча/несколько/зависит), а
+  // не просто повторять канцелярский вопрос "хочешь записаться?" в
+  // пустоту, игнорируя то, что клиент спросил.
+  const addressesTopic = /сеанс|встреч|несколько|зависит|уточн|решит мастер/i.test(reply);
+  return {
+    ok: addressesTopic,
+    label: `отвечает по теме количества встреч: ${addressesTopic ? 'да' : 'НЕТ — похоже, вопрос проигнорирован'}`,
+  };
+};
 
 const cases: Case[] = [
   {
@@ -76,8 +99,9 @@ const cases: Case[] = [
       direct_tattoo_allowed: 'yes',
       consultation_needed: 'no',
     }),
+    nextStep: 'quote_price',
     lastClientMessage: 'сколько будет стоить?',
-    expectPeriodWord: true,
+    check: expectPeriodWord,
   },
   {
     name: 'B — крупный проект, price_explained=yes (ожидаемый путь)',
@@ -90,8 +114,9 @@ const cases: Case[] = [
       direct_tattoo_allowed: 'no',
       consultation_needed: 'yes',
     }),
+    nextStep: 'quote_price',
     lastClientMessage: 'а сколько это будет стоить примерно?',
-    expectPeriodWord: true,
+    check: expectPeriodWord,
   },
   {
     name: 'C — крупный проект, но price_explained=no (баг-сценарий из прода: Extractor не проставил price_explained)',
@@ -104,8 +129,33 @@ const cases: Case[] = [
       direct_tattoo_allowed: 'no',
       consultation_needed: 'yes',
     }),
+    nextStep: 'quote_price',
     lastClientMessage: 'сколько стоит?',
-    expectPeriodWord: true,
+    check: expectPeriodWord,
+  },
+  {
+    name: 'D — после цены клиент спрашивает "а что если нужно больше одной встречи?" (не quote_price, а ask_wants_to_book)',
+    card: baseCard({
+      category: 'project',
+      idea: 'плотная графика на спине и плече',
+      size: 'спина+плечо',
+      price_quoted: '2800',
+      price_explained: 'no',
+      direct_tattoo_allowed: 'no',
+      consultation_needed: 'yes',
+      price_shown: 'yes',
+      wants_to_book: null,
+    }),
+    nextStep: 'ask_wants_to_book',
+    recentHistory: [
+      { from: 'client', text: 'сколько стоит?' },
+      {
+        from: 'inka',
+        text: 'такая работа обычно около 2800₪ за встречу. тут считаются размер, плотность деталей и время на аккуратную работу.',
+      },
+    ],
+    lastClientMessage: 'а что если нужно больше одной встречи?',
+    check: expectAnswersSessionCountQuestion,
   },
 ];
 
@@ -128,18 +178,15 @@ async function main() {
     console.log(`  клиент: "${c.lastClientMessage}"`);
     try {
       const reply = await runResponder({
-        nextStep: 'quote_price',
+        nextStep: c.nextStep,
         clientCard: c.card,
         lastClientMessage: c.lastClientMessage,
-        recentHistory: [],
+        recentHistory: c.recentHistory ?? [],
         slotsDisplay: null,
       });
       console.log(`  Инка: ${reply}`);
-      const hasPeriodWord = /сеанс|встреч/i.test(reply);
-      const ok = hasPeriodWord === c.expectPeriodWord;
-      console.log(
-        `  ${ok ? 'PASS' : 'FAIL'} — упоминание "сеанс"/"встреча": ${hasPeriodWord ? 'есть' : 'НЕТ'}`
-      );
+      const { ok, label } = c.check(reply);
+      console.log(`  ${ok ? 'PASS' : 'FAIL'} — ${label}`);
       if (!ok) anyMissing = true;
     } catch (err) {
       console.log(`  ОШИБКА ВЫЗОВА: ${err instanceof Error ? err.message : String(err)}`);
@@ -152,7 +199,7 @@ async function main() {
     console.log('ИТОГО: есть проблемы — см. FAIL/ОШИБКА выше.');
     process.exit(1);
   }
-  console.log('ИТОГО: все сценарии называют цену с "за сеанс"/"за встречу".');
+  console.log('ИТОГО: все сценарии прошли проверку.');
 }
 
 main();
