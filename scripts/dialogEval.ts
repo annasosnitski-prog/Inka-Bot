@@ -10,6 +10,7 @@
 // ============================================================
 
 import { runResponder } from '../lib/responder';
+import { runExtractor } from '../lib/extractor';
 import type { ClientCard, NextStep } from '../lib/stateMachine';
 import type { RecentDialogTurn } from '../lib/dialogLog';
 
@@ -194,6 +195,64 @@ async function main() {
     }
     console.log('');
   }
+
+  // ----------------------------------------------------------
+  // Extractor — "плотное сообщение" (много фактов в одном заходе).
+  // Повод: у стороннего бота (не Inka) на такое же по духу сообщение
+  // ("мне 36, диагноз в начале года, стимуляторы, сертралин от ГТР,
+  // нужна помощь с контролем препаратов и терапии") не сработало
+  // извлечение — среагировал только на короткую переформулировку.
+  // extractorPrompt.txt для Inka прямо требует "если клиент дал
+  // несколько фактов в одном сообщении — заполни ВСЕ соответствующие
+  // поля" — проверяем это утверждение на реальном вызове, а не верим
+  // ему на слово.
+  console.log('========================================');
+  console.log('DIALOG EVAL — Extractor, плотное сообщение');
+  console.log('========================================\n');
+
+  const denseMessage =
+    'Привет! Хочу тату на предплечье, примерно 15 см, чёрно-белая ' +
+    'графика в виде волка, воздушная, не сильно плотная. Это будет ' +
+    'моя первая тату, кожа чистая, ничего сводить не надо. Меня зовут ' +
+    'Марина, удобнее в телеграм. Референс приложу отдельно.';
+
+  console.log(`▶ Плотное сообщение (idea+placement+size+style+first_tattoo+existing_tattoo+имя+канал)`);
+  console.log(`  клиент: "${denseMessage}"`);
+  try {
+    const extracted = await runExtractor({
+      currentCard: {},
+      messageText: denseMessage,
+      hasPhoto: false,
+      photoCaption: null,
+      isAdminSender: false,
+      recentHistory: [],
+      photoFileId: null,
+    });
+    console.log('  извлечено:', JSON.stringify(extracted, null, 2));
+
+    const expectedFilled: Array<[string, unknown]> = [
+      ['idea', extracted.idea],
+      ['placement', extracted.placement],
+      ['size', extracted.size],
+      ['first_tattoo', extracted.first_tattoo],
+      ['existing_tattoo', extracted.existing_tattoo],
+      ['client_name', extracted.client_name],
+      ['contact_channel', extracted.contact_channel],
+    ];
+    const missing = expectedFilled.filter(([, v]) => v === null || v === undefined);
+    if (missing.length > 0) {
+      console.log(
+        `  FAIL — не извлечены поля из ОДНОГО плотного сообщения: ${missing.map(([k]) => k).join(', ')}`
+      );
+      anyMissing = true;
+    } else {
+      console.log('  PASS — все поля извлечены из одного сообщения, без переспрашивания.');
+    }
+  } catch (err) {
+    console.log(`  ОШИБКА ВЫЗОВА: ${err instanceof Error ? err.message : String(err)}`);
+    anyMissing = true;
+  }
+  console.log('');
 
   if (anyMissing) {
     console.log('ИТОГО: есть проблемы — см. FAIL/ОШИБКА выше.');
