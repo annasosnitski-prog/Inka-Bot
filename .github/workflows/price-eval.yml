@@ -5,13 +5,23 @@ on:
     paths:
       - "lib/extractorPrompt.txt"
       - "lib/extractor.ts"
+      - "lib/pricingRules.txt"
+      - "lib/responderPrompt.txt"
+      - "lib/responder.ts"
+      - "lib/adminPrompt.txt"
       - "scripts/priceEval.ts"
+      - "scripts/dialogEval.ts"
   push:
     branches: [main]
     paths:
       - "lib/extractorPrompt.txt"
       - "lib/extractor.ts"
+      - "lib/pricingRules.txt"
+      - "lib/responderPrompt.txt"
+      - "lib/responder.ts"
+      - "lib/adminPrompt.txt"
       - "scripts/priceEval.ts"
+      - "scripts/dialogEval.ts"
   workflow_dispatch: {}
 
 jobs:
@@ -24,5 +34,8 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run eval:price
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - run: npm run eval:dialog
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
