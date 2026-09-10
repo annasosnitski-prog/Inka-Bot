@@ -37,7 +37,7 @@ import {
   MASTER_CLOSED_MARKER,
   type AvailableSlot,
 } from '../lib/calendar';
-import { formatInvoice, isScheduleRequest } from '../lib/admin';
+import { formatInvoice, isScheduleRequest, isSlotCommandLine } from '../lib/admin';
 import { formatDialogHistory, type DialogEntry } from '../lib/dialogLog';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from '../lib/addSlotParser';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
@@ -331,6 +331,22 @@ ok(
     'переведи для меня текст на иврит: привет 🙂 в этот раз я могу принять тебя на два часа позже. но давай дальше уже постараемся держаться согласованного времени, потому что когда запись несколько раз переносится, мне сложно нормально собрать день.'
   )
 );
+
+console.log('\n▶ isSlotCommandLine (пачка команд календаря одним сообщением)');
+// Реальный баг: Аня прислала 6 строк "/добавить чат ..."/"/добавить окно
+// ..." одним сообщением — addSlotParser ищет тег/дату/время по ВСЕМУ
+// тексту разом, поэтому создавался только один (и не факт что верный)
+// слот, остальные строки терялись молча. Фикс: если КАЖДАЯ непустая
+// строка сообщения по отдельности похожа на команду календаря — runAdmin
+// обрабатывает их по одной. Эти тесты — только на распознавание строк
+// (обработка каждой линии дальше идёт через уже отдельно протестированный
+// addSlotParser, здесь незачем дублировать сетевые вызовы календаря).
+ok('"/добавить чат 14 сентября 12:00-14:00" → true', isSlotCommandLine('/добавить чат 14 сентября 12:00-14:00'));
+ok('"добавить окно 14 сентября 14:00-17:00" (без слэша) → true', isSlotCommandLine('добавить окно 14 сентября 14:00-17:00'));
+ok('"/закрой приём 20.07 10:00-12:00" → true', isSlotCommandLine('/закрой приём 20.07 10:00-12:00'));
+ok('"/удали тату 20.07" → true', isSlotCommandLine('/удали тату 20.07'));
+ok('"привет, как дела?" → false (не команда)', !isSlotCommandLine('привет, как дела?'));
+ok('"" → false (пустая строка)', !isSlotCommandLine(''));
 
 console.log('\n▶ formatDialogHistory (история диалога для /история)');
 const histEntries: DialogEntry[] = [

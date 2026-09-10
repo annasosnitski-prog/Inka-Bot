@@ -80,6 +80,30 @@ const DELETE_SLOT_CMDS = ['/удали', '/удалить', 'удали', 'уд�
 // переносится...") ложно улетало в /расписание вместо своего реального
 // адресата (LLM-диалог). Настоящие запросы расписания — короткие фразы,
 // длинное сообщение с похожим словом внутри — что-то другое.
+// Команды календаря, которые можно перечислить пачкой (каждая на своей
+// строке) в одном сообщении — см. runAdmin. handleAddSlot/handleCloseSlot/
+// handleDeleteSlot определены ниже как function-объявления (hoisted),
+// поэтому ссылаться на них здесь безопасно.
+const SLOT_LINE_HANDLERS: Array<[string[], (arg: string) => Promise<string>]> = [
+  [ADD_SLOT_CMDS, handleAddSlot],
+  [CLOSE_SLOT_CMDS, handleCloseSlot],
+  [DELETE_SLOT_CMDS, handleDeleteSlot],
+];
+
+export function isSlotCommandLine(line: string): boolean {
+  const firstWord = (line.split(/\s+/)[0] ?? '').toLowerCase();
+  return SLOT_LINE_HANDLERS.some(([cmds]) => cmds.includes(firstWord));
+}
+
+async function handleSlotCommandLine(line: string): Promise<string> {
+  const firstWord = (line.split(/\s+/)[0] ?? '').toLowerCase();
+  const arg = line.slice(firstWord.length).trim();
+  for (const [cmds, handler] of SLOT_LINE_HANDLERS) {
+    if (cmds.includes(firstWord)) return handler(arg);
+  }
+  return `не поняла строку: "${line}"`;
+}
+
 const SCHEDULE_REQUEST_MAX_LENGTH = 60;
 export function isScheduleRequest(text: string): boolean {
   const t = text.trim();
@@ -98,6 +122,23 @@ export async function runAdmin(msg: AdminMessage): Promise<AdminResult> {
     const invoice = await handleInvoice(msg, '');
     const who = msg.forwardName ? ` ${msg.forwardName}` : '';
     return { reply: `${invoice}\n\nнужен портрет — напиши: /портрет${who}` };
+  }
+
+  // ПАЧКА КОМАНД КАЛЕНДАРЯ ОДНИМ СООБЩЕНИЕМ (/добавить×N, /закрой×N,
+  // /удали×N на разных строках). Была реальная ошибка: findTag/findDate/
+  // findTimeRange в addSlotParser ищут по ВСЕМУ переданному тексту, а не
+  // построчно, поэтому 6 строк "/добавить чат ..." + "/добавить окно ..."
+  // в одном сообщении схлопывались в ОДИН (и не факт что правильный) слот,
+  // остальные 5 строк молча терялись без единой ошибки. Если ВСЕ непустые
+  // строки сообщения по отдельности выглядят как команда календаря —
+  // обрабатываем каждую строку своим отдельным вызовом парсера.
+  const rawLines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (rawLines.length > 1 && rawLines.every(isSlotCommandLine)) {
+    const replies: string[] = [];
+    for (const line of rawLines) {
+      replies.push(await handleSlotCommandLine(line));
+    }
+    return { reply: replies.join('\n') };
   }
 
   const firstWord = (raw.split(/\s+/)[0] ?? '').toLowerCase();
