@@ -76,7 +76,10 @@ export function mergeClientCard(
       payment_reminder_sent: null,
       booked_at: null,
       payment_reminder_early_sent: null,
-      reference_asked: null,
+      // Explicit "no" means: for THIS new project a reference has not yet
+      // been asked/supplied. This distinguishes it from legacy cards where
+      // reference_asked=null but photos_count>0 already proves an old photo.
+      reference_asked: 'no',
 
       // Person-scoped fields survive a project change.
       first_tattoo: extracted.first_tattoo ?? current.first_tattoo,
