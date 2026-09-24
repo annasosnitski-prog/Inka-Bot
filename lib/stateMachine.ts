@@ -122,6 +122,7 @@ export type NextStep =
   | 'handle_out_of_scope_block'
   | 'handle_service_not_offered'
   | 'clarify_service_fit'
+  | 'new_project_after_booking'
   | 'clarify_booked_photo'
   | 'handle_photo_no_caption'
   | 'ask_idea'
@@ -179,6 +180,11 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     card.lead_status === 'consultation_booked';
 
   if (isAlreadyBooked) {
+    // A second independent tattoo must not overwrite the project that already
+    // owns the booking. The current one-card model cannot safely hold both.
+    // Route it to a separate hand-off instead of silently mixing projects.
+    if (signals.is_new_project_request) return 'new_project_after_booking';
+
     if (signals.client_wants_to_reschedule) return 'reschedule_requested_ping_master';
 
     // v2: a generic photo is NOT proof of payment. We require explicit
