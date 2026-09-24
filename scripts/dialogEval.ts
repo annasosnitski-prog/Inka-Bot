@@ -55,6 +55,8 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     force_client_mode: null,
     booked_at: null,
     payment_reminder_early_sent: null,
+    service_fit: null,
+    second_project_flagged: null,
     ...over,
   };
 }

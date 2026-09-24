@@ -481,6 +481,8 @@ function recordToClientCard(
     has_photo_this_message: false,
     photo_has_caption: false,
     force_client_mode: fields.force_client_mode ?? null,
+    service_fit: fields.service_fit ?? null,
+    second_project_flagged: fields.second_project_flagged ?? null,
   };
 }
 
@@ -543,6 +545,8 @@ function clientCardToAirtableFields(
     reference_asked: card.reference_asked,
     photos_count: extra.photos_count,
     force_client_mode: card.force_client_mode,
+    service_fit: card.service_fit,
+    second_project_flagged: card.second_project_flagged,
   };
 }
 

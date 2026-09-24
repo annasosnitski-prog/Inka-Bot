@@ -61,6 +61,8 @@ function card(over: Partial<ClientCard> = {}): ClientCard {
     has_photo_this_message: false,
     photo_has_caption: false,
     force_client_mode: null,
+    service_fit: null,
+    second_project_flagged: null,
     ...over,
   };
 }
@@ -133,6 +135,33 @@ eq(
   getNextStep(card(), signals({ service_fit: 'needs_clarification' })),
   'clarify_service_fit'
 );
+eq(
+  'persisted lock holds on a later turn with no fresh signal (code remembers, not the LLM)',
+  getNextStep(card({ service_fit: 'not_offered' }), signals()),
+  'handle_service_not_offered'
+);
+eq(
+  'a neutral reply ("ок") does not clear a persisted lock',
+  getNextStep(card({ service_fit: 'needs_clarification' }), signals()),
+  'clarify_service_fit'
+);
+eq(
+  'client explicitly clarifying this turn clears the persisted lock',
+  getNextStep(card({ service_fit: 'not_offered' }), signals({ service_fit: 'allowed' })),
+  'show_tattoo_slots'
+);
+const serviceFitPatch = getCardPatchForStep(
+  'clarify_service_fit',
+  card({ idea: null, service_fit: null }),
+  signals({ service_fit: 'needs_clarification' })
+);
+eq('signal this turn gets persisted into the card patch', serviceFitPatch.service_fit, 'needs_clarification');
+const noSignalPatch = getCardPatchForStep(
+  'ask_idea',
+  card({ idea: null, service_fit: 'not_offered' }),
+  signals()
+);
+eq('no signal this turn leaves service_fit out of the patch', noSignalPatch.service_fit, undefined);
 
 console.log('\n▶ v2 booked-photo classification');
 const bookedPhoto = card({
@@ -228,6 +257,20 @@ eq(
   'second project after booking routes to handoff',
   getNextStep(protectedBooked, signals({ is_new_project_request: true })),
   'new_project_after_booking'
+);
+const handoffPatch = getCardPatchForStep(
+  'new_project_after_booking',
+  protectedBooked,
+  signals({ is_new_project_request: true })
+);
+eq('handoff sets the anti-spam flag', handoffPatch.second_project_flagged, 'yes');
+eq(
+  'once flagged, further follow-ups about the same second project do not re-ping the master',
+  getNextStep(
+    { ...protectedBooked, second_project_flagged: 'yes' },
+    signals({ is_new_project_request: true })
+  ),
+  'booked_followup_chat'
 );
 
 console.log('\n▶ v2 price contract');

@@ -93,6 +93,14 @@ export interface ClientCard {
   has_photo_this_message: boolean;
   photo_has_caption: boolean;
   force_client_mode: YesNo;
+  // Persisted per-project gate: unlike the transient signals below, this is
+  // a fact about the CURRENT project, carried across turns by code — not by
+  // asking the Extractor to remember it from recent_history.
+  service_fit: ServiceFit;
+  // Guards new_project_after_booking from re-pinging the master on every
+  // follow-up message about the same second project (no structured second
+  // project record exists yet — see new_project_after_booking below).
+  second_project_flagged: YesNo;
 }
 
 export interface MessageSignals {
@@ -170,9 +178,14 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     return 'handle_out_of_scope_block';
   }
 
-  // v2 service gate: unsupported work must never reach quote/booking.
-  if (signals.service_fit === 'not_offered') return 'handle_service_not_offered';
-  if (signals.service_fit === 'needs_clarification') return 'clarify_service_fit';
+  // v2 service gate: unsupported work must never reach quote/booking. The
+  // persisted card.service_fit is the source of truth across turns — a
+  // fresh per-message signal only overrides it when the Extractor actually
+  // raised the question THIS message; otherwise the code keeps whatever was
+  // already decided, instead of asking the LLM to "remember" it itself.
+  const effectiveServiceFit = signals.service_fit ?? card.service_fit;
+  if (effectiveServiceFit === 'not_offered') return 'handle_service_not_offered';
+  if (effectiveServiceFit === 'needs_clarification') return 'clarify_service_fit';
 
   // Already-booked conversations are isolated from the acquisition funnel.
   const isAlreadyBooked =
@@ -183,7 +196,13 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     // A second independent tattoo must not overwrite the project that already
     // owns the booking. The current one-card model cannot safely hold both.
     // Route it to a separate hand-off instead of silently mixing projects.
-    if (signals.is_new_project_request) return 'new_project_after_booking';
+    // Ping the master only ONCE per second project — without this guard,
+    // every follow-up message the client sends about that second tattoo
+    // (still "different" from the booked card, which never absorbs it)
+    // would re-trigger the same hand-off and spam the master again.
+    if (signals.is_new_project_request && card.second_project_flagged !== 'yes') {
+      return 'new_project_after_booking';
+    }
 
     if (signals.client_wants_to_reschedule) return 'reschedule_requested_ping_master';
 
@@ -313,6 +332,8 @@ export interface CardPatch {
   price_shown?: YesNo;
   decline_followup_asked?: YesNo;
   reference_asked?: YesNo;
+  service_fit?: ServiceFit;
+  second_project_flagged?: YesNo;
 }
 
 export function getCardPatchForStep(
@@ -324,6 +345,14 @@ export function getCardPatchForStep(
 
   if (signals.client_confirms_booking !== null && card.wants_to_book !== 'yes') {
     patch.wants_to_book = signals.client_confirms_booking;
+  }
+
+  // Persist service_fit only when the Extractor actually raised it this
+  // message (including "allowed", which is how a prior lock gets cleared).
+  // A null signal means the question didn't come up now — leave the card's
+  // existing value untouched rather than overwriting it with null.
+  if (signals.service_fit != null) {
+    patch.service_fit = signals.service_fit;
   }
 
   // A real project/reference photo satisfies the per-project reference ask.
@@ -351,6 +380,8 @@ export function getCardPatchForStep(
     case 'slot_change_requested_waiting':
     case 'no_more_slots_waiting':
       return { ...patch, chosen_slot_id: null, lead_status: 'waiting_slots' };
+    case 'new_project_after_booking':
+      return { ...patch, second_project_flagged: 'yes' };
     case 'ask_social':
       return { ...patch, social_asked: 'yes' };
     case 'ask_reference_photo':
