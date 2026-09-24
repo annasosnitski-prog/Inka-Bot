@@ -190,10 +190,51 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       photo_purpose: extracted.photo_purpose,
     };
 
-    // ВАЖНО: старого pattern-match override "ок/го/да = хочу записаться"
-    // здесь больше нет. Extractor получает recentHistory и обязан связывать
-    // короткий ответ с последним вопросом Инки. Кодовый override мог принять
-    // "ок" на имя/соцсеть/другой вопрос за согласие на бронь.
+    // СТРАХОВКА: Extractor получает recentHistory и обычно сам верно
+    // связывает короткий ответ с последним вопросом Инки, но не всегда —
+    // единичный сбой распознавания на этом шаге отправляет клиента в
+    // тупик (ask_wants_to_book повторяется бесконечно). Код применяет
+    // fallback ТОЛЬКО когда по currentCard точно видно, что клиент стоит
+    // именно на вопросе "хочешь записаться?" (цена уже показана,
+    // wants_to_book ещё null) — тот же контекст, что даёт getNextStep
+    // ниже, поэтому false positive на "нет" в ответ на СОВСЕМ ДРУГОЙ
+    // вопрос (имя/соцсеть/что угодно) здесь исключён: тогда это условие
+    // просто не выполняется. "ок"/"окей" намеренно НЕ считаются
+    // согласием — это нейтральный отклик, не явное "да".
+    const stuckOnWantsToBook =
+      signals.client_confirms_booking === null &&
+      currentCard.wants_to_book === null &&
+      (!!currentCard.price_quoted || currentCard.price_explained === 'yes');
+
+    if (stuckOnWantsToBook && messageText) {
+      const lower = messageText.toLowerCase().trim();
+      const yesPatterns = [
+        'да', 'ага', 'хочу', 'давай', 'конечно', 'запиши', 'записывай',
+        'записаться', 'хочу записаться', 'запишите', 'запишите меня',
+        'можно записаться', 'хочу забронировать', 'бронируй', 'го',
+        'yes', 'yep', 'sure', 'lets go',
+      ];
+      const noPatterns = [
+        'нет', 'не', 'пока нет', 'не сейчас', 'подумаю', 'позже',
+        'ещё подумаю', 'еще подумаю', 'потом', 'не надо', 'не хочу',
+        'пока думаю', 'не уверен', 'пока не знаю',
+      ];
+
+      const matchesYes = yesPatterns.some(
+        (p) => lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ',') || lower.startsWith(p + '!')
+      );
+      const matchesNo = noPatterns.some(
+        (p) => lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ',')
+      );
+
+      if (matchesYes && !matchesNo) {
+        signals.client_confirms_booking = 'yes';
+        console.log('CODE OVERRIDE: client_confirms_booking = yes (pattern match, ask_wants_to_book context)');
+      } else if (matchesNo && !matchesYes) {
+        signals.client_confirms_booking = 'no';
+        console.log('CODE OVERRIDE: client_confirms_booking = no (pattern match, ask_wants_to_book context)');
+      }
+    }
 
     // 4. STATE MACHINE — первый проход с тем, что уже знаем
     // (slot_options из Airtable могут быть устаревшими — сейчас
