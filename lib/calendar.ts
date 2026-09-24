@@ -83,7 +83,7 @@ export function tagDisplayLabel(tag: SlotTag | null): string {
     case '[ПРИЁМ]':
       return ' (в студии)';
     case '[ОКНО]':
-      return ' (walk-in)';
+      return '';
     default:
       return '';
   }

@@ -48,7 +48,7 @@ function buildSlotsMessage(slotType: SlotType, slotsDisplay: string[]): string {
     slotType === 'consultation'
       ? 'напиши, пожалуйста, номер варианта, какой подходит — консультация бесплатная, в переписке, около 20 минут.'
       : 'напиши, пожалуйста, номер варианта, какой подходит.';
-  return `привет! появились свободные окошки, которые тебе подходят:\n\n${lines.join('\n')}\n\n${outro}`;
+  return `привет! появилось свободное время, которое тебе подходит:\n\n${lines.join('\n')}\n\n${outro}`;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
