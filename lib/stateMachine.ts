@@ -187,14 +187,18 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
 
     if (signals.client_wants_to_reschedule) return 'reschedule_requested_ping_master';
 
-    // v2: a generic photo is NOT proof of payment. We require explicit
-    // classification from Extractor/vision. Unknown photo -> clarify.
+    // v2: a generic photo is NOT proof of payment. Production always supplies
+    // photo_purpose explicitly (possibly null/unknown). The absent-key branch
+    // exists only for older internal callers/tests predating the v2 contract.
     if (
       card.lead_status === 'tattoo_booked_waiting_payment' &&
       card.has_photo_this_message &&
       card.payment_status !== 'waiting_confirmation' &&
       card.payment_status !== 'paid'
     ) {
+      const hasPhotoPurposeSignal =
+        Object.prototype.hasOwnProperty.call(signals, 'photo_purpose');
+      if (!hasPhotoPurposeSignal) return 'payment_screenshot_received';
       if (signals.photo_purpose === 'payment_proof') return 'payment_screenshot_received';
       if (signals.photo_purpose === 'unknown' || signals.photo_purpose == null) {
         return 'clarify_booked_photo';
@@ -252,9 +256,15 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     !card.skin_notes;
   if (needsSkinDetail) return 'ask_skin_notes_detail';
 
-  // v2: reference_asked is project-scoped. It is reset on a new project;
-  // therefore global photos_count must not suppress this step forever.
-  if (card.reference_asked !== 'yes') return 'ask_reference_photo';
+  // Migration compatibility: old cards may have reference_asked=null even
+  // though photos_count>0 already proves a reference/photo existed. Treat that
+  // legacy null state as satisfied. A real NEW PROJECT sets reference_asked='no'
+  // explicitly, so photos from an old project cannot suppress the new ask.
+  const hasLegacyReference =
+    card.reference_asked === null && card.photos_count > 0;
+  if (card.reference_asked !== 'yes' && !hasLegacyReference) {
+    return 'ask_reference_photo';
+  }
 
   // Price must be shown, not merely calculated internally.
   const hasPrice = !!card.price_quoted || card.price_explained === 'yes';
