@@ -199,7 +199,7 @@ eq('new project replaces placement', newProject.placement, 'спина');
 eq('new project really clears old size', newProject.size, null);
 eq('new project really clears old price', newProject.price_quoted, null);
 eq('new project resets price_shown', newProject.price_shown, null);
-eq('new project resets reference ask', newProject.reference_asked, null);
+eq('new project marks reference as not yet asked for this project', newProject.reference_asked, 'no');
 eq('first_tattoo survives project change', newProject.first_tattoo, 'no');
 eq('phone survives project change', newProject.phone, '0501112233');
 eq('client name survives project change', newProject.client_name, 'Маша');
