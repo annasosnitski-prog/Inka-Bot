@@ -501,11 +501,11 @@ eq('tagOf [ПРИЁМ ОНЛАЙН... ≠ [ПРИЁМ]', tagOf('[ПРИЁМ ОН
 // подписи формата для клиента
 eq('label чат', tagDisplayLabel('[ЧАТ]'), ' (по переписке)');
 eq('label приём', tagDisplayLabel('[ПРИЁМ]'), ' (в студии)');
-eq('label окно', tagDisplayLabel('[ОКНО]'), ' (walk-in)');
+eq('label окно — пусто (не показываем клиенту служебный тег)', tagDisplayLabel('[ОКНО]'), '');
 eq('label тату — пусто', tagDisplayLabel('[ТАТУ]'), '');
-// formatSlotForDisplay дописывает пометку
+// formatSlotForDisplay: [ОКНО] не дописывает никакой пометки клиенту
 const walkinSlot: AvailableSlot = { id: 'e1', summary: '[ОКНО] окно', start: '2026-07-17T12:00:00+03:00', end: '2026-07-17T14:00:00+03:00', tag: '[ОКНО]' };
-ok('дисплей слота содержит (walk-in)', formatSlotForDisplay(walkinSlot).includes('(walk-in)'));
+ok('дисплей слота [ОКНО] не содержит (walk-in)', !formatSlotForDisplay(walkinSlot).includes('walk-in'));
 // busyMarkerForTag: маркер занятости по тегу (сами тексты маркеров — вне
 // объёма переименования тегов, остаются как есть).
 eq('бронь [ТАТУ] → ОЖИДАЕТ ПРЕДОПЛАТЫ', busyMarkerForTag('[ТАТУ]', 'tattoo'), 'ОЖИДАЕТ ПРЕДОПЛАТЫ');
