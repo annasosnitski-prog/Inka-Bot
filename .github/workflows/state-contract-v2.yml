@@ -1,0 +1,23 @@
+name: State Contract v2
+
+on:
+  push:
+    branches:
+      - fix/state-contract-v2
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run deterministic tests
+        run: npm test

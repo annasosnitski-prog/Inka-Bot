@@ -1,18 +1,8 @@
 // ============================================================
-// INKA-BOT — State Machine
-// Чистый TypeScript, БЕЗ вызовов LLM.
-// Источник логики: INKA_MASTER_PRODUCTION_v1_0.txt
-//   (разделы "STATE MACHINE: КАК ВЫБИРАТЬ СЛЕДУЮЩИЙ ШАГ" и
-//    "ВНУТРЕННЕЕ СОСТОЯНИЕ")
-// Источник цены/маршрута: INKANYA_PRICE_v1_2.txt
-//   (направление: direct_tattoo_allowed / consultation_needed
-//    уже посчитаны Extractor-ом по правилам прайса — здесь их
-//    НЕ пересчитываем, только используем)
+// INKA-BOT — State Machine v2 contract
+// Pure TypeScript. No LLM calls.
+// Extractor describes the current message/project; this module owns routing.
 // ============================================================
-
-// ----------------------------------------------------------
-// ТИПЫ
-// ----------------------------------------------------------
 
 export type Intent =
   | 'admin_test'
@@ -49,27 +39,8 @@ export type Category =
 
 export type YesNo = 'yes' | 'no' | null;
 export type ExistingTattoo = 'no' | 'cover' | 'modification' | 'scar_work' | null;
-// Канал, которым мастер будет писать клиенту для чат-консультации ([ЧАТ]-
-// слоты) — спрашивается один раз, сразу после телефона, обязательно (не
-// пропускается, в отличие от social_link). Правило Ани: телефон клиента
-// нужен ВСЕГДА для подтверждения записи, а после него — явно уточнить,
-// в телеграме (том же чате) или в вотсапе (на этот номер) писать.
 export type ContactChannel = 'telegram' | 'whatsapp' | null;
-// waiting_prepayment — слот закреплён, ждём скрин оплаты от клиента.
-// waiting_confirmation — клиент прислал скрин, ждём, что мастер сверит
-//   сумму и подтвердит (бот НЕ подтверждает оплату сам — не может
-//   проверить сумму по картинке). paid проставляет мастер.
-export type PaymentStatus =
-  | 'none'
-  | 'waiting_prepayment'
-  | 'waiting_confirmation'
-  | 'paid'
-  | null;
-// Момент, когда тату-бронь была подтверждена (confirm_slot_awaiting_payment) —
-// ISO-таймстамп. Нужен НЕ воронке (state machine его не читает), а cron-джобе
-// /api/payment-reminders для раннего напоминания мастеру ("бронь стоит уже
-// сутки без оплаты"), которое не привязано к времени ДО слота, в отличие от
-// уже существующего позднего окна (≤36ч до слота, см. booked_slot_start_iso).
+export type PaymentStatus = 'none' | 'waiting_prepayment' | 'waiting_confirmation' | 'paid' | null;
 export type ClientType =
   | '1_undefined'
   | '2_reference'
@@ -78,8 +49,10 @@ export type ClientType =
   | '5_anxious'
   | null;
 
-// Карточка клиента — то, что лежит в Airtable + то, что Extractor
-// вернул из последнего сообщения, слитое в одну запись.
+// Transient message-level routing signals introduced in v2.
+export type ServiceFit = 'allowed' | 'needs_clarification' | 'not_offered' | null;
+export type PhotoPurpose = 'payment_proof' | 'reference' | 'other' | 'unknown' | null;
+
 export interface ClientCard {
   telegram_id: number;
   intent: Intent;
@@ -92,53 +65,59 @@ export interface ClientCard {
   existing_tattoo: ExistingTattoo;
   direct_tattoo_allowed: YesNo;
   consultation_needed: YesNo;
-  active_work_time_estimate: string | null; // "<=3h" | ">3h" | "unknown" | null
+  active_work_time_estimate: string | null;
   price_quoted: string | null;
   price_explained: YesNo;
-  price_factors: string | null; // внутренняя пометка Extractor-а, какие факторы трудоёмкости определили цену (см. extractorPrompt.txt, ШАГ 2b) — только для мастера, клиенту никогда не показывается
-  price_shown: YesNo; // цену реально ПОКАЗАЛИ клиенту (шаг quote_price отработал), не просто посчитали внутри
-  wants_to_book: YesNo; // явное подтверждение клиента "да, хочу записаться" после цены
-  decline_followup_asked: YesNo; // уже спрашивали "что останавливает" при отказе? спрашивается ОДИН раз (см. all_done/declined_followup_chat)
-  phone: string | null; // номер телефона клиента для подтверждения брони — спрашивается перед показом дат
-  // Имя, которое клиент НАЗВАЛ САМ — отдельно от Telegram-профиля (first_name
-  // там не всегда настоящее имя: ники, эмодзи, название бизнеса и т.п.).
-  // Обязательно для тату И консультации, спрашивается вместе с телефоном,
-  // если можно — одним сообщением. См. clientCardToAirtableFields — как
-  // только известно, ОНО заменяет собой отображаемое имя (колонка name).
+  price_factors: string | null;
+  price_shown: YesNo;
+  wants_to_book: YesNo;
+  decline_followup_asked: YesNo;
+  phone: string | null;
   client_name: string | null;
-  contact_channel: ContactChannel; // телеграм/вотсап — только для консультации ([ЧАТ]), обязательно, спрашивается сразу после телефона
-  social_link: string | null; // инста/фейсбук/что угодно, где можно увидеть клиента — необязательно
-  social_asked: YesNo; // уже спрашивали соцсеть? спрашивается ОДИН раз, сразу после телефона, независимо от ответа — не блокирует запись
+  contact_channel: ContactChannel;
+  social_link: string | null;
+  social_asked: YesNo;
   payment_status: PaymentStatus;
   client_type: ClientType;
   skin_notes: string | null;
   spam_count: 0 | 1 | 2 | 3;
   chosen_slot_id: string | null;
-  slot_options: string[] | null; // реальные слоты, пришедшие из календаря
-  booked_slot_display: string | null; // читаемые дата+время подтверждённой брони (для follow-up вопросов "когда у меня запись")
-  booked_slot_start_iso: string | null; // машиночитаемое время начала тату-брони (ISO) — для напоминания мастеру о неоплате за 36ч до слота
-  payment_reminder_sent: YesNo; // уже пинговали мастера про неоплату этой брони? сбрасывается при новой брони
-  booked_at: string | null; // ISO-время подтверждения тату-брони — для раннего напоминания о неоплате, сбрасывается при новой брони
-  payment_reminder_early_sent: YesNo; // уже отправили РАННЕЕ напоминание (через сутки после брони, независимо от даты слота)? отдельный гвард от payment_reminder_sent, сбрасывается при новой брони
-  reference_asked: YesNo; // уже просили референс/фото-пример? спрашивается ОДИН раз, только если клиент за весь разговор ни разу не присылал фото — не блокирует запись, если фото так и не пришло
+  slot_options: string[] | null;
+  booked_slot_display: string | null;
+  booked_slot_start_iso: string | null;
+  payment_reminder_sent: YesNo;
+  booked_at: string | null;
+  payment_reminder_early_sent: YesNo;
+  reference_asked: YesNo;
   photos_count: number;
   has_photo_this_message: boolean;
   photo_has_caption: boolean;
-  force_client_mode: YesNo; // переключатель /client и /admin — см. telegram.ts
+  force_client_mode: YesNo;
+  // Persisted per-project gate: unlike the transient signals below, this is
+  // a fact about the CURRENT project, carried across turns by code — not by
+  // asking the Extractor to remember it from recent_history.
+  service_fit: ServiceFit;
+  // Guards new_project_after_booking from re-pinging the master on every
+  // follow-up message about the same second project (no structured second
+  // project record exists yet — see new_project_after_booking below).
+  second_project_flagged: YesNo;
 }
 
-// Что Extractor дополнительно сообщает о ТЕКУЩЕМ сообщении —
-// не то, что лежит в карточке, а сырые сигналы из этого сообщения.
 export interface MessageSignals {
-  is_admin_sender: boolean; // telegram_id === 457343487
+  is_admin_sender: boolean;
   is_prompt_injection: boolean;
   is_out_of_scope: boolean;
-  is_wrong_layout: boolean; // русский текст, набранный в латинской раскладке (гиббериш)
-  client_picked_slot_id: string | null; // id слота, который Extractor распознал в тексте клиента (валидность проверяет state machine, не Extractor)
-  client_wants_other_slots: boolean; // "ничего не подходит", "другое время"
-  client_asks_for_more_slots: boolean; // "а есть ещё?"
-  client_wants_to_reschedule: boolean; // клиент с УЖЕ подтверждённой записью просит перенести
-  client_confirms_booking: YesNo; // ответ клиента на "хочешь записаться?" — yes/no/null если не отвечал на этот вопрос сейчас
+  is_wrong_layout: boolean;
+  client_picked_slot_id: string | null;
+  client_wants_other_slots: boolean;
+  client_asks_for_more_slots: boolean;
+  client_wants_to_reschedule: boolean;
+  client_confirms_booking: YesNo;
+  // v2: all are current-message signals, never persisted as project facts.
+  service_fit?: ServiceFit;
+  service_fit_reason?: string | null;
+  is_new_project_request?: boolean;
+  photo_purpose?: PhotoPurpose;
 }
 
 export type NextStep =
@@ -149,6 +128,10 @@ export type NextStep =
   | 'handle_out_of_scope_warning_1'
   | 'handle_out_of_scope_warning_2'
   | 'handle_out_of_scope_block'
+  | 'handle_service_not_offered'
+  | 'clarify_service_fit'
+  | 'new_project_after_booking'
+  | 'clarify_booked_photo'
   | 'handle_photo_no_caption'
   | 'ask_idea'
   | 'ask_placement'
@@ -178,115 +161,75 @@ export type NextStep =
   | 'all_done'
   | 'declined_followup_chat';
 
-// ----------------------------------------------------------
-// ГЛАВНАЯ ФУНКЦИЯ
-// ----------------------------------------------------------
+function hasSlots(card: ClientCard): boolean {
+  return !!card.slot_options && card.slot_options.length > 0;
+}
 
 export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep {
-  // 1. РЕЖИМ — admin/test проверяется первым, выше всего остального.
-  // (раздел "AUTHOR / ADMIN / TEST MODE": admin не запускает клиентский
-  // state machine вообще)
-  //
-  // ⚠️ ЗАГЛУШКА: 'admin_mode' здесь — просто флаг "это мастер, не клиент".
-  // Сама начинка admin-режима (счёт по запросу, психологический портрет
-  // клиента, лист ожидания, календарь на день, статистика) — отдельный
-  // модуль lib/admin.ts, строится на ШАГЕ 7, после Calendar/booking.
-  // До шага 7 telegram.ts должен просто ответить чем-то заглушечным
-  // на admin_mode (например "admin-режим пока в разработке").
-  //
-  // force_client_mode — переключатель командами /client и /admin в
-  // telegram.ts (перехватываются раньше Extractor-а). Когда мастер сама
-  // тестирует клиентский путь, force_client_mode = 'yes' и admin_mode
-  // не срабатывает, несмотря на is_admin_sender = true. Команды читают
-  // telegram_id, а не текст — подмена с другого аккаунта невозможна.
-  if (signals.is_admin_sender && card.force_client_mode !== 'yes') {
-    return 'admin_mode';
-  }
+  // Hard guards first.
+  if (signals.is_admin_sender && card.force_client_mode !== 'yes') return 'admin_mode';
+  if (card.lead_status === 'blocked') return 'silence_blocked';
+  if (signals.is_prompt_injection) return 'handle_prompt_injection';
+  if (signals.is_wrong_layout) return 'wrong_keyboard_layout';
 
-  // 2. БЛОКИРОВКА — только клиентский режим.
-  if (card.lead_status === 'blocked') {
-    return 'silence_blocked';
-  }
-
-  // 3. PROMPT INJECTION — проверяется раньше диагностики.
-  if (signals.is_prompt_injection) {
-    return 'handle_prompt_injection';
-  }
-
-  // 3b. НЕПРАВИЛЬНАЯ РАСКЛАДКА — русский текст, набранный латиницей
-  // (гиббериш вроде "e;t tcnm jgsn"). Расшифровать надёжно нельзя, поэтому
-  // не двигаем воронку — просто просим переключить раскладку и повторить.
-  // Проверяем рано (до out_of_scope/фото/брони): гиббериш в любом состоянии
-  // = один и тот же мягкий ответ, а не случайный шаг воронки.
-  if (signals.is_wrong_layout) {
-    return 'wrong_keyboard_layout';
-  }
-
-  // 4. OUT OF SCOPE — три предупреждения, потом блок.
-  // (раздел 2: первый раз — вернуть к теме, второй — повторить
-  // границу, третий — lead_status = blocked)
   if (signals.is_out_of_scope) {
     if (card.spam_count === 0) return 'handle_out_of_scope_warning_1';
     if (card.spam_count === 1) return 'handle_out_of_scope_warning_2';
-    return 'handle_out_of_scope_block'; // ставит lead_status=blocked в Airtable
+    return 'handle_out_of_scope_block';
   }
 
-  // 5. УЖЕ ПОДТВЕРЖДЁННАЯ ЗАПИСЬ — разговор после брони.
-  // ВАЖНО: этот блок проверяется РАНЬШЕ ветки "фото без подписи" ниже.
-  // Скрин предоплаты — это фото и обычно БЕЗ подписи; если бы photo-ветка
-  // шла первой, любой скрин уходил бы в handle_photo_no_caption и логика
-  // оплаты никогда не срабатывала. Поэтому booked-состояние имеет приоритет.
-  //
-  // Инка САМА НЕ переносит встречи — она только спокойно фиксирует
-  // запрос на перенос и явно пингует мастера. Для всех ОСТАЛЬНЫХ тем
-  // (вопросы про процесс/боль/подготовку/что угодно ещё) — отдельный
-  // нейтральный шаг booked_followup_chat, который просто отвечает по
-  // теме без попытки заново предлагать слоты или считать цену. Без
-  // этого блока любой вопрос после брони мог уйти в общую логику ниже
-  // (direct_tattoo_allowed === 'yes' всё ещё true) и повторно показать
-  // слоты или спросить контакт — это уже случалось как баг.
+  // v2 service gate: unsupported work must never reach quote/booking. The
+  // persisted card.service_fit is the source of truth across turns — a
+  // fresh per-message signal only overrides it when the Extractor actually
+  // raised the question THIS message; otherwise the code keeps whatever was
+  // already decided, instead of asking the LLM to "remember" it itself.
+  const effectiveServiceFit = signals.service_fit ?? card.service_fit;
+  if (effectiveServiceFit === 'not_offered') return 'handle_service_not_offered';
+  if (effectiveServiceFit === 'needs_clarification') return 'clarify_service_fit';
+
+  // Already-booked conversations are isolated from the acquisition funnel.
   const isAlreadyBooked =
     card.lead_status === 'tattoo_booked_waiting_payment' ||
     card.lead_status === 'consultation_booked';
+
   if (isAlreadyBooked) {
-    if (signals.client_wants_to_reschedule) {
-      return 'reschedule_requested_ping_master';
+    // A second independent tattoo must not overwrite the project that already
+    // owns the booking. The current one-card model cannot safely hold both.
+    // Route it to a separate hand-off instead of silently mixing projects.
+    // Ping the master only ONCE per second project — without this guard,
+    // every follow-up message the client sends about that second tattoo
+    // (still "different" from the booked card, which never absorbs it)
+    // would re-trigger the same hand-off and spam the master again.
+    if (signals.is_new_project_request && card.second_project_flagged !== 'yes') {
+      return 'new_project_after_booking';
     }
-    // СКРИН ПРЕДОПЛАТЫ. Тату забронировано, оплата ещё не подтверждена, и
-    // клиент прислал фото — трактуем это как скрин предоплаты. Инка НЕ
-    // подтверждает оплату сама (не может сверить сумму по картинке) —
-    // фиксирует payment_status=waiting_confirmation и пингует мастера
-    // (пинг и пересылку скрина делает telegram.ts, здесь только шаг).
-    // Guard по payment_status, чтобы повторный скрин не пинговал мастера
-    // второй раз — тогда это уже обычный booked_followup_chat.
+
+    if (signals.client_wants_to_reschedule) return 'reschedule_requested_ping_master';
+
+    // v2: a generic photo is NOT proof of payment. Production always supplies
+    // photo_purpose explicitly (possibly null/unknown). The absent-key branch
+    // exists only for older internal callers/tests predating the v2 contract.
     if (
       card.lead_status === 'tattoo_booked_waiting_payment' &&
       card.has_photo_this_message &&
       card.payment_status !== 'waiting_confirmation' &&
       card.payment_status !== 'paid'
     ) {
-      return 'payment_screenshot_received';
+      const hasPhotoPurposeSignal =
+        Object.prototype.hasOwnProperty.call(signals, 'photo_purpose');
+      if (!hasPhotoPurposeSignal) return 'payment_screenshot_received';
+      if (signals.photo_purpose === 'payment_proof') return 'payment_screenshot_received';
+      if (signals.photo_purpose === 'unknown' || signals.photo_purpose == null) {
+        return 'clarify_booked_photo';
+      }
     }
     return 'booked_followup_chat';
   }
 
-  // 5b. КЛИЕНТ УЖЕ В ЛИСТЕ ОЖИДАНИЯ (waiting_slots/waiting_slots_pinged).
-  // Раньше любое следующее сообщение клиента (даже простое "ок спасибо")
-  // заново прогонялось по всей воронке и упиралось в тот же no_more_slots_
-  // waiting — бот дословно (или почти дословно) повторял "подходящих
-  // окошек нет" на каждую реплику, что выглядело как баг с зацикливанием
-  // (реальная жалоба с живых тестов). Три исхода:
-  //   - появились реальные слоты (telegram.ts уже подтянул свежий
-  //     slot_options к этому месту) → показываем их, это и есть тот
-  //     самый повторный заход, который лист ожидания должен обеспечить;
-  //   - клиент явно СНОВА спрашивает про варианты → можно ещё раз мягко
-  //     сказать "пока нет", это осознанный ответ на осознанный вопрос;
-  //   - иначе (просто "ок", "спасибо", любой другой разговор) → обычный
-  //     нейтральный чат, не повторяем весь спич заново.
   const isWaitingForSlots =
     card.lead_status === 'waiting_slots' || card.lead_status === 'waiting_slots_pinged';
   if (isWaitingForSlots) {
-    if (card.slot_options && card.slot_options.length > 0) {
+    if (hasSlots(card)) {
       return card.direct_tattoo_allowed === 'yes' ? 'show_tattoo_slots' : 'show_consultation_slots';
     }
     if (signals.client_wants_other_slots || signals.client_asks_for_more_slots) {
@@ -295,215 +238,88 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     return 'waiting_slots_followup_chat';
   }
 
-  // 6. ФОТО без подписи — отдельная ветка, один вопрос.
-  // (раздел 3: "сохранила. что из фото важно...")
-  if (card.has_photo_this_message && !card.photo_has_caption) {
-    return 'handle_photo_no_caption';
-  }
+  // A photo with no caption needs one small clarification before diagnosis.
+  if (card.has_photo_this_message && !card.photo_has_caption) return 'handle_photo_no_caption';
 
-  // 7. СЛОТЫ УЖЕ ПОКАЗАНЫ — обрабатываем раньше, чем заново считать цену.
-  // (раздел 4: lead_status = slots_shown)
+  // Slots already shown: interpret the client's choice before anything else.
   if (card.lead_status === 'slots_shown') {
     if (signals.client_picked_slot_id) {
-      // Валидность выбора проверяет САМ КОД — сверяем id со списком
-      // актуальных slot_options, а не доверяем LLM-сигналу напрямую.
-      // Это надёжнее: занятость слота — факт календаря, не интерпретация
-      // текста. Если id не входит в текущий список — слот уже занят
-      // или устарел.
-      const isValidChoice =
-        !!card.slot_options && card.slot_options.includes(signals.client_picked_slot_id);
-
-      if (!isValidChoice) {
-        return 'slot_taken_pick_again';
-      }
-
-      // Выбор валиден: дальше либо подтверждение тату (ожидание оплаты),
-      // либо подтверждение консультации — зависит от того, какие слоты
-      // показывались (direct_tattoo_allowed/consultation_needed карточки).
-      if (card.direct_tattoo_allowed === 'yes') {
-        return 'confirm_slot_awaiting_payment';
-      }
-      return 'confirm_consultation_booked';
+      const isValidChoice = hasSlots(card) && card.slot_options!.includes(signals.client_picked_slot_id);
+      if (!isValidChoice) return 'slot_taken_pick_again';
+      return card.direct_tattoo_allowed === 'yes'
+        ? 'confirm_slot_awaiting_payment'
+        : 'confirm_consultation_booked';
     }
-    if (signals.client_wants_other_slots) {
-      return 'slot_change_requested_waiting'; // chosen_slot_id=null, lead_status=waiting_slots
-    }
+    if (signals.client_wants_other_slots) return 'slot_change_requested_waiting';
     if (signals.client_asks_for_more_slots) {
-      if (card.slot_options && card.slot_options.length > 0) {
-        // ещё есть реальные варианты — показать тот же show_* шаг повторно
+      if (hasSlots(card)) {
         return card.direct_tattoo_allowed === 'yes'
           ? 'show_tattoo_slots'
           : 'show_consultation_slots';
       }
-      return 'no_more_slots_waiting'; // chosen_slot_id=null, lead_status=waiting_slots
+      return 'no_more_slots_waiting';
     }
-    // Клиент написал что-то непонятное при показанных слотах (например
-    // назвал день недели вместо номера, или Extractor не смог распознать
-    // выбор) — это НЕ "слот занят" (тот шаг — только когда выбор валиден
-    // по индексу, но конкретно этот id уже не в списке). Просим явно
-    // назвать номер, без слова "занято" — иначе вводим в заблуждение.
     return 'unclear_slot_choice';
   }
 
-  // 8. СБОР ДАННЫХ ДЛЯ ЦЕНЫ — idea → placement → size → existing_tattoo.
-  // (раздел 5: порядок — приоритет, не жёсткая цепочка; Responder может
-  // объединить 2-3 поля в один вопрос, это не задача state machine)
+  // Diagnosis / pricing inputs.
   if (!card.idea) return 'ask_idea';
   if (!card.placement) return 'ask_placement';
   if (!card.size) return 'ask_size';
   if (!card.existing_tattoo) return 'ask_existing_tattoo_or_skin';
 
-  // 9. СЛОЖНАЯ КОЖА / КАВЕР / ШРАМЫ — уточнить skin_notes если применимо.
-  // (раздел 6: если есть кавер/шрам/непонятная кожа и skin_notes пусто)
   const needsSkinDetail =
     (card.existing_tattoo === 'cover' ||
       card.existing_tattoo === 'modification' ||
       card.existing_tattoo === 'scar_work') &&
     !card.skin_notes;
-  if (needsSkinDetail) {
-    return 'ask_skin_notes_detail';
-  }
+  if (needsSkinDetail) return 'ask_skin_notes_detail';
 
-  // 9b. РЕФЕРЕНС — если клиент за весь разговор НИ РАЗУ не присылал фото,
-  // просим референс/пример ОДИН раз, до того как называть цену: фото
-  // сильно снижает неясность того, что именно клиент имеет в виду под
-  // идеей, и помогает точнее оценить сложность. Не блокирует воронку —
-  // спрашивается один раз (тот же паттерн, что и social_asked) и не
-  // требует ответа: если референса так и не будет, идём дальше на цене
-  // по тому, что клиент описал текстом.
-  if (card.photos_count === 0 && card.reference_asked !== 'yes') {
+  // Migration compatibility: old cards may have reference_asked=null even
+  // though photos_count>0 already proves a reference/photo existed. Treat that
+  // legacy null state as satisfied. A real NEW PROJECT sets reference_asked='no'
+  // explicitly, so photos from an old project cannot suppress the new ask.
+  const hasLegacyReference =
+    card.reference_asked === null && card.photos_count > 0;
+  if (card.reference_asked !== 'yes' && !hasLegacyReference) {
     return 'ask_reference_photo';
   }
 
-  // 10. ЦЕНА ПЕРЕД ЛЮБЫМ СЛЕДУЮЩИМ ШАГОМ.
-  // category/direct_tattoo_allowed/consultation_needed к этому моменту
-  // уже должны быть посчитаны Extractor-ом (по правилам PRICE v1.2) —
-  // state machine их не пересчитывает, только проверяет наличие цены.
-  //
-  // ВАЖНО: price_quoted/price_explained Extractor может заполнить "молча"
-  // тем же сообщением, что закрыло idea/placement/size/existing_tattoo —
-  // цена посчитана внутри, но клиенту её ещё никто не называл. Раньше
-  // hasPrice засчитывался сразу и шаг quote_price пропускался целиком —
-  // клиент попадал прямо на "хочешь записаться?", ни разу не услышав
-  // цифру. price_shown отдельно фиксирует, что quote_price реально
-  // отработал (см. getCardPatchForStep) — без него не пропускаем шаг,
-  // даже если цена уже вычислена.
+  // Price must be shown, not merely calculated internally.
   const hasPrice = !!card.price_quoted || card.price_explained === 'yes';
-  if (!hasPrice || card.price_shown !== 'yes') {
-    return 'quote_price';
-  }
+  if (!hasPrice || card.price_shown !== 'yes') return 'quote_price';
 
-  // 10b. ПОДТВЕРЖДЕНИЕ НАМЕРЕНИЯ ЗАПИСАТЬСЯ.
-  // Клиент мог спрашивать цену просто из интереса, без намерения
-  // записываться прямо сейчас. Не тянем контакт/слоты без явного "да" —
-  // спрашиваем отдельно и ждём подтверждения. effectiveWantsToBook
-  // приоритизирует свежий сигнал из ТЕКУЩЕГО сообщения (signals) над
-  // тем, что уже сохранено в карточке — клиент мог передумать.
-  //
-  // ИСКЛЮЧЕНИЕ: если card.wants_to_book УЖЕ "yes" — больше не даём
-  // свежему сигналу его перебить. У Extractor нет памяти переписки, он
-  // видит только последнее сообщение + карточку — короткое "нет" на
-  // СОВСЕМ ДРУГОЙ вопрос (например "скинь инстаграм?" на шаге ask_social,
-  // который идёт СРАЗУ ПОСЛЕ подтверждённого "да") легко принять за отказ
-  // от записи, и клиента на финишной прямой отбрасывает в all_done — было
-  // замечено вживую (клиент сказал "хочу", дал телефон/имя/канал, потом
-  // "нет" на инстаграм — и получил "что-то останавливает?"). Once yes,
-  // always yes: дальше по воронке signals.client_confirms_booking уже не
-  // используется для ЭТОГО решения, только для самого первого перехода
-  // null → yes/no.
   const effectiveWantsToBook =
-    card.wants_to_book === 'yes' ? 'yes' : signals.client_confirms_booking ?? card.wants_to_book;
-  if (effectiveWantsToBook === null) {
-    return 'ask_wants_to_book';
-  }
+    card.wants_to_book === 'yes'
+      ? 'yes'
+      : signals.client_confirms_booking ?? card.wants_to_book;
+
+  if (effectiveWantsToBook === null) return 'ask_wants_to_book';
   if (effectiveWantsToBook === 'no') {
-    if (card.decline_followup_asked === 'yes') {
-      // Уже один раз мягко спросили "что останавливает" — правило
-      // Responder-а прямо запрещает повторять этот вопрос дальше
-      // ("БОЛЬШЕ не возвращаться к теме записи самой"), но без этой
-      // ветки код каждый раз заново решал all_done и Responder не мог
-      // узнать, что уже спрашивал (у него тоже нет памяти переписки) —
-      // вопрос повторялся дословно на каждую следующую реплику клиента.
-      return 'declined_followup_chat';
-    }
-    return 'all_done';
+    return card.decline_followup_asked === 'yes' ? 'declined_followup_chat' : 'all_done';
   }
 
-  // 11a. ПРЯМОЙ ПУТЬ НА ТАТУ
+  // Direct tattoo route.
   if (card.direct_tattoo_allowed === 'yes') {
-    // price_explained недостаточно для тату-слотов — нужен именно price_quoted.
-    if (!card.price_quoted) {
-      return 'quote_price';
-    }
-    if (card.first_tattoo === null) {
-      return 'ask_first_tattoo';
-    }
-    // ТЕЛЕФОН — обязателен перед показом дат брони. По бизнес-правилу Ани
-    // мы всегда берём номер телефона клиента для подтверждения брони,
-    // прежде чем показывать/закреплять слоты. Пишем в тот же чат по
-    // telegram_id, но для подтверждения брони нужен именно телефон.
-    if (!card.phone) {
-      return 'ask_phone';
-    }
-    // ИМЯ — обязательно, как и телефон (Telegram-профиль не годится, см.
-    // ClientCard.client_name). Спрашиваем сразу после телефона, в идеале
-    // одним сообщением с ним (см. responderPrompt.txt: ask_phone).
-    if (!card.client_name) {
-      return 'ask_name';
-    }
-    // СОЦСЕТЬ — необязательно, спрашиваем ОДИН раз сразу после телефона
-    // (см. getCardPatchForStep: social_asked проставляется сразу же, как
-    // только этот шаг отдан клиенту, независимо от того, что он ответит
-    // на СЛЕДУЮЩЕМ сообщении). Не блокирует запись, если клиент не
-    // ответил или соцсети нет.
-    if (card.social_asked !== 'yes') {
-      return 'ask_social';
-    }
-    if (card.slot_options && card.slot_options.length > 0) {
-      return 'show_tattoo_slots';
-    }
-    return 'no_more_slots_waiting'; // нет реальных слотов — в лист ожидания
+    if (!card.price_quoted) return 'quote_price';
+    if (card.first_tattoo === null) return 'ask_first_tattoo';
+    if (!card.phone) return 'ask_phone';
+    if (!card.client_name) return 'ask_name';
+    if (card.social_asked !== 'yes') return 'ask_social';
+    return hasSlots(card) ? 'show_tattoo_slots' : 'no_more_slots_waiting';
   }
 
-  // 11b. КОНСУЛЬТАЦИОННЫЙ ПУТЬ
+  // Consultation route.
   if (card.consultation_needed === 'yes') {
-    // Телефон обязателен и для консультации — то же правило про любой
-    // запрос на даты брони.
-    if (!card.phone) {
-      return 'ask_phone';
-    }
-    // ИМЯ — обязательно, как и для тату (см. комментарий в 11a).
-    if (!card.client_name) {
-      return 'ask_name';
-    }
-    // КАНАЛ СВЯЗИ — только для консультации (это [ЧАТ]-слот: мастер сама
-    // пишет клиенту в назначенное время, а не наоборот, как с тату). В
-    // отличие от social_asked это ОБЯЗАТЕЛЬНЫЙ шаг, не пропускается —
-    // без канала мастер не знает, куда писать.
-    if (!card.contact_channel) {
-      return 'ask_contact_channel';
-    }
-    if (card.social_asked !== 'yes') {
-      return 'ask_social';
-    }
-    if (card.slot_options && card.slot_options.length > 0) {
-      return 'show_consultation_slots';
-    }
-    return 'no_more_slots_waiting';
+    if (!card.phone) return 'ask_phone';
+    if (!card.client_name) return 'ask_name';
+    if (!card.contact_channel) return 'ask_contact_channel';
+    if (card.social_asked !== 'yes') return 'ask_social';
+    return hasSlots(card) ? 'show_consultation_slots' : 'no_more_slots_waiting';
   }
 
-  // Если ни direct_tattoo_allowed, ни consultation_needed ещё не выставлены
-  // Extractor-ом (например, потому что category всё ещё null) — возвращаемся
-  // к сбору цены. Это защитный fallback, в норме сюда не попадаем, если
-  // Extractor честно выставил оба поля после category.
   return 'quote_price';
 }
-
-// ----------------------------------------------------------
-// ПОМОЩНИК: какие изменения карточки происходят НА ЭТОМ шаге
-// (то, что state machine обязана записать обратно в Airtable,
-// помимо того что вернул Extractor)
-// ----------------------------------------------------------
 
 export interface CardPatch {
   lead_status?: LeadStatus;
@@ -516,6 +332,8 @@ export interface CardPatch {
   price_shown?: YesNo;
   decline_followup_asked?: YesNo;
   reference_asked?: YesNo;
+  service_fit?: ServiceFit;
+  second_project_flagged?: YesNo;
 }
 
 export function getCardPatchForStep(
@@ -523,28 +341,33 @@ export function getCardPatchForStep(
   card: ClientCard,
   signals: MessageSignals
 ): CardPatch {
-  // wants_to_book сохраняется в карточку НАВСЕГДА, в отличие от
-  // большинства signals полей — это не разовый сигнал сообщения, а
-  // факт про клиента, который должен помниться на следующих шагах.
-  //
-  // Once yes, always yes — та же защита, что и в getNextStep выше: если
-  // card.wants_to_book уже "yes", не даём случайному сигналу этого же
-  // сообщения (например Extractor принял "нет" на вопрос про инстаграм
-  // за отказ от записи — у него нет памяти переписки, чтобы знать, что
-  // на самом деле спросили) откатить его обратно в Airtable. Без этой
-  // защиты getNextStep выше принял бы верное решение НА ЭТОТ ход, но
-  // испорченное значение всё равно записалось бы и сломало бы СЛЕДУЮЩИЙ.
   const patch: CardPatch = {};
+
   if (signals.client_confirms_booking !== null && card.wants_to_book !== 'yes') {
     patch.wants_to_book = signals.client_confirms_booking;
   }
 
+  // Persist service_fit only when the Extractor actually raised it this
+  // message (including "allowed", which is how a prior lock gets cleared).
+  // A null signal means the question didn't come up now — leave the card's
+  // existing value untouched rather than overwriting it with null.
+  if (signals.service_fit != null) {
+    patch.service_fit = signals.service_fit;
+  }
+
+  // A real project/reference photo satisfies the per-project reference ask.
+  // For no-caption photos, handle_photo_no_caption itself is the reference
+  // clarification, so do not ask for another reference on the next turn.
+  if (
+    card.has_photo_this_message &&
+    card.lead_status !== 'tattoo_booked_waiting_payment' &&
+    card.lead_status !== 'consultation_booked'
+  ) {
+    patch.reference_asked = 'yes';
+  }
+
   switch (step) {
     case 'all_done':
-      // Проставляется СРАЗУ, как только шаг отдан клиенту — не на его
-      // ответ (тот же паттерн, что и ask_social ниже). Со следующего
-      // сообщения, если клиент всё ещё не хочет записываться, дальше
-      // идёт declined_followup_chat, а не повтор этого же вопроса.
       return { ...patch, decline_followup_asked: 'yes' };
     case 'handle_out_of_scope_warning_1':
       return { ...patch, spam_count: 1 };
@@ -557,15 +380,11 @@ export function getCardPatchForStep(
     case 'slot_change_requested_waiting':
     case 'no_more_slots_waiting':
       return { ...patch, chosen_slot_id: null, lead_status: 'waiting_slots' };
+    case 'new_project_after_booking':
+      return { ...patch, second_project_flagged: 'yes' };
     case 'ask_social':
-      // Проставляется СРАЗУ, как только шаг отдан клиенту — не на его
-      // ответ. Спрашиваем ровно один раз: следующее сообщение уже уходит
-      // дальше по воронке независимо от того, дал клиент соцсеть или нет.
       return { ...patch, social_asked: 'yes' };
     case 'ask_reference_photo':
-      // Тот же паттерн: проставляется сразу, как только шаг отдан
-      // клиенту, независимо от того, пришлёт он фото или нет — спрашиваем
-      // ровно один раз за разговор.
       return { ...patch, reference_asked: 'yes' };
     case 'quote_price':
       return { ...patch, price_shown: 'yes' };
@@ -582,8 +401,6 @@ export function getCardPatchForStep(
     case 'confirm_consultation_booked':
       return { ...patch, lead_status: 'consultation_booked', slot_options: null };
     case 'payment_screenshot_received':
-      // lead_status НЕ трогаем — запись остаётся tattoo_booked_waiting_payment
-      // до тех пор, пока мастер не подтвердит оплату (payment_status=paid).
       return { ...patch, payment_status: 'waiting_confirmation' };
     default:
       return patch;

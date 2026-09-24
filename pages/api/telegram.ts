@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { upsertClient, findClientByTelegramId } from '../../lib/airtable';
 import { runExtractor } from '../../lib/extractor';
+import { mergeClientCard } from '../../lib/clientCardMerge';
 import { getNextStep, getCardPatchForStep } from '../../lib/stateMachine';
 import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
@@ -12,8 +13,8 @@ import { sendTelegramMessage, forwardTelegramMessage, pickLargestTelegramPhoto }
 import { getDepositAmount } from '../../lib/paymentConfig';
 
 // Master's own Telegram ID — admin/test mode detection.
-// ЗАГЛУШКА на шаге 3-4: admin_mode сейчас просто отвечает заглушкой,
-// полноценная логика admin-режима строится на шаге 7.
+// Admin requests are handled by the dedicated admin module below and do not
+// enter the client state machine unless /client mode was explicitly enabled.
 const MASTER_TELEGRAM_ID = 457343487;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -120,20 +121,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const currentCard = recordToClientCard(telegramId, existing?.fields ?? {});
 
     // 1b. ПОСЛЕДНИЕ РЕПЛИКИ ПЕРЕПИСКИ — контекст этого хода для Extractor
-    // и Responder. Раньше оба видели только currentCard + голое последнее
-    // сообщение, без памяти "что я только что спросила" — короткий ответ
-    // клиента ("нет", "да", "думаю") нечем было привязать к вопросу, на
-    // который он отвечает. Отсюда живой баг: "нет" на "скинь инстаграм?"
-    // читалось как отказ от записи (см. lib/dialogLog.ts). dialog_history
-    // уже читается для существующего клиента, отдельного похода в Airtable
-    // не требует.
+    // и Responder. currentCard — агрегат фактов, а recentHistory позволяет
+    // понять, на какой именно последний вопрос клиент отвечает коротким
+    // "да", "нет", "ок" и т.п.
     const recentHistory = recentDialogForModel(parseDialogHistory(existing));
 
-    // 1a. ADMIN-РЕЖИМ (ШАГ 7). Мастер (isAdminSender), если она не
-    // переключилась в клиентский путь командой /client (force_client_mode),
-    // обрабатывается отдельным admin-модулем — БЕЗ клиентского Extractor /
-    // state machine / Responder. Иначе прогон Аниных служебных запросов
-    // через воронку засоряет её же карточку и выдаёт бессмыслицу.
+    // 1a. ADMIN-РЕЖИМ. Мастер, если она не переключилась в клиентский путь
+    // командой /client, обрабатывается отдельным admin-модулем — БЕЗ
+    // клиентского Extractor / state machine / Responder.
     if (isAdminSender && currentCard.force_client_mode !== 'yes') {
       try {
         const adminResult = await runAdmin({
@@ -160,7 +155,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ ok: true });
     }
 
-    // 2. EXTRACTOR — разобрать сообщение клиента на поля.
+    // 2. EXTRACTOR — разобрать сообщение клиента на поля и transient-сигналы.
     const extracted = await runExtractor({
       currentCard,
       messageText,
@@ -171,8 +166,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       photoFileId,
     });
 
-    // 3. Слить новую карточку.
-    const mergedCard: ClientCard = mergeCard(currentCard, extracted, {
+    // 3. Слить новую карточку. mergeClientCard умеет реально сбрасывать
+    // проектные поля при явной новой идее и защищает уже забронированный
+    // проект от перезаписи второй татуировкой.
+    const mergedCard: ClientCard = mergeClientCard(currentCard, extracted, {
       hasPhotoThisMessage: hasPhoto,
       photoHasCaption: hasPhoto && !!photoCaption,
     });
@@ -187,15 +184,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       client_asks_for_more_slots: extracted.client_asks_for_more_slots,
       client_wants_to_reschedule: extracted.client_wants_to_reschedule,
       client_confirms_booking: extracted.client_confirms_booking,
+      service_fit: extracted.service_fit,
+      service_fit_reason: extracted.service_fit_reason,
+      is_new_project_request: extracted.is_new_project_request,
+      photo_purpose: extracted.photo_purpose,
     };
 
-    // ФИКС: Extractor не знает, какой шаг был предыдущим (он не получает
-    // previous_step и не видит ответ бота). Поэтому он не может надёжно
-    // распознать "записаться" / "да" / "хочу" как ответ на вопрос
-    // "хочешь записаться?". Детерминированный перехват: если карточка
-    // стоит на ask_wants_to_book (wants_to_book ещё null, цена дана)
-    // и Extractor вернул client_confirms_booking = null — проверяем
-    // текст сообщения на явные маркеры согласия/отказа КОДОМ.
+    // СТРАХОВКА: Extractor получает recentHistory и обычно сам верно
+    // связывает короткий ответ с последним вопросом Инки, но не всегда —
+    // единичный сбой распознавания на этом шаге отправляет клиента в
+    // тупик (ask_wants_to_book повторяется бесконечно). Код применяет
+    // fallback ТОЛЬКО когда по currentCard точно видно, что клиент стоит
+    // именно на вопросе "хочешь записаться?" (цена уже показана,
+    // wants_to_book ещё null) — тот же контекст, что даёт getNextStep
+    // ниже, поэтому false positive на "нет" в ответ на СОВСЕМ ДРУГОЙ
+    // вопрос (имя/соцсеть/что угодно) здесь исключён: тогда это условие
+    // просто не выполняется. "ок"/"окей" намеренно НЕ считаются
+    // согласием — это нейтральный отклик, не явное "да".
     const stuckOnWantsToBook =
       signals.client_confirms_booking === null &&
       currentCard.wants_to_book === null &&
@@ -207,7 +212,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         'да', 'ага', 'хочу', 'давай', 'конечно', 'запиши', 'записывай',
         'записаться', 'хочу записаться', 'запишите', 'запишите меня',
         'можно записаться', 'хочу забронировать', 'бронируй', 'го',
-        'ок', 'окей', 'ok', 'yes', 'yep', 'sure', 'lets go',
+        'yes', 'yep', 'sure', 'lets go',
       ];
       const noPatterns = [
         'нет', 'не', 'пока нет', 'не сейчас', 'подумаю', 'позже',
@@ -215,7 +220,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         'пока думаю', 'не уверен', 'пока не знаю',
       ];
 
-      // Проверяем: точное совпадение ИЛИ текст начинается с паттерна
       const matchesYes = yesPatterns.some(
         (p) => lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ',') || lower.startsWith(p + '!')
       );
@@ -225,10 +229,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (matchesYes && !matchesNo) {
         signals.client_confirms_booking = 'yes';
-        console.log('CODE OVERRIDE: client_confirms_booking = yes (pattern match)');
+        console.log('CODE OVERRIDE: client_confirms_booking = yes (pattern match, ask_wants_to_book context)');
       } else if (matchesNo && !matchesYes) {
         signals.client_confirms_booking = 'no';
-        console.log('CODE OVERRIDE: client_confirms_booking = no (pattern match)');
+        console.log('CODE OVERRIDE: client_confirms_booking = no (pattern match, ask_wants_to_book context)');
       }
     }
 
@@ -237,48 +241,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // только определяем, в какую сторону движется диалог).
     let nextStep = getNextStep(mergedCard, signals);
 
-    // 5. CALENDAR — подгружаем АКТУАЛЬНЫЙ список слотов из календаря,
-    // если карточка УЖЕ дошла до точки, где слоты в принципе нужны:
-    // направление выбрано (direct_tattoo_allowed ИЛИ consultation_needed
-    // = "yes") И контакт уже известен. Это шире, чем просто проверка
-    // nextStep === 'show_*' — потому что если контакт стал известен
-    // ИМЕННО в этом сообщении (клиент только что ответил "в телеграм"),
-    // первый проход getNextStep() ещё видит старые пустые slot_options
-    // из Airtable и сразу решает "слотов нет" (no_more_slots_waiting),
-    // не успев их подгрузить. Проверяем по структуре карточки, а не по
-    // конкретному значению nextStep — иначе теряем именно тот момент,
-    // когда слоты нужны СРАЗУ на этом же сообщении.
+    // 5. CALENDAR — подгружаем АКТУАЛЬНЫЙ список слотов только когда
+    // текущий state действительно находится в слот-флоу. Раньше одного
+    // routeChosen + phone было достаточно, поэтому уже забронированный
+    // клиент мог зря триггерить календарь на любом follow-up сообщении.
     let liveCard = mergedCard;
-    // Человекочитаемые версии slot_options для показа клиенту через
-    // Responder (Extractor и bookSlot продолжают работать с чистыми
-    // event.id в slot_options — эта строка только для текста ответа).
     let slotsDisplay: string[] | null = null;
-    // Сырые слоты с ISO-временем (не только текст) — нужны при успешной
-    // брони, чтобы сохранить машиночитаемое время начала (booked_slot_start_iso,
-    // см. ниже) для напоминания мастеру о неоплате за 36ч до слота.
     let rawSlots: AvailableSlot[] | null = null;
 
-    // Слоты подгружаем, когда направление выбрано И у нас уже есть
-    // телефон клиента (по бизнес-правилу телефон обязателен перед
-    // показом дат — см. ask_phone в state machine).
     const hasPhone = !!mergedCard.phone;
     const routeChosen =
       mergedCard.direct_tattoo_allowed === 'yes' || mergedCard.consultation_needed === 'yes';
-    const needsFreshSlots = routeChosen && hasPhone;
+    const slotLookupSteps: NextStep[] = [
+      'show_tattoo_slots',
+      'show_consultation_slots',
+      'no_more_slots_waiting',
+      'waiting_slots_followup_chat',
+      'slot_taken_pick_again',
+      'unclear_slot_choice',
+      'confirm_slot_awaiting_payment',
+      'confirm_consultation_booked',
+    ];
+    const needsFreshSlots = routeChosen && hasPhone && slotLookupSteps.includes(nextStep);
 
-    // Если первый проход (шаг 4) уже валидно подтвердил бронь по списку,
-    // который РЕАЛЬНО показывали клиенту (mergedCard.slot_options из
-    // Airtable) — не пересчитываем nextStep по свежему топ-3 ниже. Свежий
-    // список мог сдвинуться (конкурентная бронь, новый слот через
-    // /добавить, истёкший lead-time) и случайно не включать тот же самый,
-    // всё ещё свободный слот — тогда getNextStep() на свежем списке ложно
-    // вернул бы slot_taken_pick_again, и bookSlot() ниже вообще не
-    // вызвался бы, хотя слот на деле свободен. Настоящую проверку
-    // занятости делает bookSlot() по конкретному event id, не присутствие
-    // в топ-N. slot_options/slotsDisplay/rawSlots из свежего фетча всё
-    // равно используются ниже (шаг 6) для человекочитаемой даты/времени
-    // брони — если пикнутого id там не найдётся, booked_slot_display
-    // просто останется пустым (Responder уже умеет с этим работать).
+    // Если первый проход уже валидно подтвердил бронь по списку, который
+    // реально показывали клиенту, не пересчитываем подтверждение по свежему
+    // top-N: настоящую проверку занятости делает bookSlot() по event id.
     const alreadyConfirmed =
       nextStep === 'confirm_slot_awaiting_payment' || nextStep === 'confirm_consultation_booked';
 
@@ -319,7 +307,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (!result.success) {
         console.log('Booking failed, refetching slots:', result.error);
-        // Слот увели — подгружаем свежий список и просим выбрать снова.
         const freshSlots = await getAvailableSlots(slotType, 3).catch(() => []);
         liveCard = {
           ...liveCard,
@@ -329,18 +316,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         slotsDisplay = freshSlots.map(formatSlotForDisplay);
         nextStep = 'slot_taken_pick_again';
       } else {
-        // Сохраняем читаемую дату+время брони — иначе после того, как
-        // slot_options обнуляются патчем, у карточки не остаётся НИКАКИХ
-        // человекочитаемых данных о времени записи, и на follow-up вопрос
-        // "когда у меня запись" бот не может ответить сам (было замечено
-        // вживую). slotsDisplay и liveCard.slot_options построены из одного
-        // и того же вызова getAvailableSlots в том же порядке — по индексу
-        // выбранного id находим соответствующую человекочитаемую строку.
         const pickedIndex = liveCard.slot_options?.indexOf(signals.client_picked_slot_id) ?? -1;
         const pickedDisplay = pickedIndex >= 0 ? slotsDisplay?.[pickedIndex] ?? null : null;
-        // Только для тату (нужно исключительно для напоминаний о
-        // неоплаченной предоплате, а предоплата есть только у тату-брони;
-        // консультации бесплатные, напоминания им не нужны).
         const isTattooBooking = nextStep === 'confirm_slot_awaiting_payment';
         const pickedStartIso =
           isTattooBooking && pickedIndex >= 0 ? rawSlots?.[pickedIndex]?.start ?? null : null;
@@ -349,9 +326,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           chosen_slot_id: signals.client_picked_slot_id,
           booked_slot_display: pickedDisplay,
           booked_slot_start_iso: pickedStartIso,
-          payment_reminder_sent: null, // новая бронь — сбрасываем гвард напоминания
-          booked_at: isTattooBooking ? new Date().toISOString() : liveCard.booked_at, // для раннего напоминания о неоплате (см. pages/api/payment-reminders.ts)
-          payment_reminder_early_sent: isTattooBooking ? null : liveCard.payment_reminder_early_sent, // новая бронь — сбрасываем гвард раннего напоминания
+          payment_reminder_sent: null,
+          booked_at: isTattooBooking ? new Date().toISOString() : liveCard.booked_at,
+          payment_reminder_early_sent: isTattooBooking ? null : liveCard.payment_reminder_early_sent,
         };
       }
     }
@@ -361,14 +338,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const patch = getCardPatchForStep(nextStep, liveCard, signals);
     const finalCard: ClientCard = { ...liveCard, ...patch };
 
-    // 8. Сохранить в Airtable. Обёрнуто в свой try/catch — тот же принцип,
-    // что уже у календаря (шаг 5) и пинга мастеру (шаг 11): сбой
-    // вторичного шага не должен стоить клиенту ответа. Раньше падение
-    // здесь (например код ссылается на поле, которого ещё нет в таблице —
-    // так и вышло 2026-08-09 с social_link) улетало в общий catch внизу
-    // файла, и клиент не получал вообще ничего. Теперь клиент всё равно
-    // получит ответ на это сообщение — просто состояние карточки не
-    // сохранится и на следующем сообщении подтянется по старым данным.
+    // 8. Сохранить в Airtable. Сбой сохранения не должен лишать клиента
+    // ответа на текущий ход.
     const photosCountIncrement = hasPhoto ? 1 : 0;
     const fieldsToSave = clientCardToAirtableFields(finalCard, {
       username,
@@ -389,19 +360,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // 9. RESPONDER — написать живой ответ клиенту.
+    // Для фото без текста даём responder-у хотя бы назначение изображения,
+    // если Extractor его уверенно определил.
+    const responderLastMessage =
+      messageText ??
+      (extracted.photo_purpose === 'payment_proof'
+        ? '[клиент прислал подтверждение оплаты]'
+        : extracted.photo_purpose === 'reference'
+          ? '[клиент прислал референс по тату]'
+          : hasPhoto
+            ? '[клиент прислал фото без подписи]'
+            : null);
+
     const replyText = await runResponder({
       nextStep,
       clientCard: finalCard,
-      lastClientMessage: messageText,
+      lastClientMessage: responderLastMessage,
       recentHistory,
       slotsDisplay,
     });
 
     // 9b. РЕКВИЗИТЫ ПРЕДОПЛАТЫ. На шаге подтверждения тату дописываем
-    // реквизиты (Bit + банковский счёт) ДЕТЕРМИНИРОВАННО из env, а не
-    // через LLM — номера нельзя доверять генерации, любая ошибка в
-    // цифре = потерянные деньги. Responder-у велено НЕ печатать
-    // реквизиты самому (см. confirm_slot_awaiting_payment в промпте).
+    // реквизиты ДЕТЕРМИНИРОВАННО из env, а не через LLM.
     let finalReply = replyText;
     if (nextStep === 'confirm_slot_awaiting_payment') {
       const payBlock = buildPaymentDetailsBlock();
@@ -415,35 +395,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       await sendTelegramMessage(chatId, finalReply);
     }
 
-    // 10b. ЛОГ ДИАЛОГА. Дописываем этот обмен репликами (клиент + Инка) в
-    // историю клиента в Airtable — Аня поднимает её командой /история.
-    // Вызывается ПОСЛЕ отправки ответа клиенту, чтобы задержка логирования
-    // не влияла на его получение. Никогда не бросает исключение.
+    // 10b. ЛОГ ДИАЛОГА.
     await appendDialogTurn(existing, lastMessageForRecord, finalReply);
 
-    // 11. ПИНГ МАСТЕРУ. Некоторые шаги обещают клиенту "передала мастеру"
-    // или требуют действия Ани (подтвердить оплату, назначить перенос,
-    // подобрать слот). Раньше эти обещания уходили в пустоту — здесь
-    // реально уведомляем мастера в её личный чат.
-    //
-    // ВАЖНО: этот код выполняется, только когда клиентский пайплайн
-    // реально отработал — а он либо для настоящего клиента (isAdminSender
-    // = false), либо для Ани, сознательно тестирующей клиентский путь
-    // командой /client (isAdminSender = true, но тогда шаг 1a уже
-    // перехватил бы её как admin_mode и сюда мы бы не попали). То есть
-    // если мы здесь — уведомление ожидаемо и нужно ВСЕГДА, включая
-    // собственные тесты Ани: раньше был отдельный guard "!isAdminSender",
-    // который в /client-тестах ложно гасил пинг целиком (Аня жаловалась,
-    // что не получает уведомление о брони при тестировании) — этот guard
-    // был лишним и неверным, убран.
-    // Обёрнуто в свой try/catch: сбой пинга не должен ломать ответ клиенту.
+    // 11. ПИНГ МАСТЕРУ. Шаги, которые обещают "передала мастеру" или
+    // требуют действия Ани, должны иметь реальный пинг, а не только текст.
     try {
       const notifyLabel = finalCard.client_name || clientLabel;
-      const masterNote = buildMasterNotification(nextStep, notifyLabel, username);
+      const masterNote = buildMasterNotification(
+        nextStep,
+        notifyLabel,
+        username,
+        lastMessageForRecord
+      );
       if (masterNote) {
         await sendTelegramMessage(MASTER_TELEGRAM_ID, masterNote);
-        // Скрин оплаты пересылаем Ане целиком — ей нужно видеть саму
-        // картинку, чтобы сверить сумму и подтвердить.
         if (
           nextStep === 'payment_screenshot_received' &&
           chatId &&
@@ -452,11 +418,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
         }
       } else if (pingOnEveryMessage()) {
-        // 11b. РЕЖИМ ПЕРВЫХ ЖИВЫХ ТЕСТОВ (env PING_MASTER_ON_ALL_MESSAGES=1).
-        // Аня хочет знать про КАЖДОЕ сообщение клиента, а не только про
-        // шаги воронки из buildMasterNotification — чтобы следить за
-        // диалогом в реальном времени, не сидя в Airtable. Шлём только
-        // когда funnel-пинга не было (masterNote = null), чтобы не дублировать.
         await sendTelegramMessage(
           MASTER_TELEGRAM_ID,
           buildGenericMessagePing(notifyLabel, username, lastMessageForRecord)
@@ -504,7 +465,7 @@ function recordToClientCard(
     contact_channel: fields.contact_channel ?? null,
     social_link: fields.social_link ?? null,
     social_asked: fields.social_asked ?? null,
-    payment_status: fields.deposit_status ?? null, // колонка в Airtable зовётся deposit_status
+    payment_status: fields.deposit_status ?? null,
     client_type: fields.client_type ?? null,
     skin_notes: fields.skin_notes ?? null,
     spam_count: fields.spam_count ?? 0,
@@ -520,6 +481,8 @@ function recordToClientCard(
     has_photo_this_message: false,
     photo_has_caption: false,
     force_client_mode: fields.force_client_mode ?? null,
+    service_fit: fields.service_fit ?? null,
+    second_project_flagged: fields.second_project_flagged ?? null,
   };
 }
 
@@ -530,58 +493,6 @@ function parseSlotOptions(raw: any): string[] | null {
     return raw.split(',').map((s) => s.trim());
   }
   return null;
-}
-
-function mergeCard(
-  current: ClientCard,
-  extracted: {
-    intent: ClientCard['intent'];
-    idea: string | null;
-    placement: string | null;
-    size: string | null;
-    existing_tattoo: ClientCard['existing_tattoo'];
-    skin_notes: string | null;
-    first_tattoo: ClientCard['first_tattoo'];
-    category: ClientCard['category'];
-    active_work_time_estimate: string | null;
-    direct_tattoo_allowed: ClientCard['direct_tattoo_allowed'];
-    consultation_needed: ClientCard['consultation_needed'];
-    price_quoted: string | null;
-    price_explained: ClientCard['price_explained'];
-    price_factors: string | null;
-    phone: string | null;
-    client_name: string | null;
-    contact_channel: ClientCard['contact_channel'];
-    social_link: string | null;
-  },
-  messageFlags: { hasPhotoThisMessage: boolean; photoHasCaption: boolean }
-): ClientCard {
-  return {
-    ...current,
-    intent: extracted.intent ?? current.intent,
-    idea: extracted.idea ?? current.idea,
-    placement: extracted.placement ?? current.placement,
-    size: extracted.size ?? current.size,
-    existing_tattoo: extracted.existing_tattoo ?? current.existing_tattoo,
-    skin_notes: extracted.skin_notes ?? current.skin_notes,
-    first_tattoo: extracted.first_tattoo ?? current.first_tattoo,
-    category: extracted.category ?? current.category,
-    active_work_time_estimate:
-      extracted.active_work_time_estimate ?? current.active_work_time_estimate,
-    direct_tattoo_allowed:
-      extracted.direct_tattoo_allowed ?? current.direct_tattoo_allowed,
-    consultation_needed:
-      extracted.consultation_needed ?? current.consultation_needed,
-    price_quoted: extracted.price_quoted ?? current.price_quoted,
-    price_explained: extracted.price_explained ?? current.price_explained,
-    price_factors: extracted.price_factors ?? current.price_factors,
-    phone: extracted.phone ?? current.phone,
-    client_name: extracted.client_name ?? current.client_name,
-    contact_channel: extracted.contact_channel ?? current.contact_channel,
-    social_link: extracted.social_link ?? current.social_link,
-    has_photo_this_message: messageFlags.hasPhotoThisMessage,
-    photo_has_caption: messageFlags.photoHasCaption,
-  };
 }
 
 function clientCardToAirtableFields(
@@ -595,13 +506,8 @@ function clientCardToAirtableFields(
 ): Record<string, any> {
   return {
     username: extra.username,
-    // name — отображаемое имя (используется в /счёт, пингах мастеру,
-    // календаре). Пока клиент сам не назвал имя (client_name), берём
-    // Telegram-профиль как и раньше; как только client_name известно —
-    // оно ПОДМЕНЯЕТ собой отображаемое имя (Telegram first_name не всегда
-    // настоящее). client_name хранится отдельной колонкой — это флаг
-    // "клиент сам подтвердил", не переиспользуем name для этой цели,
-    // иначе ask_name решил бы, что имя уже назвали (см. lib/stateMachine.ts).
+    // name — отображаемое имя. Пока клиент сам не назвал имя, берём
+    // Telegram-профиль; client_name хранится отдельно как подтверждённое.
     name: card.client_name || extra.name,
     client_name: card.client_name,
     last_message: extra.last_message,
@@ -626,7 +532,7 @@ function clientCardToAirtableFields(
     contact_channel: card.contact_channel,
     social_link: card.social_link,
     social_asked: card.social_asked,
-    deposit_status: card.payment_status, // колонка в Airtable зовётся deposit_status
+    deposit_status: card.payment_status,
     skin_notes: card.skin_notes,
     spam_count: card.spam_count,
     chosen_slot_id: card.chosen_slot_id,
@@ -639,16 +545,17 @@ function clientCardToAirtableFields(
     reference_asked: card.reference_asked,
     photos_count: extra.photos_count,
     force_client_mode: card.force_client_mode,
+    service_fit: card.service_fit,
+    second_project_flagged: card.second_project_flagged,
   };
 }
 
-// Текст уведомления мастеру для тех шагов, где Ане нужно что-то узнать
-// или сделать. Возвращает null для шагов, не требующих её внимания —
-// тогда пинг не отправляется вовсе.
+// Текст уведомления мастеру для шагов, где Ане нужно что-то узнать или сделать.
 function buildMasterNotification(
   step: NextStep,
   clientLabel: string,
-  username: string
+  username: string,
+  lastMessage: string
 ): string | null {
   const who = username ? `${clientLabel} (@${username})` : clientLabel;
   switch (step) {
@@ -658,6 +565,8 @@ function buildMasterNotification(
       return `🗓 Новая КОНСУЛЬТАЦИЯ — ${who}. Слот забронирован.`;
     case 'payment_screenshot_received':
       return `💰 ${who} прислал скрин предоплаты — проверь сумму и подтверди оплату (скрин переслан ниже).`;
+    case 'new_project_after_booking':
+      return `🆕 ${who} написал про вторую тату при активной записи. Текущая бронь не изменена. Новый запрос: ${lastMessage}`;
     case 'reschedule_requested_ping_master':
       return `🔄 ${who} просит перенести запись — напиши насчёт нового времени.`;
     case 'slot_change_requested_waiting':
@@ -668,27 +577,16 @@ function buildMasterNotification(
   }
 }
 
-// Включён ли режим "пинговать мастера на каждое сообщение клиента" —
-// для первых живых тестов, пока Аня хочет следить за всеми диалогами,
-// а не только за шагами воронки. Управляется env-переменной, чтобы
-// включать/выключать без деплоя кода: PING_MASTER_ON_ALL_MESSAGES=1.
 function pingOnEveryMessage(): boolean {
   return process.env.PING_MASTER_ON_ALL_MESSAGES === '1';
 }
 
-// Короткий пинг "пришло сообщение от клиента" — для режима первых живых
-// тестов (см. pingOnEveryMessage). Не заменяет buildMasterNotification,
-// а дополняет его на шагах, которые сами по себе внимания не требуют.
 function buildGenericMessagePing(clientLabel: string, username: string, messageText: string): string {
   const who = username ? `${clientLabel} (@${username})` : clientLabel;
   return `📩 ${who}: ${messageText}`;
 }
 
-// Блок реквизитов предоплаты, собранный из env-переменных. Клиенту
-// предлагается два способа на выбор: Bit (по номеру телефона) и
-// банковский перевод. Если ни один реквизит не задан в env — возвращаем
-// null (тогда сообщение уходит без блока, а не с битым текстом).
-// Env: PAYMENT_BIT (номер для Bit), PAYMENT_BANK (реквизиты банка).
+// Блок реквизитов предоплаты, собранный из env-переменных.
 export function buildPaymentDetailsBlock(): string | null {
   const bit = (process.env.PAYMENT_BIT ?? '').trim();
   const bank = (process.env.PAYMENT_BANK ?? '').trim();
@@ -703,4 +601,3 @@ export function buildPaymentDetailsBlock(): string | null {
   lines.push('после оплаты пришли, пожалуйста, скрин 🙏');
   return lines.join('\n');
 }
-

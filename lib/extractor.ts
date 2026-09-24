@@ -2,8 +2,6 @@
 // INKA-BOT — Extractor
 // Первый из двух вызовов OpenAI. Узкая задача: вытащить поля
 // из сообщения клиента. НЕ пишет ответ, НЕ выбирает NEXT_STEP.
-// Промпт лежит в extractorPrompt.txt (читается один раз при холодном
-// старте функции и кэшируется в памяти процесса).
 // ============================================================
 
 import fs from 'fs';
@@ -15,34 +13,30 @@ import type {
   Category,
   ClientCard,
   ContactChannel,
+  ServiceFit,
+  PhotoPurpose,
 } from './stateMachine';
 import { callOpenAIChat, type ChatContentPart } from './openai';
 import { getTelegramFileDataUrl } from './telegramApi';
 import type { RecentDialogTurn } from './dialogLog';
 import { getPricingRules } from './pricingRules';
 
-// ----------------------------------------------------------
-// Промпт читаем один раз и держим в памяти (холодный старт
-// serverless-функции прочитает файл, тёплые вызовы — нет).
-// {{PRICING_RULES}} в extractorPrompt.txt подставляется из
-// pricingRules.txt — общего источника правды с Admin-модулем.
-// ----------------------------------------------------------
 let cachedPrompt: string | null = null;
 
 function getExtractorPrompt(): string {
   if (cachedPrompt) return cachedPrompt;
   const promptPath = path.join(process.cwd(), 'lib', 'extractorPrompt.txt');
+  const overlayPath = path.join(process.cwd(), 'lib', 'extractorContractV2.txt');
   const template = fs.readFileSync(promptPath, 'utf-8');
-  cachedPrompt = template.replace('{{PRICING_RULES}}', getPricingRules());
+  const base = template.replace('{{PRICING_RULES}}', getPricingRules());
+  // Contract overlay is intentionally appended last: it only overrides the
+  // output contract / new routing signals while preserving the battle-tested
+  // pricing and extraction rules in the production prompt.
+  const overlay = fs.readFileSync(overlayPath, 'utf-8');
+  cachedPrompt = `${base}\n\n${overlay}`;
   return cachedPrompt;
 }
 
-// ----------------------------------------------------------
-// То, что Extractor реально возвращает (сырой JSON от модели).
-// Это подмножество ClientCard + MessageSignals — без полей,
-// которыми Extractor не управляет (lead_status, spam_count,
-// chosen_slot_id, telegram_id, slot_options, photos_count).
-// ----------------------------------------------------------
 export interface ExtractorOutput {
   intent: Intent;
   idea: string | null;
@@ -72,23 +66,21 @@ export interface ExtractorOutput {
   client_asks_for_more_slots: boolean;
   client_wants_to_reschedule: boolean;
   client_confirms_booking: 'yes' | 'no' | null;
+
+  // v2 transient contract signals. They describe THIS message only.
+  service_fit: ServiceFit;
+  service_fit_reason: string | null;
+  is_new_project_request: boolean;
+  photo_purpose: PhotoPurpose;
 }
 
-// ----------------------------------------------------------
-// Вход функции: текущая карточка (как контекст для модели) +
-// сырое сообщение клиента + флаг is_admin_sender (вычислен кодом).
-// ----------------------------------------------------------
 export interface ExtractorInput {
   currentCard: Partial<ClientCard>;
-  messageText: string | null; // текст сообщения, или null если только фото без подписи
+  messageText: string | null;
   hasPhoto: boolean;
-  photoCaption: string | null; // подпись к фото, если есть
+  photoCaption: string | null;
   isAdminSender: boolean;
-  recentHistory: RecentDialogTurn[]; // последние ~15 обменов клиент↔Инка, БЕЗ текущего сообщения — контекст, каким вопросом реально было последнее сообщение Инки
-  // file_id самого большого размера фото из этого сообщения (см.
-  // lib/telegramApi.ts, pickLargestTelegramPhoto) — если задан, фото
-  // реально показывается модели (вижн), но СТРОГО как референс/дизайн,
-  // не как медицинский материал (см. extractorPrompt.txt, раздел 4).
+  recentHistory: RecentDialogTurn[];
   photoFileId: string | null;
 }
 
@@ -110,17 +102,12 @@ export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutp
     2
   );
 
-  // Вижн подключаем, только если реально есть фото И карточка ещё не в
-  // состоянии подтверждённой брони — там фото почти всегда скрин
-  // предоплаты, а не референс дизайна, тратить на него вызов вижна
-  // бессмысленно (промпт всё равно велит игнорировать нереференсные фото,
-  // но так дешевле и предсказуемее).
-  const isAlreadyBooked =
-    input.currentCard.lead_status === 'tattoo_booked_waiting_payment' ||
-    input.currentCard.lead_status === 'consultation_booked';
-
+  // v2: booked photos are also shown to vision. The overlay strictly limits
+  // booked-image use to photo_purpose classification, which lets us tell a
+  // real payment proof from a tattoo reference instead of treating ANY photo
+  // after booking as money received.
   let userMessageContent: string | ChatContentPart[] = userContent;
-  if (input.photoFileId && !isAlreadyBooked) {
+  if (input.photoFileId) {
     const photoDataUrl = await getTelegramFileDataUrl(input.photoFileId);
     if (photoDataUrl) {
       userMessageContent = [
@@ -151,16 +138,11 @@ export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutp
   return normalizeExtractorOutput(parsed);
 }
 
-// ----------------------------------------------------------
-// Защитный слой: не доверяем модели на 100%, подчищаем то, что
-// легко проверить кодом без LLM.
-// ----------------------------------------------------------
 function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput {
-  const normalized = { ...raw };
+  const normalized = { ...raw } as ExtractorOutput;
 
-  // category "large" | "body_fit" | "project" обязаны давать
-  // consultation_needed = "yes" — досчитываем кодом, не доверяя
-  // модели в краевых случаях.
+  // These route constraints are deterministic, so enforce them in code even
+  // if the model misses one in a complex message.
   if (
     normalized.category === 'large' ||
     normalized.category === 'body_fit' ||
@@ -169,6 +151,28 @@ function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput {
     normalized.direct_tattoo_allowed = 'no';
     normalized.consultation_needed = 'yes';
   }
+
+  const validServiceFit = new Set<ServiceFit>([
+    'allowed',
+    'needs_clarification',
+    'not_offered',
+    null,
+  ]);
+  if (!validServiceFit.has(normalized.service_fit ?? null)) normalized.service_fit = null;
+
+  const validPhotoPurpose = new Set<PhotoPurpose>([
+    'payment_proof',
+    'reference',
+    'other',
+    'unknown',
+    null,
+  ]);
+  if (!validPhotoPurpose.has(normalized.photo_purpose ?? null)) normalized.photo_purpose = null;
+
+  normalized.service_fit_reason = normalized.service_fit_reason ?? null;
+  normalized.is_new_project_request = normalized.is_new_project_request === true;
+  normalized.photo_purpose = normalized.photo_purpose ?? null;
+  normalized.service_fit = normalized.service_fit ?? null;
 
   return normalized;
 }
