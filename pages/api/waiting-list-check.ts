@@ -12,10 +12,13 @@
 //
 // Этот эндпоинт сам смотрит календарь и, если для нужного типа (тату/
 // консультация) появились варианты — пишет клиенту НАПРЯМУЮ (в отличие от
-// payment-reminders/warm-lead-reminders, которые пингуют мастера): это
-// чисто информационный шаг, прямое выполнение уже данного клиенту обещания
-// "как появится — напишу" (см. no_more_slots_waiting в responderPrompt.txt),
-// без элемента давления/продажи — поэтому не требует решения Ани.
+// payment-reminders/warm-lead-reminders, которые только пингуют мастера):
+// это чисто информационный шаг, прямое выполнение уже данного клиенту
+// обещания "как появится — напишу" (см. no_more_slots_waiting в
+// responderPrompt.txt), без элемента давления/продажи — поэтому не требует
+// решения Ани. Мастеру при этом всё равно уходит короткое уведомление
+// постфактум (что и кому написали) — иначе Аня узнаёт об этом только если
+// клиент сам расскажет.
 //
 // Одна пара вызовов getAvailableSlots на весь прогон (по одному на каждый
 // тип слота), а не по вызову на клиента — календарь общий, не персональный.
@@ -34,6 +37,11 @@ import { getAvailableSlots, formatSlotForDisplay } from '../../lib/calendar';
 import type { SlotType, AvailableSlot } from '../../lib/calendar';
 import { sendTelegramMessage } from '../../lib/telegramApi';
 import { pickWaitingListSlotType } from '../../lib/reminderWindows';
+
+// Тот же ID мастера, что и в payment-reminders/warm-lead-reminders —
+// сюда же уходит короткое уведомление, что бот сам написал клиенту
+// (Аня иначе узнаёт об этом только если клиент ей перескажет).
+const MASTER_TELEGRAM_ID = 457343487;
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -111,6 +119,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           updated_at: new Date().toISOString(),
         });
         notified++;
+
+        // Уведомление мастеру — чисто информационное, не блокирует и не
+        // откатывает сам показ слотов клиенту (тот уже состоялся выше).
+        const who = f.name
+          ? `${f.name}${f.username ? ` (@${f.username})` : ''}`
+          : f.username
+          ? `@${f.username}`
+          : 'клиент';
+        const masterText = `🔔 Инка написала ${who} про свободное время:\n${slotsDisplay.join(', ')}`;
+        sendTelegramMessage(MASTER_TELEGRAM_ID, masterText).catch((masterErr) => {
+          console.error('waiting-list-check: failed to notify master for record', record.id, masterErr);
+        });
       } catch (sendErr) {
         console.error('waiting-list-check: failed to notify record', record.id, sendErr);
       }
