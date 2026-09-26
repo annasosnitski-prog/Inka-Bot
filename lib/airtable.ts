@@ -37,6 +37,42 @@ export async function findClientByTelegramId(
   return data.records[0];
 }
 
+// Один telegram_id может now own несколько строк — один клиент с двумя
+// независимыми проектами одновременно (см. lib/clientCardMerge.ts и
+// pages/api/telegram.ts). Возвращает ВСЕ его записи, самые свежие первыми
+// (по updated_at) — источник правды для того, какая запись "активнее".
+// Не фильтрует по статусу — вызывающий код (webhook: только активные;
+// admin по пересылке: вообще все, для истории) решает сам.
+export async function findAllClientRecordsByTelegramId(
+  telegramId: number | string
+): Promise<ClientRecord[]> {
+  const formula = encodeURIComponent(`{telegram_id} = ${Number(telegramId)}`);
+  const url =
+    `${AIRTABLE_API_URL}?filterByFormula=${formula}&maxRecords=10` +
+    `&sort%5B0%5D%5Bfield%5D=updated_at&sort%5B0%5D%5Bdirection%5D=desc`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Airtable search failed: ${res.status} ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  return data.records ?? [];
+}
+
+// Проект считается закрытым (не участвует в маршрутизации следующего
+// сообщения как "активный") если клиента заблокировали за спам или он
+// явно отказался записываться. lead_status при отказе НЕ меняется (см.
+// getCardPatchForStep: 'all_done'/'declined_followup_chat' не трогают
+// lead_status) — поэтому "закрыт" проверяется отдельно по wants_to_book,
+// а не одним lead_status.
+export function isProjectRecordClosed(fields: Record<string, any>): boolean {
+  return fields.lead_status === 'blocked' || fields.wants_to_book === 'no';
+}
+
 // Поиск клиента по имени или @username — для admin-режима, когда Аня
 // указывает клиента текстом, а не пересылкой. Регистронезависимо, по
 // подстроке. Может вернуть несколько (тёзки) — вызывающий код решает,
@@ -198,9 +234,17 @@ export async function updateClient(
 export async function upsertClient(
   telegramId: number | string,
   commonFields: Record<string, any>,
-  createOnlyFields: Record<string, any> = {}
+  createOnlyFields: Record<string, any> = {},
+  // Когда вызывающий код уже знает, в какую ИМЕННО запись писать (клиент
+  // с несколькими активными проектами — см. findAllClientRecordsByTelegramId),
+  // передаёт её id сюда и внутренний поиск по telegram_id пропускается.
+  // Без этого upsertClient всегда обновил бы первую попавшуюся запись
+  // клиента, а не ту, к которой на самом деле относится этот ход.
+  existingRecordId?: string
 ): Promise<{ record: ClientRecord; isNew: boolean }> {
-  const existing = await findClientByTelegramId(telegramId);
+  const existing = existingRecordId
+    ? ({ id: existingRecordId } as ClientRecord)
+    : await findClientByTelegramId(telegramId);
 
   if (existing) {
     const updated = await updateClient(existing.id, commonFields);

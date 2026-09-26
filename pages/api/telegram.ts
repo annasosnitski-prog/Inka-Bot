@@ -1,7 +1,13 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { upsertClient, findClientByTelegramId } from '../../lib/airtable';
+import {
+  upsertClient,
+  createClient,
+  findAllClientRecordsByTelegramId,
+  isProjectRecordClosed,
+} from '../../lib/airtable';
+import type { ClientRecord } from '../../lib/airtable';
 import { runExtractor } from '../../lib/extractor';
-import { mergeClientCard } from '../../lib/clientCardMerge';
+import { mergeClientCard, isBooked } from '../../lib/clientCardMerge';
 import { getNextStep, getCardPatchForStep } from '../../lib/stateMachine';
 import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
@@ -116,15 +122,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    // 1. Найти текущую карточку клиента (если есть).
-    const existing = await findClientByTelegramId(telegramId);
-    const currentCard = recordToClientCard(telegramId, existing?.fields ?? {});
+    // 1. Найти ВСЕ активные проекты этого telegram_id. Клиент может вести
+    // до двух независимых татуировок одновременно — вторая заводит себе
+    // отдельную строку в Airtable (см. п.2b ниже и lib/clientCardMerge.ts),
+    // а не перезаписывает первую. "Активный" = не заблокирован и явно не
+    // отказался записываться — lead_status при отказе НЕ меняется (см.
+    // getCardPatchForStep), поэтому смотрим isProjectRecordClosed, а не
+    // один lead_status.
+    const allRecords = await findAllClientRecordsByTelegramId(telegramId);
+    const activeRecords = allRecords.filter((r) => !isProjectRecordClosed(r.fields));
+    // Самая недавно тронутая запись — то, что клиент продолжает по
+    // умолчанию; уточняется через is_new_project_request в п.2b.
+    const primaryRecord: ClientRecord | null = activeRecords[0] ?? null;
+    const secondaryRecord: ClientRecord | null = activeRecords[1] ?? null;
+
+    let existing: ClientRecord | null = primaryRecord;
+    let currentCard = recordToClientCard(telegramId, existing?.fields ?? {});
 
     // 1b. ПОСЛЕДНИЕ РЕПЛИКИ ПЕРЕПИСКИ — контекст этого хода для Extractor
     // и Responder. currentCard — агрегат фактов, а recentHistory позволяет
     // понять, на какой именно последний вопрос клиент отвечает коротким
     // "да", "нет", "ок" и т.п.
-    const recentHistory = recentDialogForModel(parseDialogHistory(existing));
+    let recentHistory = recentDialogForModel(parseDialogHistory(existing));
 
     // 1a. ADMIN-РЕЖИМ. Мастер, если она не переключилась в клиентский путь
     // командой /client, обрабатывается отдельным admin-модулем — БЕЗ
@@ -155,8 +174,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ ok: true });
     }
 
-    // 2. EXTRACTOR — разобрать сообщение клиента на поля и transient-сигналы.
-    const extracted = await runExtractor({
+    // 2. EXTRACTOR — разобрать сообщение клиента на поля и transient-сигналы,
+    // относительно самого свежего активного проекта.
+    let extracted = await runExtractor({
       currentCard,
       messageText,
       hasPhoto,
@@ -165,6 +185,56 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       recentHistory,
       photoFileId,
     });
+
+    // 2b. ВТОРОЙ АКТИВНЫЙ ПРОЕКТ. Сообщение не про самый свежий проект
+    // (is_new_project_request) — но прежде чем считать, что начинается ещё
+    // (третий) проект, проверяем: может, оно про уже существующий ВТОРОЙ
+    // активный проект клиента (переключение между двумя, а не новый).
+    // Второй прогон Extractor-а стоит дороже одного сообщения, но это
+    // редкий ход — переключение между проектами, а не каждое сообщение.
+    let isCreatingSecondProject = false;
+    if (extracted.is_new_project_request && secondaryRecord) {
+      const secondaryCard = recordToClientCard(telegramId, secondaryRecord.fields);
+      const secondaryHistory = recentDialogForModel(parseDialogHistory(secondaryRecord));
+      const extractedForSecondary = await runExtractor({
+        currentCard: secondaryCard,
+        messageText,
+        hasPhoto,
+        photoCaption,
+        isAdminSender,
+        recentHistory: secondaryHistory,
+        photoFileId,
+      });
+      if (!extractedForSecondary.is_new_project_request) {
+        // Действительно про второй проект — переключаем весь ход на него.
+        extracted = extractedForSecondary;
+        currentCard = secondaryCard;
+        recentHistory = secondaryHistory;
+        existing = secondaryRecord;
+      }
+      // Иначе: не подошло ни к одному из двух активных — это уже третий,
+      // независимый проект. Третьего одновременного проекта мы не ведём —
+      // extracted остаётся посчитанным относительно primaryRecord, и ниже
+      // это уходит в уже существующий hand-off (new_project_after_booking /
+      // second_project_flagged), как раньше.
+    } else if (extracted.is_new_project_request && !secondaryRecord && isBooked(currentCard)) {
+      // Единственный активный проект уже забронирован, а клиент заводит
+      // НЕЗАВИСИМУЮ вторую татуировку — даём ей отдельную запись вместо
+      // разового пинга мастеру без дальнейшего ведения (см. историю в PR
+      // с first-cut второго проекта). Сид — пустая карточка с сохранёнными
+      // личными полями: mergeClientCard увидит isBooked(seed)===false и
+      // соберёт проектные поля из extracted, не трогая бронь primaryRecord.
+      const seed = recordToClientCard(telegramId, {});
+      seed.phone = currentCard.phone;
+      seed.client_name = currentCard.client_name;
+      seed.first_tattoo = currentCard.first_tattoo;
+      seed.contact_channel = currentCard.contact_channel;
+      seed.social_link = currentCard.social_link;
+      currentCard = seed;
+      recentHistory = [];
+      existing = null;
+      isCreatingSecondProject = true;
+    }
 
     // 3. Слить новую карточку. mergeClientCard умеет реально сбрасывать
     // проектные поля при явной новой идее и защищает уже забронированный
@@ -349,12 +419,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
 
     try {
-      const { record } = await upsertClient(
-        telegramId,
-        fieldsToSave,
-        { lead_status: finalCard.lead_status, spam_count: 0 }
-      );
-      console.log('Airtable saved:', { recordId: record.id, nextStep });
+      if (isCreatingSecondProject) {
+        // Независимый второй проект — ОБЯЗАТЕЛЬНО новая запись. upsertClient
+        // здесь не подходит: без явного recordId он сам найдёт по telegram_id
+        // и перезапишет первую, уже забронированную строку этого клиента.
+        const record = await createClient({
+          telegram_id: Number(telegramId),
+          ...fieldsToSave,
+          lead_status: finalCard.lead_status,
+          spam_count: 0,
+        });
+        console.log('Airtable: created second-project record', { recordId: record.id, nextStep });
+      } else {
+        const { record } = await upsertClient(
+          telegramId,
+          fieldsToSave,
+          { lead_status: finalCard.lead_status, spam_count: 0 },
+          existing?.id
+        );
+        console.log('Airtable saved:', { recordId: record.id, nextStep });
+      }
     } catch (saveErr) {
       console.error('Airtable save failed (non-fatal — client still gets a reply for this turn):', saveErr);
     }
@@ -397,6 +481,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // 10b. ЛОГ ДИАЛОГА.
     await appendDialogTurn(existing, lastMessageForRecord, finalReply);
+
+    // 10c. НОВЫЙ ВТОРОЙ ПРОЕКТ — одноразовое уведомление в момент создания
+    // отдельной записи (не завязано на nextStep: клиент по этой новой
+    // записи уже идёт по обычной воронке — ask_idea и т.д., а не по
+    // старому статичному hand-off тексту).
+    if (isCreatingSecondProject) {
+      try {
+        const notifyLabel = finalCard.client_name || clientLabel;
+        const who = username ? `${notifyLabel} (@${username})` : notifyLabel;
+        await sendTelegramMessage(
+          MASTER_TELEGRAM_ID,
+          `🆕 ${who} начал(а) второй, независимый проект при активной записи. Текущая бронь не изменена — веду второй проект отдельно, как обычного нового клиента.`
+        );
+      } catch (notifySecondErr) {
+        console.error('Second-project master notification failed:', notifySecondErr);
+      }
+    }
 
     // 11. ПИНГ МАСТЕРУ. Шаги, которые обещают "передала мастеру" или
     // требуют действия Ани, должны иметь реальный пинг, а не только текст.

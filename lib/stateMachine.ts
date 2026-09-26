@@ -98,8 +98,11 @@ export interface ClientCard {
   // asking the Extractor to remember it from recent_history.
   service_fit: ServiceFit;
   // Guards new_project_after_booking from re-pinging the master on every
-  // follow-up message about the same second project (no structured second
-  // project record exists yet — see new_project_after_booking below).
+  // follow-up message about the same overflow project. A genuine SECOND
+  // project now gets its own Airtable record (see pages/api/telegram.ts,
+  // which resolves it before this gate ever runs) — this NextStep and flag
+  // only fire for a rare THIRD concurrent project, where a real hand-off
+  // (not a new record) is still the right call.
   second_project_flagged: YesNo;
 }
 
@@ -193,12 +196,13 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     card.lead_status === 'consultation_booked';
 
   if (isAlreadyBooked) {
-    // A second independent tattoo must not overwrite the project that already
-    // owns the booking. The current one-card model cannot safely hold both.
-    // Route it to a separate hand-off instead of silently mixing projects.
-    // Ping the master only ONCE per second project — without this guard,
-    // every follow-up message the client sends about that second tattoo
-    // (still "different" from the booked card, which never absorbs it)
+    // By the time this card reaches getNextStep, telegram.ts has already
+    // resolved a genuine SECOND project onto its own record — this branch
+    // never sees that case. What lands here is the rarer THIRD concurrent
+    // project, where a real hand-off (not a new record) is still correct:
+    // ping the master only ONCE — without this guard, every follow-up
+    // message the client sends about that project (still "different" from
+    // this booked card, which never absorbs it)
     // would re-trigger the same hand-off and spam the master again.
     if (signals.is_new_project_request && card.second_project_flagged !== 'yes') {
       return 'new_project_after_booking';
