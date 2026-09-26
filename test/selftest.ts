@@ -41,7 +41,7 @@ import { formatInvoice, isScheduleRequest, isSlotCommandLine } from '../lib/admi
 import { formatDialogHistory, type DialogEntry } from '../lib/dialogLog';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from '../lib/addSlotParser';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
-import { isProjectRecordClosed } from '../lib/airtable';
+import { isProjectRecordClosed, resolveActiveProjects } from '../lib/airtable';
 import { getDepositAmount } from '../lib/paymentConfig';
 import { pickLargestTelegramPhoto } from '../lib/telegramApi';
 import {
@@ -696,6 +696,40 @@ ok(
   !isProjectRecordClosed({ lead_status: 'tattoo_booked_waiting_payment', wants_to_book: 'yes' })
 );
 ok('пустые поля (новая запись) не считаются закрытыми', !isProjectRecordClosed({}));
+
+console.log('\n▶ resolveActiveProjects — выбор primary/secondary записи клиента');
+eq(
+  'единственная (заблокированная!) запись всё равно становится primary — иначе некому сработать guard-у blocked',
+  resolveActiveProjects([{ id: 'r1', fields: { lead_status: 'blocked' } }]).primary?.id,
+  'r1'
+);
+ok(
+  'у заблокированной единственной записи нет secondary',
+  resolveActiveProjects([{ id: 'r1', fields: { lead_status: 'blocked' } }]).secondary === null
+);
+eq(
+  'единственная отказавшая запись тоже становится primary (не пропадает из вида)',
+  resolveActiveProjects([{ id: 'r1', fields: { lead_status: 'estimated', wants_to_book: 'no' } }]).primary
+    ?.id,
+  'r1'
+);
+eq(
+  'две активные записи — первая (свежая) primary, вторая secondary',
+  resolveActiveProjects([
+    { id: 'new', fields: { lead_status: 'tattoo_booked_waiting_payment' } },
+    { id: 'old', fields: { lead_status: 'diagnosing' } },
+  ]).secondary?.id,
+  'old'
+);
+eq(
+  'закрытая вторая запись не считается secondary',
+  resolveActiveProjects([
+    { id: 'new', fields: { lead_status: 'tattoo_booked_waiting_payment' } },
+    { id: 'old', fields: { lead_status: 'estimated', wants_to_book: 'no' } },
+  ]).secondary,
+  null
+);
+eq('пустой список → и primary, и secondary null', resolveActiveProjects([]).primary, null);
 
 // ================= ИТОГ =================
 console.log(`\n${'='.repeat(40)}`);

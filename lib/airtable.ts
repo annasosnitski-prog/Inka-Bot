@@ -73,6 +73,30 @@ export function isProjectRecordClosed(fields: Record<string, any>): boolean {
   return fields.lead_status === 'blocked' || fields.wants_to_book === 'no';
 }
 
+// Из всех записей клиента (самая свежая первой — см.
+// findAllClientRecordsByTelegramId) выбирает, какая ведёт текущий разговор
+// (primary) и какая — второй, ещё не закрытый проект (secondary), если он есть.
+//
+// primary НАМЕРЕННО берётся без фильтра по isProjectRecordClosed — это та
+// же семантика, что была у прежнего findClientByTelegramId (просто первая
+// запись клиента). Если бы closed-записи тут отфильтровывались, у
+// заблокированного или отказавшегося клиента (единственная запись —
+// значит, primary всегда должен указывать именно на неё) не осталось бы
+// вообще никакой карточки: guard 'blocked' в getNextStep не сработал бы, а
+// сохранение без явного recordId нашло бы эту же запись через
+// findClientByTelegramId и молча сняло бы с неё блокировку.
+//
+// Фильтр применяется только при поиске ВТОРОГО проекта: закрытый проект не
+// может быть тем, с кем клиент сейчас параллельно ведёт разговор.
+export function resolveActiveProjects(records: ClientRecord[]): {
+  primary: ClientRecord | null;
+  secondary: ClientRecord | null;
+} {
+  const primary = records[0] ?? null;
+  const secondary = records.slice(1).find((r) => !isProjectRecordClosed(r.fields)) ?? null;
+  return { primary, secondary };
+}
+
 // Поиск клиента по имени или @username — для admin-режима, когда Аня
 // указывает клиента текстом, а не пересылкой. Регистронезависимо, по
 // подстроке. Может вернуть несколько (тёзки) — вызывающий код решает,

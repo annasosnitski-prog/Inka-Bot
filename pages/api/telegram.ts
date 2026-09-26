@@ -3,7 +3,7 @@ import {
   upsertClient,
   createClient,
   findAllClientRecordsByTelegramId,
-  isProjectRecordClosed,
+  resolveActiveProjects,
 } from '../../lib/airtable';
 import type { ClientRecord } from '../../lib/airtable';
 import { runExtractor } from '../../lib/extractor';
@@ -122,19 +122,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    // 1. Найти ВСЕ активные проекты этого telegram_id. Клиент может вести
-    // до двух независимых татуировок одновременно — вторая заводит себе
-    // отдельную строку в Airtable (см. п.2b ниже и lib/clientCardMerge.ts),
-    // а не перезаписывает первую. "Активный" = не заблокирован и явно не
-    // отказался записываться — lead_status при отказе НЕ меняется (см.
-    // getCardPatchForStep), поэтому смотрим isProjectRecordClosed, а не
-    // один lead_status.
+    // 1. Найти ВСЕ проекты этого telegram_id. Клиент может вести до двух
+    // независимых татуировок одновременно — вторая заводит себе отдельную
+    // строку в Airtable (см. п.2b ниже и lib/clientCardMerge.ts), а не
+    // перезаписывает первую. Разбор, какая запись главная, а какая —
+    // второй активный проект (если есть), в lib/airtable.ts:resolveActiveProjects
+    // — там же объяснение, почему primary не фильтруется по "закрытости".
     const allRecords = await findAllClientRecordsByTelegramId(telegramId);
-    const activeRecords = allRecords.filter((r) => !isProjectRecordClosed(r.fields));
-    // Самая недавно тронутая запись — то, что клиент продолжает по
-    // умолчанию; уточняется через is_new_project_request в п.2b.
-    const primaryRecord: ClientRecord | null = activeRecords[0] ?? null;
-    const secondaryRecord: ClientRecord | null = activeRecords[1] ?? null;
+    const { primary: primaryRecord, secondary: secondaryRecord } = resolveActiveProjects(allRecords);
 
     let existing: ClientRecord | null = primaryRecord;
     let currentCard = recordToClientCard(telegramId, existing?.fields ?? {});
@@ -230,6 +225,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       seed.first_tattoo = currentCard.first_tattoo;
       seed.contact_channel = currentCard.contact_channel;
       seed.social_link = currentCard.social_link;
+      // social_asked гейтит вопрос "скинь инстаграм?" по card.social_asked
+      // (см. getNextStep), а не по наличию social_link — без этого бот
+      // переспросил бы то, что уже знает про человека, а не про проект.
+      seed.social_asked = currentCard.social_asked;
       currentCard = seed;
       recentHistory = [];
       existing = null;
@@ -429,6 +428,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           lead_status: finalCard.lead_status,
           spam_count: 0,
         });
+        // existing по-прежнему null с шага 2b (там это означало "истории
+        // ещё нет, читать неоткуда") — но appendDialogTurn ниже пишет ПО
+        // этому же аргументу, и на null он молча ничего не делает (см.
+        // dialogLog.ts). Без этого первая реплика нового проекта и ответ
+        // на неё никогда не попали бы в его dialog_history.
+        existing = record;
         console.log('Airtable: created second-project record', { recordId: record.id, nextStep });
       } else {
         const { record } = await upsertClient(
