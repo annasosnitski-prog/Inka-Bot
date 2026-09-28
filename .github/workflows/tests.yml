@@ -1,9 +1,10 @@
-name: State Contract v2
+name: Tests
 
 on:
+  pull_request:
   push:
     branches:
-      - fix/state-contract-v2
+      - main
   workflow_dispatch:
 
 jobs:
