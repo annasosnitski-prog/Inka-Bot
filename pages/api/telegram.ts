@@ -170,7 +170,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // 2. EXTRACTOR — разобрать сообщение клиента на поля и transient-сигналы,
-    // относительно самого свежего активного проекта.
+    // относительно самого свежего активного проекта. Если есть второй
+    // активный проект — даём Extractor-у его краткую сводку (не полную
+    // карточку): без неё сообщение, которое на самом деле про ВТОРОЙ
+    // проект, но не звучит как явное "начинаю новую тату" (например,
+    // обычный уточняющий вопрос про уже забронированный проект, пока
+    // primary — второй, ещё не забронированный), могло бы уйти в
+    // is_new_project_request=false просто потому, что модель не в курсе,
+    // что второй проект вообще существует.
+    const otherProjectSummary = secondaryRecord
+      ? (() => {
+          const c = recordToClientCard(telegramId, secondaryRecord.fields);
+          return { idea: c.idea, placement: c.placement, category: c.category, lead_status: c.lead_status };
+        })()
+      : null;
+
     let extracted = await runExtractor({
       currentCard,
       messageText,
@@ -179,6 +193,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       isAdminSender,
       recentHistory,
       photoFileId,
+      otherActiveProject: otherProjectSummary,
     });
 
     // 2b. ВТОРОЙ АКТИВНЫЙ ПРОЕКТ. Сообщение не про самый свежий проект
