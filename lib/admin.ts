@@ -26,6 +26,7 @@ import path from 'path';
 import {
   findClientByTelegramId,
   findClientsByName,
+  findAllClientRecordsByTelegramId,
   upsertClient,
   type ClientRecord,
 } from './airtable';
@@ -217,10 +218,17 @@ type TargetResult =
   | { kind: 'no_query' };
 
 async function resolveTarget(msg: AdminMessage, nameArg: string): Promise<TargetResult> {
-  // Пересылка имеет приоритет — точный telegram_id надёжнее имени.
+  // Пересылка имеет приоритет — точный telegram_id надёжнее имени. Но один
+  // telegram_id теперь может владеть НЕСКОЛЬКИМИ строками (клиент с двумя
+  // независимыми проектами одновременно, см. pages/api/telegram.ts) — если
+  // молча брать первую попавшуюся (как раньше findClientByTelegramId),
+  // можно показать не тот проект без всякого предупреждения. Поэтому здесь
+  // те же "несколько — уточни" правила, что и у поиска по имени.
   if (msg.forwardFromId) {
-    const rec = await findClientByTelegramId(msg.forwardFromId);
-    return rec ? { kind: 'found', record: rec } : { kind: 'none' };
+    const recs = await findAllClientRecordsByTelegramId(msg.forwardFromId);
+    if (recs.length === 0) return { kind: 'none' };
+    if (recs.length === 1) return { kind: 'found', record: recs[0] };
+    return { kind: 'ambiguous', records: recs };
   }
 
   const q = nameArg.trim();
@@ -233,11 +241,16 @@ async function resolveTarget(msg: AdminMessage, nameArg: string): Promise<Target
 }
 
 function ambiguousList(records: ClientRecord[]): string {
+  // Два тёзки различаются именем — но два проекта ОДНОГО клиента дадут
+  // одинаковые имя+username, и по ним не выбрать нужную строку. Добавляем
+  // идею/место/статус — этого обычно достаточно, чтобы отличить проекты
+  // друг от друга даже без явной пометки "проект 1/2".
   const lines = records.map((r) => {
     const f = r.fields;
     const name = f.name ?? '—';
     const uname = f.username ? ` (@${f.username})` : '';
-    return `• ${name}${uname}`;
+    const details = [f.idea, f.placement, f.lead_status].filter(Boolean).join(', ');
+    return `• ${name}${uname}${details ? ` — ${details}` : ''}`;
   });
   return 'нашла несколько:\n' + lines.join('\n') + '\nуточни имя точнее или перешли сообщение клиента.';
 }

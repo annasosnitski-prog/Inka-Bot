@@ -6,7 +6,7 @@ export interface MessageFlags {
   photoHasCaption: boolean;
 }
 
-function isBooked(card: ClientCard): boolean {
+export function isBooked(card: ClientCard): boolean {
   return (
     card.lead_status === 'tattoo_booked_waiting_payment' ||
     card.lead_status === 'consultation_booked'

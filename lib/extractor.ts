@@ -74,6 +74,18 @@ export interface ExtractorOutput {
   photo_purpose: PhotoPurpose;
 }
 
+// Краткая сводка ВТОРОГО активного проекта того же клиента (если есть) —
+// не полная карточка, только то, что нужно, чтобы отличить его от
+// current_card. Без этого поля Extractor вообще не знает, что у клиента
+// есть второй проект, и не может распознать сообщение, которое на самом
+// деле про него, а не про current_card (см. pages/api/telegram.ts).
+export interface OtherActiveProjectSummary {
+  idea: string | null;
+  placement: string | null;
+  category: ClientCard['category'];
+  lead_status: ClientCard['lead_status'];
+}
+
 export interface ExtractorInput {
   currentCard: Partial<ClientCard>;
   messageText: string | null;
@@ -82,6 +94,7 @@ export interface ExtractorInput {
   isAdminSender: boolean;
   recentHistory: RecentDialogTurn[];
   photoFileId: string | null;
+  otherActiveProject?: OtherActiveProjectSummary | null;
 }
 
 export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutput> {
@@ -90,6 +103,7 @@ export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutp
   const userContent = JSON.stringify(
     {
       current_card: input.currentCard,
+      other_active_project: input.otherActiveProject ?? null,
       is_admin_sender: input.isAdminSender,
       recent_history: input.recentHistory,
       message: {
