@@ -4,9 +4,11 @@ on:
   pull_request:
     paths:
       - "lib/extractorPrompt.txt"
+      - "lib/extractorContractV2.txt"
       - "lib/extractor.ts"
       - "lib/pricingRules.txt"
       - "lib/responderPrompt.txt"
+      - "lib/responderVoiceV2.txt"
       - "lib/responder.ts"
       - "lib/adminPrompt.txt"
       - "scripts/priceEval.ts"
@@ -15,9 +17,11 @@ on:
     branches: [main]
     paths:
       - "lib/extractorPrompt.txt"
+      - "lib/extractorContractV2.txt"
       - "lib/extractor.ts"
       - "lib/pricingRules.txt"
       - "lib/responderPrompt.txt"
+      - "lib/responderVoiceV2.txt"
       - "lib/responder.ts"
       - "lib/adminPrompt.txt"
       - "scripts/priceEval.ts"

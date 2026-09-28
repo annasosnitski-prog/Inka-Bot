@@ -78,6 +78,21 @@ const expectPeriodWord = (reply: string) => {
   return { ok: hasPeriodWord, label: `упоминание "сеанс"/"встреча": ${hasPeriodWord ? 'есть' : 'НЕТ'}` };
 };
 
+// Для прямой односеансовой работы (direct_tattoo_allowed="yes") "за сеанс"/
+// "за встречу" — сознательно НЕ добавляется (см. lib/responderVoiceV2.txt,
+// раздел QUOTE_PRICE): для одной понятной работы это звучит странно и
+// намекает на несколько визитов там, где их не будет. Инверсия
+// expectPeriodWord — здесь наличие фразы не ошибка, но и не требуется.
+const expectNoMechanicalPeriodWord = (reply: string) => {
+  const hasPeriodWord = /сеанс|встреч/i.test(reply);
+  return {
+    ok: !hasPeriodWord,
+    label: `для прямой односеансовой работы фраза "за сеанс"/"за встречу" не нужна: ${
+      hasPeriodWord ? 'есть (лишняя)' : 'нет, как и задумано'
+    }`,
+  };
+};
+
 const expectAnswersSessionCountQuestion = (reply: string) => {
   // Клиент спросил "а что если нужно больше одной встречи" — ответ
   // должен реально касаться темы (сеанс/встреча/несколько/зависит), а
@@ -92,7 +107,7 @@ const expectAnswersSessionCountQuestion = (reply: string) => {
 
 const cases: Case[] = [
   {
-    name: 'A — прямая цена, medium, price_explained=no (обычный клиент)',
+    name: 'A — прямая цена, medium, direct_tattoo_allowed=yes (обычный однасеансовый клиент)',
     card: baseCard({
       category: 'medium',
       idea: 'графика на предплечье',
@@ -104,7 +119,7 @@ const cases: Case[] = [
     }),
     nextStep: 'quote_price',
     lastClientMessage: 'сколько будет стоить?',
-    check: expectPeriodWord,
+    check: expectNoMechanicalPeriodWord,
   },
   {
     name: 'B — крупный проект, price_explained=yes (ожидаемый путь)',
