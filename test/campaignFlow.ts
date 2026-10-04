@@ -145,33 +145,44 @@ console.log('\n▶ 5. после сбора required_info (+ опциональ�
   patch = getCardPatchForStep('campaign_ask_field', c, sig());
   c = { ...c, ...patch };
 
-  // Клиент отвечает на approximate_size — required_info полностью собран,
-  // но бронирование слота ЕЩЁ НЕ должно наступить: есть optional_info (photo).
+  // Клиент отвечает на approximate_size — осталось обязательное фото кожи
+  // крупно/с близка (required, НЕ optional — важно для решения мастера).
   c = applyCampaignAnswer(c, 'approximate_size', '5-7 см');
   routing = routeCampaign(c);
-  eq('шаг 3: required_info собран, но ещё спрашивает optional (фото)', `${routing?.step}:${routing?.pendingField}`, 'campaign_ask_field:photo_of_placement');
+  eq('шаг 3: ask_field, ожидает фото кожи крупно', `${routing?.step}:${routing?.pendingField}`, 'campaign_ask_field:photo_of_placement');
   ok(
-    'до ответа на optional — ни handoff, ни показ слотов (мастер/бот не должны решать раньше срока)',
+    'до фото — ни handoff, ни показ слотов (мастер/бот не должны решать раньше срока)',
     getNextStep(c, sig()) !== 'campaign_handoff' && getNextStep(c, sig()) !== 'campaign_show_slots'
   );
   patch = getCardPatchForStep('campaign_ask_field', c, sig());
   c = { ...c, ...patch };
 
-  // Клиент не присылает фото (опционально) — всё равно едем дальше, не зацикливаемся.
-  // Данных собрано достаточно → routeCampaign теперь смотрит на слоты.
+  // Клиент присылает фото издалека/не в фокусе — Extractor (вижн) не
+  // засчитывает его как крупный план кожи и возвращает null → поле
+  // ОБЯЗАТЕЛЬНОЕ, поэтому бот переспрашивает, а не едет дальше молча.
   c = applyCampaignAnswer(c, 'photo_of_placement', null);
   routing = routeCampaign(c);
-  eq('шаг 4: optional пропущен без ответа, слотов ещё не загружали → campaign_no_slots', routing?.step, 'campaign_no_slots');
+  eq(
+    'плохое фото (Extractor вернул null) → required не продвинулся, переспрашивает то же поле',
+    `${routing?.step}:${routing?.pendingField}`,
+    'campaign_ask_field:photo_of_placement'
+  );
+
+  // Клиент присылает нормальный крупный план — Extractor засчитывает "yes".
+  c = applyCampaignAnswer(c, 'photo_of_placement', 'yes');
+  routing = routeCampaign(c);
+  eq('хорошее фото принято → required_info полностью собран → campaign_no_slots (слотов ещё не загружали)', routing?.step, 'campaign_no_slots');
 }
 
 // ================= 5b. self_book_slot — показ слотов, бронь, завершение =================
 console.log('\n▶ 5b. self_book_slot: показ слотов → бронь конкретного слота → followup');
 {
-  // Карточка, у которой сбор данных уже завершён (эквивалент конца теста 5).
+  // Карточка, у которой сбор данных уже завершён (эквивалент конца теста 5,
+  // включая принятое фото крупно/с близка — поле обязательное).
   let c = activateCampaign(card(), 'color_texture');
   c = applyCampaignAnswer(c, 'placement', 'предплечье');
   c = applyCampaignAnswer(c, 'approximate_size', '5-7 см');
-  c = applyCampaignAnswer(c, 'photo_of_placement', null);
+  c = applyCampaignAnswer(c, 'photo_of_placement', 'yes');
 
   // pages/api/telegram.ts подгрузило свежие [КАМПЕЙН]-слоты из календаря.
   c = { ...c, slot_options: ['ev1', 'ev2'] };
@@ -202,7 +213,7 @@ console.log('\n▶ 5c. self_book_slot: пустой пул [КАМПЕЙН] → 
   let c = activateCampaign(card(), 'color_texture');
   c = applyCampaignAnswer(c, 'placement', 'плечо');
   c = applyCampaignAnswer(c, 'approximate_size', '4 см');
-  c = applyCampaignAnswer(c, 'photo_of_placement', null);
+  c = applyCampaignAnswer(c, 'photo_of_placement', 'yes');
   // pages/api/telegram.ts попробовало найти слоты — пул пуст.
   c = { ...c, slot_options: [] };
 

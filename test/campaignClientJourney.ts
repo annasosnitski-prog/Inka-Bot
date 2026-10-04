@@ -134,27 +134,34 @@ eq('после deep link campaign_id = color_texture', card.campaign_id, 'color_
 }
 
 {
-  // Turn 3: клиент отвечает на размер — required_info полностью собран,
-  // но по конфигу есть ещё optional_info (фото), поэтому handoff ЕЩЁ рано.
+  // Turn 3: клиент отвечает на размер — осталось обязательное фото кожи
+  // крупно/с близка (required, не optional — важно для решения мастера).
   const t3 = simulateTurn(card, 'ну сантиметров 6, не больше', { campaign_field_answer: '6 см' });
-  ok('ход 3: required_info собран, но это НЕ handoff — остался optional (фото)', t3.nextStep !== 'campaign_handoff');
+  ok('ход 3: approximate_size собран, но это НЕ handoff — осталось фото', t3.nextStep !== 'campaign_handoff');
   eq('ход 3: approximate_size записан', t3.card.campaign_collected?.approximate_size, '6 см');
   card = t3.card;
 }
 
 {
-  // Turn 4: клиент не присылает фото прямо сейчас, просто уходит от вопроса —
-  // optional-поле не должно зацикливать разговор. color_texture —
-  // booking_mode: self_book_slot, так что дальше не хэндофф мастеру, а
-  // показ слотов из отдельного пула [КАМПЕЙН] (lib/calendar.ts).
-  const t4 = simulateTurn(card, 'фото скину чуть позже можно?');
-  ok('ход 4: optional-вопрос пройден без фото, без зацикливания', t4.nextStep !== 'campaign_ask_field');
+  // Turn 4: клиент присылает фото ИЗДАЛЕКА — Extractor (вижн) не считает
+  // это крупным планом кожи и возвращает campaign_field_answer=null.
+  // Поле ОБЯЗАТЕЛЬНОЕ → не продвигается, бот должен переспросить, не
+  // ехать дальше молча.
+  const t4 = simulateTurn(card, '[фото всей руки издалека]', { campaign_field_answer: null }, { hasPhoto: true, photoHasCaption: false });
+  eq('ход 4: фото издалека не засчитано → всё ещё спрашивает photo_of_placement', t4.nextStep, 'campaign_ask_field');
   card = t4.card;
+}
+
+{
+  // Turn 4b: клиент пересылает нормальный крупный план кожи — засчитано.
+  const t4b = simulateTurn(card, '[фото кожи крупно]', { campaign_field_answer: 'yes' }, { hasPhoto: true, photoHasCaption: false });
+  ok('ход 4b: хорошее фото принято, required_info полностью собран', t4b.nextStep !== 'campaign_ask_field');
+  card = t4b.card;
   console.log(`    → campaign_handoff_sent пока: ${card.campaign_handoff_sent ?? 'null'} (рано — слоты ещё не смотрели)`);
 }
 
 {
-  // Turn 4b: pages/api/telegram.ts здесь делает живой getAvailableSlots('campaign', 3)
+  // Turn 4c: pages/api/telegram.ts здесь делает живой getAvailableSlots('campaign', 3)
   // и пересчитывает nextStep на карточке со свежими slot_options — симулируем
   // тот же шаг (без сети): нашлись два свободных [КАМПЕЙН]-слота.
   card = { ...card, slot_options: ['ev1', 'ev2'] };
@@ -164,7 +171,7 @@ eq('после deep link campaign_id = color_texture', card.campaign_id, 'color_
     client_wants_to_reschedule: false, client_confirms_booking: null, campaign_field_answer: null,
   };
   const stepWithSlots = getNextStep(card, signalsNow);
-  eq('ход 4b: свежие слоты найдены → campaign_show_slots', stepWithSlots, 'campaign_show_slots');
+  eq('ход 4c: свежие слоты найдены → campaign_show_slots', stepWithSlots, 'campaign_show_slots');
   const patch = getCardPatchForStep(stepWithSlots, card, signalsNow);
   card = { ...card, ...patch };
   console.log('  [бот показывает 2 свободных времени из [КАМПЕЙН]]');

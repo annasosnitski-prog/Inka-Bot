@@ -58,8 +58,13 @@ const CAMPAIGNS: CampaignConfig[] = [
       'Мастер получает больше творческой свободы, чем при обычном клиентском заказе',
       'Итоговая работа строится в направлении примеров кампании, а не является копированием конкретного референса',
     ],
-    required_info: ['placement', 'approximate_size'],
-    optional_info: ['photo_of_placement'],
+    // photo_of_placement здесь ОБЯЗАТЕЛЬНОЕ, не optional: Ане нужно реально
+    // увидеть кожу крупно, с близкого расстояния, прежде чем подтверждать
+    // бронь (см. buildCampaignSlotBookedNotification / forwardTelegramMessage
+    // в pages/api/telegram.ts — сама фотография пересылается мастеру
+    // отдельно, текстовая карточка несёт только "yes/нет" как факт).
+    required_info: ['placement', 'approximate_size', 'photo_of_placement'],
+    optional_info: [],
     booking_mode: 'self_book_slot',
     active: true,
   },

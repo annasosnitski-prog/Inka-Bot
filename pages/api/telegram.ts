@@ -239,6 +239,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ? routeCampaign(currentCard)
       : null;
 
+    // CAMPAIGN MODE: пока карточка собирает required_info/optional_info,
+    // любое присланное фото пересылаем мастеру СРАЗУ, а не только
+    // упоминаем "yes" в текстовой сводке позже — ей нужно реально увидеть
+    // фото (например крупный план кожи), а не знать факт его отправки.
+    // Независимо от итогового nextStep этого хода (поле может быть принято
+    // или не принято Extractor-ом как достаточно крупное/близкое).
+    if (campaignRoutingBefore?.pendingField && hasPhoto && chatId && message.message_id) {
+      try {
+        await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
+      } catch (campaignPhotoForwardErr) {
+        console.error('Campaign field photo forward failed:', campaignPhotoForwardErr);
+      }
+    }
+
     let extracted = await runExtractor({
       currentCard,
       messageText,
