@@ -54,7 +54,10 @@ const CAMPAIGNS: CampaignConfig[] = [
     master_experience: 'около 4 лет',
     payment: {
       type: 'consumables_only',
-      amount: null,
+      // Известная фиксированная сумма за расходники — Responder называет
+      // её ТОЛЬКО когда человек сам явно спрашивает точную цифру (см.
+      // campaignResponderOverlay.txt), а не проговаривает сама заранее.
+      amount: '400₪',
       public_text: 'Оплата только за расходники / открытие иглы',
     },
     model_conditions: [
