@@ -138,18 +138,12 @@ console.log('\n▶ 5. после сбора required_info (+ опциональ�
   let patch = getCardPatchForStep('campaign_intro', c, sig());
   c = { ...c, ...patch };
 
-  // Клиент отвечает на placement.
+  // Клиент отвечает на placement — размер этой кампании фиксирован офером
+  // (не больше 3 см, мастер определяет сама), поэтому следующий вопрос —
+  // сразу обязательное фото кожи крупно/с близка, не approximate_size.
   c = applyCampaignAnswer(c, 'placement', 'предплечье');
   routing = routeCampaign(c);
-  eq('шаг 2: ask_field, ожидает approximate_size', `${routing?.step}:${routing?.pendingField}`, 'campaign_ask_field:approximate_size');
-  patch = getCardPatchForStep('campaign_ask_field', c, sig());
-  c = { ...c, ...patch };
-
-  // Клиент отвечает на approximate_size — осталось обязательное фото кожи
-  // крупно/с близка (required, НЕ optional — важно для решения мастера).
-  c = applyCampaignAnswer(c, 'approximate_size', '5-7 см');
-  routing = routeCampaign(c);
-  eq('шаг 3: ask_field, ожидает фото кожи крупно', `${routing?.step}:${routing?.pendingField}`, 'campaign_ask_field:photo_of_placement');
+  eq('шаг 2: ask_field, ожидает фото кожи крупно', `${routing?.step}:${routing?.pendingField}`, 'campaign_ask_field:photo_of_placement');
   ok(
     'до фото — ни handoff, ни показ слотов (мастер/бот не должны решать раньше срока)',
     getNextStep(c, sig()) !== 'campaign_handoff' && getNextStep(c, sig()) !== 'campaign_show_slots'
@@ -181,7 +175,6 @@ console.log('\n▶ 5b. self_book_slot: показ слотов → бронь к
   // включая принятое фото крупно/с близка — поле обязательное).
   let c = activateCampaign(card(), 'color_texture');
   c = applyCampaignAnswer(c, 'placement', 'предплечье');
-  c = applyCampaignAnswer(c, 'approximate_size', '5-7 см');
   c = applyCampaignAnswer(c, 'photo_of_placement', 'yes');
 
   // pages/api/telegram.ts подгрузило свежие [КАМПЕЙН]-слоты из календаря.
@@ -212,7 +205,6 @@ console.log('\n▶ 5c. self_book_slot: пустой пул [КАМПЕЙН] → 
 {
   let c = activateCampaign(card(), 'color_texture');
   c = applyCampaignAnswer(c, 'placement', 'плечо');
-  c = applyCampaignAnswer(c, 'approximate_size', '4 см');
   c = applyCampaignAnswer(c, 'photo_of_placement', 'yes');
   // pages/api/telegram.ts попробовало найти слоты — пул пуст.
   c = { ...c, slot_options: [] };
@@ -267,8 +259,8 @@ console.log('\n▶ 8. повторный /start с другой кампание
 {
   let c = activateCampaign(card(), 'color_texture');
   c = applyCampaignAnswer(c, 'placement', 'предплечье');
-  c = applyCampaignAnswer(c, 'approximate_size', '5 см');
-  ok('до переключения: оба поля color_texture собраны', !!c.campaign_collected?.placement && !!c.campaign_collected?.approximate_size);
+  c = applyCampaignAnswer(c, 'photo_of_placement', 'yes');
+  ok('до переключения: оба поля color_texture собраны', !!c.campaign_collected?.placement && !!c.campaign_collected?.photo_of_placement);
 
   // Клиент переходит по ДРУГОЙ кампейн-ссылке (используется здесь только
   // как механический пример другого id — реестр кампаний пока содержит

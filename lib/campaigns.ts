@@ -47,7 +47,10 @@ const CAMPAIGNS: CampaignConfig[] = [
     type: 'model_recruitment',
     title: 'Модель — цветные текстуры',
     goal: 'Найти моделей для отработки цветных текстур',
-    offer: 'Татуировка с цветными текстурами в направлении примеров из объявления',
+    // Размер фиксирован самим офером (небольшая работа, до 3 см) — точный
+    // размер под конкретное место и фото определяет мастер сама, поэтому
+    // это НЕ отдельный вопрос клиенту (ни в required_info, ни в optional_info).
+    offer: 'Татуировка с цветными текстурами в направлении примеров из объявления — небольшая работа, не больше 3 см',
     master_experience: 'около 4 лет',
     payment: {
       type: 'consumables_only',
@@ -63,7 +66,7 @@ const CAMPAIGNS: CampaignConfig[] = [
     // бронь (см. buildCampaignSlotBookedNotification / forwardTelegramMessage
     // в pages/api/telegram.ts — сама фотография пересылается мастеру
     // отдельно, текстовая карточка несёт только "yes/нет" как факт).
-    required_info: ['placement', 'approximate_size', 'photo_of_placement'],
+    required_info: ['placement', 'photo_of_placement'],
     optional_info: [],
     booking_mode: 'self_book_slot',
     active: true,

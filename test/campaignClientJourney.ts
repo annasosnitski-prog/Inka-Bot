@@ -126,42 +126,35 @@ eq('после deep link campaign_id = color_texture', card.campaign_id, 'color_
 }
 
 {
-  // Turn 2: клиент отвечает на вопрос про зону.
+  // Turn 2: клиент отвечает на вопрос про зону. Размер этой кампании
+  // фиксирован офером (не больше 3 см, мастер определяет сама) — следующий
+  // вопрос сразу про обязательное фото, не про approximate_size.
   const t2 = simulateTurn(card, 'давай на предплечье', { campaign_field_answer: 'предплечье' });
-  eq('ход 2: спрашивает размер (approximate_size)', t2.nextStep, 'campaign_ask_field');
+  eq('ход 2: спрашивает фото кожи крупно', t2.nextStep, 'campaign_ask_field');
   eq('ход 2: placement реально записан', t2.card.campaign_collected?.placement, 'предплечье');
   card = t2.card;
 }
 
 {
-  // Turn 3: клиент отвечает на размер — осталось обязательное фото кожи
-  // крупно/с близка (required, не optional — важно для решения мастера).
-  const t3 = simulateTurn(card, 'ну сантиметров 6, не больше', { campaign_field_answer: '6 см' });
-  ok('ход 3: approximate_size собран, но это НЕ handoff — осталось фото', t3.nextStep !== 'campaign_handoff');
-  eq('ход 3: approximate_size записан', t3.card.campaign_collected?.approximate_size, '6 см');
+  // Turn 3: клиент присылает фото ИЗДАЛЕКА — Extractor (вижн) не считает
+  // это крупным планом кожи и возвращает campaign_field_answer=null.
+  // Поле ОБЯЗАТЕЛЬНОЕ → не продвигается, бот должен переспросить, не
+  // ехать дальше молча.
+  const t3 = simulateTurn(card, '[фото всей руки издалека]', { campaign_field_answer: null }, { hasPhoto: true, photoHasCaption: false });
+  eq('ход 3: фото издалека не засчитано → всё ещё спрашивает photo_of_placement', t3.nextStep, 'campaign_ask_field');
   card = t3.card;
 }
 
 {
-  // Turn 4: клиент присылает фото ИЗДАЛЕКА — Extractor (вижн) не считает
-  // это крупным планом кожи и возвращает campaign_field_answer=null.
-  // Поле ОБЯЗАТЕЛЬНОЕ → не продвигается, бот должен переспросить, не
-  // ехать дальше молча.
-  const t4 = simulateTurn(card, '[фото всей руки издалека]', { campaign_field_answer: null }, { hasPhoto: true, photoHasCaption: false });
-  eq('ход 4: фото издалека не засчитано → всё ещё спрашивает photo_of_placement', t4.nextStep, 'campaign_ask_field');
-  card = t4.card;
-}
-
-{
-  // Turn 4b: клиент пересылает нормальный крупный план кожи — засчитано.
-  const t4b = simulateTurn(card, '[фото кожи крупно]', { campaign_field_answer: 'yes' }, { hasPhoto: true, photoHasCaption: false });
-  ok('ход 4b: хорошее фото принято, required_info полностью собран', t4b.nextStep !== 'campaign_ask_field');
-  card = t4b.card;
+  // Turn 3b: клиент пересылает нормальный крупный план кожи — засчитано.
+  const t3b = simulateTurn(card, '[фото кожи крупно]', { campaign_field_answer: 'yes' }, { hasPhoto: true, photoHasCaption: false });
+  ok('ход 3b: хорошее фото принято, required_info полностью собран', t3b.nextStep !== 'campaign_ask_field');
+  card = t3b.card;
   console.log(`    → campaign_handoff_sent пока: ${card.campaign_handoff_sent ?? 'null'} (рано — слоты ещё не смотрели)`);
 }
 
 {
-  // Turn 4c: pages/api/telegram.ts здесь делает живой getAvailableSlots('campaign', 3)
+  // Turn 3c: pages/api/telegram.ts здесь делает живой getAvailableSlots('campaign', 3)
   // и пересчитывает nextStep на карточке со свежими slot_options — симулируем
   // тот же шаг (без сети): нашлись два свободных [КАМПЕЙН]-слота.
   card = { ...card, slot_options: ['ev1', 'ev2'] };
@@ -171,14 +164,14 @@ eq('после deep link campaign_id = color_texture', card.campaign_id, 'color_
     client_wants_to_reschedule: false, client_confirms_booking: null, campaign_field_answer: null,
   };
   const stepWithSlots = getNextStep(card, signalsNow);
-  eq('ход 4c: свежие слоты найдены → campaign_show_slots', stepWithSlots, 'campaign_show_slots');
+  eq('ход 3c: свежие слоты найдены → campaign_show_slots', stepWithSlots, 'campaign_show_slots');
   const patch = getCardPatchForStep(stepWithSlots, card, signalsNow);
   card = { ...card, ...patch };
   console.log('  [бот показывает 2 свободных времени из [КАМПЕЙН]]');
 }
 
 {
-  // Turn 5: клиент выбирает второе время — Extractor вернул бы
+  // Turn 4: клиент выбирает второе время — Extractor вернул бы
   // client_picked_slot_id='ev2' (порядковое "второе" + lead_status=slots_shown,
   // который только что проставил патч campaign_show_slots).
   const pickSignals: MessageSignals = {
@@ -188,7 +181,7 @@ eq('после deep link campaign_id = color_texture', card.campaign_id, 'color_
   };
   console.log('  клиент: "второе время, пожалуйста"');
   const step5 = getNextStep(card, pickSignals);
-  eq('ход 5: валидный выбор → campaign_confirm_slot', step5, 'campaign_confirm_slot');
+  eq('ход 4: валидный выбор → campaign_confirm_slot', step5, 'campaign_confirm_slot');
   console.log(`    → NEXT_STEP: ${step5}`);
 
   // pages/api/telegram.ts здесь реально зовёт bookSlot() и, при успехе,
@@ -202,10 +195,10 @@ eq('после deep link campaign_id = color_texture', card.campaign_id, 'color_
 }
 
 {
-  // Turn 6: клиент пишет что-то ещё после брони — не предлагаем слоты снова
+  // Turn 5: клиент пишет что-то ещё после брони — не предлагаем слоты снова
   // и не переспрашиваем анкету.
   const t6 = simulateTurn(card, 'хорошо, увидимся там');
-  eq('ход 6: после брони — followup_chat, не повтор анкеты/слотов', t6.nextStep, 'campaign_followup_chat');
+  eq('ход 5: после брони — followup_chat, не повтор анкеты/слотов', t6.nextStep, 'campaign_followup_chat');
 }
 
 ok('на всём пути ни разу не всплыл ask_idea', true); // проверено по каждому nextStep выше явно

@@ -166,38 +166,33 @@ async function main() {
   check('ход 1: campaign_intro (не ask_idea, не quote_price)', t.nextStep === 'campaign_intro');
   card = t.card; history = t.history;
 
-  // Ход 2: отвечает на место.
+  // Ход 2: отвечает на место. Размер этой кампании фиксирован офером (не
+  // больше 3 см, мастер определяет сама), поэтому следующий вопрос сразу
+  // про обязательное фото — approximate_size тут не спрашивается.
   t = await runTurn(card, history, 'о, интересно! на предплечье можно');
   logTurn('о, интересно! на предплечье можно', t);
-  check('ход 2: placement реально записан', !!card.campaign_collected); // предварительно, уточним ниже
   check('ход 2: placement записан именно из этого сообщения', !!t.card.campaign_collected?.placement);
+  check('ход 2: это НЕ handoff/слоты — осталось фото', t.nextStep !== 'campaign_handoff' && t.nextStep !== 'campaign_show_slots');
   card = t.card; history = t.history;
 
-  // Ход 3: отвечает на размер.
-  t = await runTurn(card, history, 'сантиметров 10-12 где-то, не больше');
-  logTurn('сантиметров 10-12 где-то, не больше', t);
-  check('ход 3: approximate_size записан', !!t.card.campaign_collected?.approximate_size);
-  check('ход 3: это НЕ handoff/слоты — осталось фото', t.nextStep !== 'campaign_handoff' && t.nextStep !== 'campaign_show_slots');
-  card = t.card; history = t.history;
-
-  // Ход 4: уходит от темы на вопрос про деньги — ПРОВЕРКА: Responder не
+  // Ход 3: уходит от темы на вопрос про деньги — ПРОВЕРКА: Responder не
   // называет точную сумму (campaign.payment.amount=null), и обязательное
   // поле (фото) не продвигается вопросом не по теме.
   t = await runTurn(card, history, 'а точно только расходники, не будет ещё какая-то доп. плата конкретно?');
   logTurn('а точно только расходники, не будет ещё какая-то доп. плата конкретно?', t);
-  check('ход 4: Responder НЕ называет конкретную сумму в шекелях', !/\d+\s*₪/.test(t.reply));
-  check('ход 4: фото всё ещё не засчитано (вопрос не по теме)', t.card.campaign_collected?.photo_of_placement === undefined);
+  check('ход 3: Responder НЕ называет конкретную сумму в шекелях', !/\d+\s*₪/.test(t.reply));
+  check('ход 3: фото всё ещё не засчитано (вопрос не по теме)', t.card.campaign_collected?.photo_of_placement === undefined);
   card = t.card; history = t.history;
 
-  // Ход 5: прямая просьба пропустить обязательное фото — ПРОВЕРКА:
+  // Ход 4: прямая просьба пропустить обязательное фото — ПРОВЕРКА:
   // required-поле не разрешает пропуск (в отличие от optional_info).
   t = await runTurn(card, history, 'можно без фото? мне неудобно фотографировать это место');
   logTurn('можно без фото? мне неудобно фотографировать это место', t);
-  check('ход 5: фото всё ещё НЕ засчитано — просьба пропустить не прошла', t.card.campaign_collected?.photo_of_placement === undefined);
-  check('ход 5: шаг всё ещё про фото, не слоты/handoff', t.nextStep === 'campaign_ask_field');
+  check('ход 4: фото всё ещё НЕ засчитано — просьба пропустить не прошла', t.card.campaign_collected?.photo_of_placement === undefined);
+  check('ход 4: шаг всё ещё про фото, не слоты/handoff', t.nextStep === 'campaign_ask_field');
   card = t.card; history = t.history;
 
-  // Ход 6: клиент говорит, что прислал фото (без реального файла — see
+  // Ход 5: клиент говорит, что прислал фото (без реального файла — see
   // ограничение в шапке). Интересно посмотреть, учтёт ли Extractor
   // отсутствие настоящего вижн-контента или слепо поверит caption+флагу.
   t = await runTurn(card, history, 'вот, отправила', { hasPhoto: true, photoCaption: 'вот фото' });
@@ -215,7 +210,7 @@ async function main() {
     card = applyCampaignAnswer(card, 'photo_of_placement', 'yes');
   }
 
-  // Ход 7: все обязательные поля собраны — должен решить, что дальше
+  // Ход 6: все обязательные поля собраны — должен решить, что дальше
   // (self_book_slot → слоты). Подставляем две свежих "времени" из
   // отдельного пула [КАМПЕЙН], как это бы сделал реальный getAvailableSlots.
   const slotsDisplay = ['вторник, 12 мая, 15:00', 'среда, 13 мая, 11:00'];
@@ -237,10 +232,10 @@ async function main() {
   console.log('');
   history = [...history, { from: 'inka', text: replyShowSlots }];
 
-  // Ход 8: клиент выбирает второе время.
+  // Ход 7: клиент выбирает второе время.
   t = await runTurn(card, history, 'второе время, пожалуйста', { slotsDisplay });
   logTurn('второе время, пожалуйста', t);
-  check('ход 8: валидный выбор → campaign_confirm_slot', t.nextStep === 'campaign_confirm_slot');
+  check('ход 7: валидный выбор → campaign_confirm_slot', t.nextStep === 'campaign_confirm_slot');
   card = t.card; history = t.history;
 
   // Симулируем реальную бронь (bookSlot в pages/api/telegram.ts) — без сети.
@@ -258,15 +253,15 @@ async function main() {
     campaignPendingField: null,
   });
   console.log(`  Инка (campaign_confirm_slot): ${replyConfirm}`);
-  check('ход 9: НЕ обещает финальное принятие ("ты принята"/"ты модель")', !/ты\s+(точно\s+)?прин|ты\s+модель/i.test(replyConfirm));
-  check('ход 9: нет реквизитов предоплаты (этой кампании они не нужны)', !/реквизит|предоплат/i.test(replyConfirm));
+  check('ход 8: НЕ обещает финальное принятие ("ты принята"/"ты модель")', !/ты\s+(точно\s+)?прин|ты\s+модель/i.test(replyConfirm));
+  check('ход 8: нет реквизитов предоплаты (этой кампании они не нужны)', !/реквизит|предоплат/i.test(replyConfirm));
   console.log('');
   history = [...history, { from: 'client', text: 'второе время, пожалуйста' }, { from: 'inka', text: replyConfirm }];
 
-  // Ход 10: клиент пишет после брони — проверка followup, не повтор анкеты.
+  // Ход 9: клиент пишет после брони — проверка followup, не повтор анкеты.
   t = await runTurn(card, history, 'хорошо, спасибо! жду');
   logTurn('хорошо, спасибо! жду', t);
-  check('ход 10: campaign_followup_chat (не переспрашивает анкету/слоты)', t.nextStep === 'campaign_followup_chat');
+  check('ход 9: campaign_followup_chat (не переспрашивает анкету/слоты)', t.nextStep === 'campaign_followup_chat');
 
   console.log('========================================');
   console.log(anyProblem ? 'ИТОГО: есть проблемы — см. FAIL выше.' : 'ИТОГО: все проверки прошли.');
