@@ -144,17 +144,61 @@ eq('после deep link campaign_id = color_texture', card.campaign_id, 'color_
 
 {
   // Turn 4: клиент не присылает фото прямо сейчас, просто уходит от вопроса —
-  // optional-поле не должно зацикливать разговор.
+  // optional-поле не должно зацикливать разговор. color_texture —
+  // booking_mode: self_book_slot, так что дальше не хэндофф мастеру, а
+  // показ слотов из отдельного пула [КАМПЕЙН] (lib/calendar.ts).
   const t4 = simulateTurn(card, 'фото скину чуть позже можно?');
-  eq('ход 4: optional-вопрос пройден без фото → handoff, без зацикливания', t4.nextStep, 'campaign_handoff');
+  ok('ход 4: optional-вопрос пройден без фото, без зацикливания', t4.nextStep !== 'campaign_ask_field');
   card = t4.card;
-  eq('после хэндоффа: campaign_handoff_sent=yes', card.campaign_handoff_sent, 'yes');
+  console.log(`    → campaign_handoff_sent пока: ${card.campaign_handoff_sent ?? 'null'} (рано — слоты ещё не смотрели)`);
 }
 
 {
-  // Turn 5: клиент пишет что-то ещё после хэндоффа — не переспрашиваем заново.
-  const t5 = simulateTurn(card, 'хорошо, жду ответ от Ани');
-  eq('ход 5: после хэндоффа — followup_chat, не повтор анкеты', t5.nextStep, 'campaign_followup_chat');
+  // Turn 4b: pages/api/telegram.ts здесь делает живой getAvailableSlots('campaign', 3)
+  // и пересчитывает nextStep на карточке со свежими slot_options — симулируем
+  // тот же шаг (без сети): нашлись два свободных [КАМПЕЙН]-слота.
+  card = { ...card, slot_options: ['ev1', 'ev2'] };
+  const signalsNow: MessageSignals = {
+    is_admin_sender: false, is_prompt_injection: false, is_out_of_scope: false, is_wrong_layout: false,
+    client_picked_slot_id: null, client_wants_other_slots: false, client_asks_for_more_slots: false,
+    client_wants_to_reschedule: false, client_confirms_booking: null, campaign_field_answer: null,
+  };
+  const stepWithSlots = getNextStep(card, signalsNow);
+  eq('ход 4b: свежие слоты найдены → campaign_show_slots', stepWithSlots, 'campaign_show_slots');
+  const patch = getCardPatchForStep(stepWithSlots, card, signalsNow);
+  card = { ...card, ...patch };
+  console.log('  [бот показывает 2 свободных времени из [КАМПЕЙН]]');
+}
+
+{
+  // Turn 5: клиент выбирает второе время — Extractor вернул бы
+  // client_picked_slot_id='ev2' (порядковое "второе" + lead_status=slots_shown,
+  // который только что проставил патч campaign_show_slots).
+  const pickSignals: MessageSignals = {
+    is_admin_sender: false, is_prompt_injection: false, is_out_of_scope: false, is_wrong_layout: false,
+    client_picked_slot_id: 'ev2', client_wants_other_slots: false, client_asks_for_more_slots: false,
+    client_wants_to_reschedule: false, client_confirms_booking: null, campaign_field_answer: null,
+  };
+  console.log('  клиент: "второе время, пожалуйста"');
+  const step5 = getNextStep(card, pickSignals);
+  eq('ход 5: валидный выбор → campaign_confirm_slot', step5, 'campaign_confirm_slot');
+  console.log(`    → NEXT_STEP: ${step5}`);
+
+  // pages/api/telegram.ts здесь реально зовёт bookSlot() и, при успехе,
+  // проставляет chosen_slot_id ДО вызова getCardPatchForStep — симулируем
+  // успешную бронь без сети.
+  card = { ...card, chosen_slot_id: 'ev2', booked_slot_display: 'среда, 15:00' };
+  const patch5 = getCardPatchForStep(step5, card, pickSignals);
+  card = { ...card, ...patch5 };
+  eq('после брони: campaign_handoff_sent=yes (кампания для этого клиента завершена)', card.campaign_handoff_sent, 'yes');
+  eq('после брони: slot_options очищены', card.slot_options, null);
+}
+
+{
+  // Turn 6: клиент пишет что-то ещё после брони — не предлагаем слоты снова
+  // и не переспрашиваем анкету.
+  const t6 = simulateTurn(card, 'хорошо, увидимся там');
+  eq('ход 6: после брони — followup_chat, не повтор анкеты/слотов', t6.nextStep, 'campaign_followup_chat');
 }
 
 ok('на всём пути ни разу не всплыл ask_idea', true); // проверено по каждому nextStep выше явно

@@ -14,7 +14,7 @@ import { runResponder } from '../../lib/responder';
 import { runAdmin } from '../../lib/admin';
 import { appendDialogTurn, parseDialogHistory, recentDialogForModel } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
-import type { SlotType, AvailableSlot } from '../../lib/calendar';
+import type { BookingType, AvailableSlot } from '../../lib/calendar';
 import { sendTelegramMessage, forwardTelegramMessage, pickLargestTelegramPhoto } from '../../lib/telegramApi';
 import { getDepositAmount } from '../../lib/paymentConfig';
 import { getCampaign } from '../../lib/campaigns';
@@ -25,6 +25,8 @@ import {
   parseCampaignData,
   serializeCampaignData,
   buildCampaignHandoffNotification,
+  buildCampaignSlotBookedNotification,
+  buildCampaignNoSlotsNotification,
   type CampaignRouting,
 } from '../../lib/campaignFlow';
 
@@ -410,8 +412,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // мастеру. Не путать с campaignRoutingBefore (это было ДО слияния
     // ответа клиента в карточку).
     const campaignRouting: CampaignRouting | null = mergedCard.campaign_id
-      ? routeCampaign(mergedCard)
+      ? routeCampaign(mergedCard, signals)
       : null;
+    const campaignSelfBooksSlots = campaignRouting?.campaign.booking_mode === 'self_book_slot';
 
     // 5. CALENDAR — подгружаем АКТУАЛЬНЫЙ список слотов только когда
     // текущий state действительно находится в слот-флоу. Раньше одного
@@ -433,17 +436,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       'unclear_slot_choice',
       'confirm_slot_awaiting_payment',
       'confirm_consultation_booked',
+      // Кампейн-эквиваленты (см. lib/campaignFlow.ts, booking_mode:
+      // self_book_slot) — отдельный тег [КАМПЕЙН], тот же механизм.
+      'campaign_show_slots',
+      'campaign_no_slots',
+      'campaign_confirm_slot',
     ];
-    const needsFreshSlots = routeChosen && hasPhone && slotLookupSteps.includes(nextStep);
+    const needsFreshSlots =
+      (routeChosen && hasPhone && slotLookupSteps.includes(nextStep)) ||
+      (campaignSelfBooksSlots && slotLookupSteps.includes(nextStep));
 
     // Если первый проход уже валидно подтвердил бронь по списку, который
     // реально показывали клиенту, не пересчитываем подтверждение по свежему
     // top-N: настоящую проверку занятости делает bookSlot() по event id.
     const alreadyConfirmed =
-      nextStep === 'confirm_slot_awaiting_payment' || nextStep === 'confirm_consultation_booked';
+      nextStep === 'confirm_slot_awaiting_payment' ||
+      nextStep === 'confirm_consultation_booked' ||
+      nextStep === 'campaign_confirm_slot';
 
     if (needsFreshSlots) {
-      const slotType: SlotType = mergedCard.direct_tattoo_allowed === 'yes' ? 'tattoo' : 'consultation';
+      const slotType: BookingType = campaignSelfBooksSlots
+        ? 'campaign'
+        : mergedCard.direct_tattoo_allowed === 'yes'
+          ? 'tattoo'
+          : 'consultation';
       try {
         const slots = await getAvailableSlots(slotType, 3);
         liveCard = { ...mergedCard, slot_options: slots.map((s) => s.id) };
@@ -466,10 +482,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // удалось (слот увели секунду назад) — откатываем на повторный
     // выбор, не притворяясь, что всё прошло гладко.
     if (
-      (nextStep === 'confirm_slot_awaiting_payment' || nextStep === 'confirm_consultation_booked') &&
+      (nextStep === 'confirm_slot_awaiting_payment' ||
+        nextStep === 'confirm_consultation_booked' ||
+        nextStep === 'campaign_confirm_slot') &&
       signals.client_picked_slot_id
     ) {
-      const slotType: SlotType = nextStep === 'confirm_slot_awaiting_payment' ? 'tattoo' : 'consultation';
+      const slotType: BookingType =
+        nextStep === 'confirm_slot_awaiting_payment'
+          ? 'tattoo'
+          : nextStep === 'campaign_confirm_slot'
+            ? 'campaign'
+            : 'consultation';
       const result = await bookSlot(
         signals.client_picked_slot_id,
         slotType,
@@ -486,20 +509,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           slot_options: freshSlots.map((s) => s.id),
         };
         slotsDisplay = freshSlots.map(formatSlotForDisplay);
-        nextStep = 'slot_taken_pick_again';
+        nextStep = nextStep === 'campaign_confirm_slot' ? 'campaign_show_slots' : 'slot_taken_pick_again';
       } else {
         const pickedIndex = liveCard.slot_options?.indexOf(signals.client_picked_slot_id) ?? -1;
         const pickedDisplay = pickedIndex >= 0 ? slotsDisplay?.[pickedIndex] ?? null : null;
         const isTattooBooking = nextStep === 'confirm_slot_awaiting_payment';
+        const isCampaignBooking = nextStep === 'campaign_confirm_slot';
         const pickedStartIso =
-          isTattooBooking && pickedIndex >= 0 ? rawSlots?.[pickedIndex]?.start ?? null : null;
+          (isTattooBooking || isCampaignBooking) && pickedIndex >= 0
+            ? rawSlots?.[pickedIndex]?.start ?? null
+            : null;
         liveCard = {
           ...liveCard,
           chosen_slot_id: signals.client_picked_slot_id,
           booked_slot_display: pickedDisplay,
           booked_slot_start_iso: pickedStartIso,
           payment_reminder_sent: null,
-          booked_at: isTattooBooking ? new Date().toISOString() : liveCard.booked_at,
+          booked_at: isTattooBooking || isCampaignBooking ? new Date().toISOString() : liveCard.booked_at,
           payment_reminder_early_sent: isTattooBooking ? null : liveCard.payment_reminder_early_sent,
         };
       }
@@ -609,22 +635,40 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // 10d. CAMPAIGN HANDOFF — одноразовое уведомление мастеру в момент,
-    // когда все required_info/optional_info собраны (booking_mode:
-    // master_approval). Отдельно от buildMasterNotification ниже — тому
-    // шагу неоткуда взять campaign/collected без лишних параметров.
-    if (nextStep === 'campaign_handoff' && campaignRouting) {
+    // 10d. CAMPAIGN NOTIFICATIONS — хэндофф (master_approval), подтверждённая
+    // бронь [КАМПЕЙН]-слота, и одноразовый пинг "пул пуст" (self_book_slot).
+    // Отдельно от buildMasterNotification ниже — тому шагу неоткуда взять
+    // campaign/collected без лишних параметров.
+    if (campaignRouting) {
       try {
         const notifyLabel = finalCard.client_name || clientLabel;
-        const note = buildCampaignHandoffNotification(
-          campaignRouting.campaign,
-          finalCard.campaign_collected ?? {},
-          notifyLabel,
-          username
-        );
-        await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
+        if (nextStep === 'campaign_handoff') {
+          const note = buildCampaignHandoffNotification(
+            campaignRouting.campaign,
+            finalCard.campaign_collected ?? {},
+            notifyLabel,
+            username
+          );
+          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
+        } else if (nextStep === 'campaign_confirm_slot') {
+          const whenDisplay = finalCard.booked_slot_display ?? 'см. календарь [КАМПЕЙН]';
+          const note = buildCampaignSlotBookedNotification(
+            campaignRouting.campaign,
+            finalCard.campaign_collected ?? {},
+            notifyLabel,
+            username,
+            whenDisplay
+          );
+          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
+        } else if (
+          nextStep === 'campaign_no_slots' &&
+          liveCard.campaign_collected?.__no_slots_pinged !== '1'
+        ) {
+          const note = buildCampaignNoSlotsNotification(campaignRouting.campaign, notifyLabel, username);
+          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
+        }
       } catch (campaignNotifyErr) {
-        console.error('Campaign handoff notification failed:', campaignNotifyErr);
+        console.error('Campaign notification failed:', campaignNotifyErr);
       }
     }
 

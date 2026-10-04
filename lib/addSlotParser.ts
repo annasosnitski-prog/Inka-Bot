@@ -65,6 +65,9 @@ function nextWeekday(now: Date, targetDay: number): string {
 const TAG_PATTERNS: { re: RegExp; tag: SlotTag }[] = [
   { re: /окно|walk[\s-]?in|вок[\s-]?ин|волк[\s-]?ин|уок[\s-]?ин|олкин/i, tag: '[ОКНО]' },
   { re: /чат|видео|online|онлайн/i, tag: '[ЧАТ]' },
+  // Кампейн/рекрутинг-слоты (см. lib/campaigns.ts) — отдельный пул, не
+  // пересекается ни с одним из клиентских тегов выше/ниже.
+  { re: /кампейн|кампани|модел/i, tag: '[КАМПЕЙН]' },
   { re: /тату|tattoo/i, tag: '[ТАТУ]' },
   { re: /приём|прием|конс|студи|очн/i, tag: '[ПРИЁМ]' },
 ];
@@ -203,7 +206,7 @@ export function findTimeRange(text: string): { startTime: string; endTime: strin
 export function parseAddSlotCommand(text: string, now: Date): ParsedAddSlot | ParseFailure {
   const tag = findTag(text);
   if (!tag) {
-    return { ok: false, error: 'не поняла тип слота. напиши: чат / окно.' };
+    return { ok: false, error: 'не поняла тип слота. напиши: чат / окно / кампейн.' };
   }
   // [ТАТУ]/[ПРИЁМ] — это Дневник-сессии мастера с реальным клиентом, бот их
   // никогда не предлагает в чате (см. tagsForRequest в lib/calendar.ts).
@@ -269,7 +272,7 @@ export interface ParsedClose {
 export function parseCloseCommand(text: string, now: Date): ParsedClose | ParseFailure {
   const tag = findTag(text);
   if (!tag) {
-    return { ok: false, error: 'не поняла что закрыть. напиши: тату или приём (можно и чат/окно).' };
+    return { ok: false, error: 'не поняла что закрыть. напиши: тату или приём (можно и чат/окно/кампейн).' };
   }
   const family = familyOfTag(tag);
 
@@ -306,7 +309,7 @@ export interface ParsedDelete {
 export function parseDeleteCommand(text: string, now: Date): ParsedDelete | ParseFailure {
   const tag = findTag(text);
   if (!tag) {
-    return { ok: false, error: 'не поняла что удалить. напиши: тату или приём (можно и чат/окно).' };
+    return { ok: false, error: 'не поняла что удалить. напиши: тату или приём (можно и чат/окно/кампейн).' };
   }
   const family = familyOfTag(tag);
 

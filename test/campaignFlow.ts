@@ -126,8 +126,10 @@ console.log('\n▶ 4. кампейн-клиент не попадает в ask_i
   eq('первый ход — campaign_intro', step, 'campaign_intro');
 }
 
-// ================= 5. После required_info — master approval / handoff =================
-console.log('\n▶ 5. после сбора required_info (+ опциональных) — handoff мастеру, не раньше');
+// ================= 5. После required_info — переходим к бронированию слота =================
+// color_texture — booking_mode: self_book_slot, так что после сбора данных
+// бот сам предлагает/бронирует [КАМПЕЙН]-слот, а не просто передаёт мастеру.
+console.log('\n▶ 5. после сбора required_info (+ опциональных) — self_book_slot, не раньше');
 {
   let c = activateCampaign(card(), 'color_texture');
   // Шаг 1: интро, спрашивает первое required_info (placement).
@@ -144,24 +146,80 @@ console.log('\n▶ 5. после сбора required_info (+ опциональ�
   c = { ...c, ...patch };
 
   // Клиент отвечает на approximate_size — required_info полностью собран,
-  // но handoff ЕЩЁ НЕ должен наступить: есть optional_info (photo).
+  // но бронирование слота ЕЩЁ НЕ должно наступить: есть optional_info (photo).
   c = applyCampaignAnswer(c, 'approximate_size', '5-7 см');
   routing = routeCampaign(c);
   eq('шаг 3: required_info собран, но ещё спрашивает optional (фото)', `${routing?.step}:${routing?.pendingField}`, 'campaign_ask_field:photo_of_placement');
-  ok('до ответа на optional — НЕ handoff (мастер не должен решать раньше срока)', getNextStep(c, sig()) !== 'campaign_handoff');
+  ok(
+    'до ответа на optional — ни handoff, ни показ слотов (мастер/бот не должны решать раньше срока)',
+    getNextStep(c, sig()) !== 'campaign_handoff' && getNextStep(c, sig()) !== 'campaign_show_slots'
+  );
   patch = getCardPatchForStep('campaign_ask_field', c, sig());
   c = { ...c, ...patch };
 
-  // Клиент не присылает фото (оптционально) — всё равно едем дальше, не зацикливаемся.
+  // Клиент не присылает фото (опционально) — всё равно едем дальше, не зацикливаемся.
+  // Данных собрано достаточно → routeCampaign теперь смотрит на слоты.
   c = applyCampaignAnswer(c, 'photo_of_placement', null);
   routing = routeCampaign(c);
-  eq('шаг 4: optional пропущен без ответа → handoff', routing?.step, 'campaign_handoff');
-  patch = getCardPatchForStep('campaign_handoff', c, sig());
-  eq('патч handoff: campaign_handoff_sent=yes', patch.campaign_handoff_sent, 'yes');
+  eq('шаг 4: optional пропущен без ответа, слотов ещё не загружали → campaign_no_slots', routing?.step, 'campaign_no_slots');
+}
+
+// ================= 5b. self_book_slot — показ слотов, бронь, завершение =================
+console.log('\n▶ 5b. self_book_slot: показ слотов → бронь конкретного слота → followup');
+{
+  // Карточка, у которой сбор данных уже завершён (эквивалент конца теста 5).
+  let c = activateCampaign(card(), 'color_texture');
+  c = applyCampaignAnswer(c, 'placement', 'предплечье');
+  c = applyCampaignAnswer(c, 'approximate_size', '5-7 см');
+  c = applyCampaignAnswer(c, 'photo_of_placement', null);
+
+  // pages/api/telegram.ts подгрузило свежие [КАМПЕЙН]-слоты из календаря.
+  c = { ...c, slot_options: ['ev1', 'ev2'] };
+  let routing = routeCampaign(c);
+  eq('слоты есть → campaign_show_slots', routing?.step, 'campaign_show_slots');
+  let patch = getCardPatchForStep('campaign_show_slots', c, sig());
+  eq('патч show_slots: lead_status=slots_shown (чтобы Extractor распознал порядковый выбор)', patch.lead_status, 'slots_shown');
   c = { ...c, ...patch };
 
-  // Следующее сообщение клиента (новый ход) уже не повторяет сбор данных.
-  eq('следующий ход после хэндоффа → campaign_followup_chat (не переспрашивает)', getNextStep(c, sig()), 'campaign_followup_chat');
+  // Клиент выбирает второй слот — getNextStep видит валидный client_picked_slot_id.
+  const pickSignals = sig({ client_picked_slot_id: 'ev2' });
+  eq('валидный выбор слота → campaign_confirm_slot', getNextStep(c, pickSignals), 'campaign_confirm_slot');
+
+  // pages/api/telegram.ts реально бронирует (bookSlot) и проставляет chosen_slot_id
+  // ДО вызова getCardPatchForStep — здесь симулируем результат этого шага.
+  c = { ...c, chosen_slot_id: 'ev2', booked_slot_display: 'вторник, 10:00' };
+  patch = getCardPatchForStep('campaign_confirm_slot', c, pickSignals);
+  eq('патч confirm_slot: campaign_handoff_sent=yes (кампания завершена)', patch.campaign_handoff_sent, 'yes');
+  eq('патч confirm_slot: slot_options очищены', patch.slot_options, null);
+  c = { ...c, ...patch };
+
+  eq('следующий ход после брони → campaign_followup_chat (не переспрашивает и не предлагает слоты снова)', getNextStep(c, sig()), 'campaign_followup_chat');
+}
+
+// ================= 5c. self_book_slot — пустой пул слотов не зацикливает и не ломает =================
+console.log('\n▶ 5c. self_book_slot: пустой пул [КАМПЕЙН] → campaign_no_slots, без лишних повторов');
+{
+  let c = activateCampaign(card(), 'color_texture');
+  c = applyCampaignAnswer(c, 'placement', 'плечо');
+  c = applyCampaignAnswer(c, 'approximate_size', '4 см');
+  c = applyCampaignAnswer(c, 'photo_of_placement', null);
+  // pages/api/telegram.ts попробовало найти слоты — пул пуст.
+  c = { ...c, slot_options: [] };
+
+  eq('пустой пул → campaign_no_slots (а не зависает/не падает в handoff)', getNextStep(c, sig()), 'campaign_no_slots');
+  let patch = getCardPatchForStep('campaign_no_slots', c, sig());
+  eq('патч no_slots: campaign_handoff_sent остаётся null (ждём, пока появится слот)', patch.campaign_handoff_sent, undefined);
+  eq('патч no_slots: ставит одноразовый маркер пинга мастеру', patch.campaign_collected?.__no_slots_pinged, '1');
+  c = { ...c, ...patch };
+
+  // Повторное сообщение клиента, слотов всё ещё нет — не зацикливается на
+  // повторной отправке пинга (это решает код в pages/api/telegram.ts по
+  // тому же маркеру), а маршрут остаётся тем же, не "залипает" в handoff.
+  eq('повторный ход без слотов → всё ещё campaign_no_slots', getNextStep(c, sig()), 'campaign_no_slots');
+
+  // Мастер добавила слот — следующий ход должен сразу увидеть его.
+  c = { ...c, slot_options: ['ev9'] };
+  eq('слот появился → campaign_show_slots на следующем ходе', getNextStep(c, sig()), 'campaign_show_slots');
 }
 
 // ================= 6. Обычный клиент без campaign_id — воронка не тронута =================

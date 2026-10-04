@@ -190,6 +190,9 @@ export type NextStep =
   | 'campaign_intro'
   | 'campaign_ask_field'
   | 'campaign_handoff'
+  | 'campaign_show_slots'
+  | 'campaign_no_slots'
+  | 'campaign_confirm_slot'
   | 'campaign_followup_chat';
 
 function hasSlots(card: ClientCard): boolean {
@@ -217,7 +220,7 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   // guard — but a deactivated campaign mid-flight falls back safely here
   // instead of getting stuck).
   if (card.campaign_id) {
-    const campaignRouting = routeCampaign(card);
+    const campaignRouting = routeCampaign(card, signals);
     if (campaignRouting) return campaignRouting.step;
   }
 

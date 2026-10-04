@@ -38,6 +38,14 @@ active_campaign.pending_field называет, какое значение се
 сообщении есть фото — верни "yes", даже если подписи нет или она про
 что-то другое.
 
+ВЫБОР СЛОТА (booking_mode: self_book_slot). Когда все обязательные поля
+уже собраны, active_campaign.pending_field становится null, а карточка
+переходит в обычный режим показа слотов — current_card.lead_status =
+"slots_shown" и slot_options заполнены. В этом случае применяется
+ОБЫЧНОЕ правило client_picked_slot_id из основного промпта (порядковое
+числительное → id слота по позиции в slot_options) — оно не отменяется
+кампейн-режимом.
+
 Добавь в JSON ровно одно новое поле:
 "campaign_field_answer": string | null
 

@@ -30,7 +30,14 @@ export interface CampaignConfig {
   // только то, что они должны быть заполнены.
   required_info: string[];
   optional_info: string[];
-  booking_mode: 'master_approval';
+  // 'master_approval' — после сбора данных только хэндофф мастеру, сама
+  //   кампания НЕ бронирует ничего в календаре (Аня решает и договаривается
+  //   о времени сама, вне бота).
+  // 'self_book_slot' — после сбора данных бот показывает и бронирует
+  //   слот из ОТДЕЛЬНОГО пула [КАМПЕЙН] (lib/calendar.ts) — не из
+  //   обычных ОКНО/ЧАТ клиентских пулов. Мастер создаёт эти слоты через
+  //   /добавить кампейн ... (lib/addSlotParser.ts).
+  booking_mode: 'master_approval' | 'self_book_slot';
   active: boolean;
 }
 
@@ -53,7 +60,7 @@ const CAMPAIGNS: CampaignConfig[] = [
     ],
     required_info: ['placement', 'approximate_size'],
     optional_info: ['photo_of_placement'],
-    booking_mode: 'master_approval',
+    booking_mode: 'self_book_slot',
     active: true,
   },
 ];
