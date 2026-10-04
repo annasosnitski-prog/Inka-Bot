@@ -73,6 +73,41 @@ Admin-сообщения (от `MASTER_TELEGRAM_ID`) перехватывают�
 (заблокирован или клиент явно отказался) — важно: `lead_status` при отказе
 **не меняется**, поэтому "закрыт" проверяется отдельно, не одним статусом.
 
+## Campaign mode (рекрутинг/рекламные deep links)
+
+Один бот принимает людей из разных кампаний через Telegram deep link
+`t.me/inka_assistant_bot?start=<campaign_id>`. Это полностью отдельный,
+config-driven флоу, не переиспользующий обычную тату-воронку:
+
+- **`lib/campaigns.ts`** — конфиг кампаний. Новая кампания = новая запись
+  в массиве (`id`, `title`, `offer`, `payment`, `required_info`,
+  `optional_info`, `booking_mode`...), без правок `stateMachine.ts` или
+  промптов.
+- **`lib/campaignFlow.ts`** — generic state machine над конфигом:
+  `routeCampaign` решает шаг (`campaign_intro` → `campaign_ask_field` ×N →
+  `campaign_handoff` → `campaign_followup_chat`) чисто по тому, какие
+  `required_info`/`optional_info` ключи уже есть в `campaign_collected`.
+  Код не знает смысла конкретных полей, только их наличие.
+- `pages/api/telegram.ts` распознаёт `/start <payload>` ДО Extractor-а,
+  активирует кампанию на карточке (`activateCampaign`) и, если
+  `card.campaign_id` задан, `getNextStep`/`getCardPatchForStep`
+  (`lib/stateMachine.ts`) делегируют весь роутинг в `campaignFlow.ts` —
+  обычная диагностика (idea→price→booking) и `pricingRules` для такой
+  карточки вообще не выполняются.
+- Extractor/Responder получают `active_campaign`/`campaign` в input и
+  используют свои overlay-файлы (`campaignExtractorOverlay.txt`,
+  `campaignResponderOverlay.txt`) — тот же паттерн, что v2-оверлеи ниже:
+  overlay безусловно приклеен к промпту, но эффективен только когда
+  campaign не null во входных данных конкретного вызова.
+- Хранение: `campaign_id` (Single line text) + `campaign_data` (Long
+  text, JSON — собранные поля и `handoff_sent`) в Airtable, тот же паттерн,
+  что `dialog_history`. Переживает перезапуск serverless-функции.
+- `booking_mode: "master_approval"` — после сбора всех `required_info` (и
+  однократного прохода по `optional_info`) карточка получает
+  `campaign_handoff_sent='yes'` и мастеру уходит отдельное уведомление
+  (`buildCampaignHandoffNotification`); Responder явно не обещает клиенту,
+  что он принят — решение за мастером.
+
 ## LLM-слой: три промпта + два "v2-оверлея"
 
 Три роли, три файла-промпта:
@@ -108,8 +143,8 @@ admin-промпт подставляют себе через `{{PRICING_RULES}}
 
 Два разных вида проверки, не путать:
 
-- **`npm test`** (`test/selftest.ts` + `test/stateContractV2.ts`, ~320
-  проверок) — чистая логика без сети: `getNextStep`, `getCardPatchForStep`,
+- **`npm test`** (`test/selftest.ts` + `test/stateContractV2.ts` +
+  `test/campaignFlow.ts`, ~350 проверок) — чистая логика без сети: `getNextStep`, `getCardPatchForStep`,
   `mergeClientCard`, парсеры команд, календарные хелперы, `resolveActiveProjects`
   и т.п. Никаких LLM-вызовов, работает без ключей. Гоняется в CI на каждый
   PR и пуш в `main` (`.github/workflows/tests.yml`).

@@ -4,6 +4,8 @@
 // Extractor describes the current message/project; this module owns routing.
 // ============================================================
 
+import { routeCampaign, getCampaignCardPatch } from './campaignFlow';
+
 export type Intent =
   | 'admin_test'
   | 'idea'
@@ -104,6 +106,19 @@ export interface ClientCard {
   // only fire for a rare THIRD concurrent project, where a real hand-off
   // (not a new record) is still the right call.
   second_project_flagged: YesNo;
+  // Campaign/recruitment deep-link mode (see lib/campaigns.ts,
+  // lib/campaignFlow.ts). null = normal client funnel, unchanged. Set once
+  // from a recognized /start <campaign_id> payload and persisted across
+  // turns + serverless restarts via Airtable (campaign_id field).
+  campaign_id: string | null;
+  // Generic key->value store of campaign required_info/optional_info
+  // answers, keyed by the campaign's own field names. Code only reads
+  // presence/absence of keys — never interprets the values.
+  campaign_collected: Record<string, string> | null;
+  // Set once the campaign's booking_mode handoff message has been sent —
+  // routes all further messages to campaign_followup_chat instead of
+  // re-running the collection loop.
+  campaign_handoff_sent: YesNo;
 }
 
 export interface MessageSignals {
@@ -121,6 +136,12 @@ export interface MessageSignals {
   service_fit_reason?: string | null;
   is_new_project_request?: boolean;
   photo_purpose?: PhotoPurpose;
+  // Campaign mode only: this message's answer to the currently pending
+  // campaign field (see lib/campaignFlow.ts), already merged into
+  // card.campaign_collected by pages/api/telegram.ts before getNextStep
+  // runs. Present here only so getCampaignCardPatch has the same shape as
+  // every other transient signal — the merge itself already happened.
+  campaign_field_answer?: string | null;
 }
 
 export type NextStep =
@@ -162,7 +183,14 @@ export type NextStep =
   | 'payment_screenshot_received'
   | 'booked_followup_chat'
   | 'all_done'
-  | 'declined_followup_chat';
+  | 'declined_followup_chat'
+  // Campaign/recruitment mode (see lib/campaignFlow.ts). Generic across all
+  // campaigns — which campaign and which field is being asked travels
+  // alongside the card/step, never encoded in the step name itself.
+  | 'campaign_intro'
+  | 'campaign_ask_field'
+  | 'campaign_handoff'
+  | 'campaign_followup_chat';
 
 function hasSlots(card: ClientCard): boolean {
   return !!card.slot_options && card.slot_options.length > 0;
@@ -179,6 +207,18 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     if (card.spam_count === 0) return 'handle_out_of_scope_warning_1';
     if (card.spam_count === 1) return 'handle_out_of_scope_warning_2';
     return 'handle_out_of_scope_block';
+  }
+
+  // Campaign/recruitment deep-link mode takes over entirely — it has its
+  // own generic, config-driven routing (lib/campaignFlow.ts) and never
+  // falls through into the tattoo-pricing funnel below. A null result
+  // means campaign_id doesn't resolve to a known/active campaign (should
+  // not normally happen once set — see pages/api/telegram.ts activation
+  // guard — but a deactivated campaign mid-flight falls back safely here
+  // instead of getting stuck).
+  if (card.campaign_id) {
+    const campaignRouting = routeCampaign(card);
+    if (campaignRouting) return campaignRouting.step;
   }
 
   // v2 service gate: unsupported work must never reach quote/booking. The
@@ -338,6 +378,8 @@ export interface CardPatch {
   reference_asked?: YesNo;
   service_fit?: ServiceFit;
   second_project_flagged?: YesNo;
+  campaign_collected?: Record<string, string> | null;
+  campaign_handoff_sent?: YesNo;
 }
 
 export function getCardPatchForStep(
@@ -345,6 +387,13 @@ export function getCardPatchForStep(
   card: ClientCard,
   signals: MessageSignals
 ): CardPatch {
+  // Campaign cards get a fully separate patch function — the tattoo-funnel
+  // preamble below (wants_to_book / reference_asked bookkeeping) doesn't
+  // apply and shouldn't touch a campaign card's fields.
+  if (card.campaign_id) {
+    return getCampaignCardPatch(step, card, signals);
+  }
+
   const patch: CardPatch = {};
 
   if (signals.client_confirms_booking !== null && card.wants_to_book !== 'yes') {

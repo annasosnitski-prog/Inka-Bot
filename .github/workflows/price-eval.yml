@@ -11,6 +11,10 @@ on:
       - "lib/responderVoiceV2.txt"
       - "lib/responder.ts"
       - "lib/adminPrompt.txt"
+      - "lib/campaignExtractorOverlay.txt"
+      - "lib/campaignResponderOverlay.txt"
+      - "lib/campaignFlow.ts"
+      - "lib/campaigns.ts"
       - "scripts/priceEval.ts"
       - "scripts/dialogEval.ts"
   push:
@@ -24,6 +28,10 @@ on:
       - "lib/responderVoiceV2.txt"
       - "lib/responder.ts"
       - "lib/adminPrompt.txt"
+      - "lib/campaignExtractorOverlay.txt"
+      - "lib/campaignResponderOverlay.txt"
+      - "lib/campaignFlow.ts"
+      - "lib/campaigns.ts"
       - "scripts/priceEval.ts"
       - "scripts/dialogEval.ts"
   workflow_dispatch: {}

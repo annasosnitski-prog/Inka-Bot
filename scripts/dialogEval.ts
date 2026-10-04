@@ -57,6 +57,9 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     payment_reminder_early_sent: null,
     service_fit: null,
     second_project_flagged: null,
+    campaign_id: null,
+    campaign_collected: null,
+    campaign_handoff_sent: null,
     ...over,
   };
 }
