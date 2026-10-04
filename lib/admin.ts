@@ -465,9 +465,10 @@ function humanDate(ymd: string): string {
 async function handleAddSlot(arg: string): Promise<string> {
   if (!arg.trim()) {
     return (
-      'что и когда поставить (только окно/чат — открытый слот для нового клиента)? например:\n' +
+      'что и когда поставить (окно/чат/кампейн — открытый слот для нового клиента)? например:\n' +
       '/добавить окно пятница 12:00-14:00\n' +
-      '/добавить чат завтра 10:00-10:30'
+      '/добавить чат завтра 10:00-10:30\n' +
+      '/добавить кампейн пятница 16:00-17:00'
     );
   }
 
@@ -512,8 +513,10 @@ async function handleAddSlot(arg: string): Promise<string> {
 // Дневника), короче — только это окно (только тату).
 // ----------------------------------------------------------
 
-function familyLabel(family: 'tattoo' | 'consultation'): string {
-  return family === 'tattoo' ? 'тату' : 'консультации';
+function familyLabel(family: 'tattoo' | 'consultation' | 'campaign'): string {
+  if (family === 'tattoo') return 'тату';
+  if (family === 'campaign') return 'кампейн';
+  return 'консультации';
 }
 
 async function handleCloseSlot(arg: string): Promise<string> {
@@ -544,7 +547,8 @@ async function handleCloseSlot(arg: string): Promise<string> {
   const when = `${humanDate(parsed.date)}, ${parsed.timeRange.startTime}–${parsed.timeRange.endTime}`;
   const nameSuffix = parsed.name ? ` — ${parsed.name}` : '';
 
-  let scope = ' (только это окно, для консультаций)';
+  let scope =
+    parsed.family === 'campaign' ? ' (только это окно, для кампейна)' : ' (только это окно, для консультаций)';
   if (parsed.family === 'tattoo') {
     const [h1, m1] = parsed.timeRange.startTime.split(':').map(Number);
     const [h2, m2] = parsed.timeRange.endTime.split(':').map(Number);

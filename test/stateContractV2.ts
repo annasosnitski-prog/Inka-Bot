@@ -63,6 +63,9 @@ function card(over: Partial<ClientCard> = {}): ClientCard {
     force_client_mode: null,
     service_fit: null,
     second_project_flagged: null,
+    campaign_id: null,
+    campaign_collected: null,
+    campaign_handoff_sent: null,
     ...over,
   };
 }
@@ -120,6 +123,7 @@ function extracted(over: Partial<ExtractorOutput> = {}): ExtractorOutput {
     service_fit_reason: null,
     is_new_project_request: false,
     photo_purpose: null,
+    campaign_field_answer: null,
     ...over,
   };
 }

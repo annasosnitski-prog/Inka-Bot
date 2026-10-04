@@ -14,9 +14,21 @@ import { runResponder } from '../../lib/responder';
 import { runAdmin } from '../../lib/admin';
 import { appendDialogTurn, parseDialogHistory, recentDialogForModel } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
-import type { SlotType, AvailableSlot } from '../../lib/calendar';
+import type { BookingType, AvailableSlot } from '../../lib/calendar';
 import { sendTelegramMessage, forwardTelegramMessage, pickLargestTelegramPhoto } from '../../lib/telegramApi';
 import { getDepositAmount } from '../../lib/paymentConfig';
+import { getCampaign } from '../../lib/campaigns';
+import {
+  routeCampaign,
+  activateCampaign,
+  applyCampaignAnswer,
+  parseCampaignData,
+  serializeCampaignData,
+  buildCampaignHandoffNotification,
+  buildCampaignSlotBookedNotification,
+  buildCampaignNoSlotsNotification,
+  type CampaignRouting,
+} from '../../lib/campaignFlow';
 
 // Master's own Telegram ID — admin/test mode detection.
 // Admin requests are handled by the dedicated admin module below and do not
@@ -67,9 +79,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const hasPhoto = !!message.photo;
   const photoFileId = hasPhoto ? pickLargestTelegramPhoto(message.photo)?.file_id ?? null : null;
   const photoCaption: string | null = message.caption ?? null;
-  const messageText: string | null = message.text ?? message.caption ?? null;
+  let messageText: string | null = message.text ?? message.caption ?? null;
+
+  // DEEP LINK КАМПАНИЙ. Telegram доставляет "/start <payload>" как обычное
+  // текстовое сообщение при переходе по ссылке t.me/bot?start=<payload>.
+  // Распознаём ЗДЕСЬ, до Extractor — иначе "/start color_texture" ушло бы
+  // в обычный пайплайн как бессмысленная "идея тату" (см. lib/campaigns.ts,
+  // lib/campaignFlow.ts). Неизвестный/неактивный payload безопасно не
+  // активирует кампанию — campaignActivationId останется null и клиент
+  // просто попадёт в обычную воронку с пустым первым сообщением.
+  let campaignActivationId: string | null = null;
+  let isStartCommand = false;
+  if (messageText === '/start' || (messageText && messageText.startsWith('/start '))) {
+    isStartCommand = true;
+    const payload = messageText.slice('/start'.length).trim();
+    const campaign = getCampaign(payload);
+    if (campaign) campaignActivationId = campaign.id;
+    messageText = null;
+  }
+
   const lastMessageForRecord =
-    messageText ?? '[клиент прислал фото без подписи]';
+    messageText ??
+    (isStartCommand ? `[/start ${campaignActivationId ?? ''}]`.trim() : '[клиент прислал фото без подписи]');
 
   const isAdminSender = telegramId === MASTER_TELEGRAM_ID;
   const clientLabel = firstName || username || String(telegramId);
@@ -111,7 +142,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   //
   // Мастера (isAdminSender) НЕ отбиваем этим фолбэком — её сообщения
   // (в т.ч. пересылки без текста) должны дойти до admin-обработчика ниже.
-  if (!messageText && !hasPhoto && !isAdminSender) {
+  // /start (campaignActivationId распознан выше, messageText уже обнулён)
+  // тоже не должен попадать в этот фолбэк — иначе переход по кампейн-ссылке
+  // отвечал бы "я понимаю только текст и фото" вместо запуска воронки.
+  if (!messageText && !hasPhoto && !isAdminSender && !isStartCommand) {
     if (chatId) {
       await sendTelegramMessage(
         chatId,
@@ -133,6 +167,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     let existing: ClientRecord | null = primaryRecord;
     let currentCard = recordToClientCard(telegramId, existing?.fields ?? {});
+
+    // 1c. АКТИВАЦИЯ/ПЕРЕКЛЮЧЕНИЕ КАМПАНИИ. Распознанный выше валидный
+    // /start <campaign_id> всегда полностью заменяет campaign-состояние
+    // карточки — даже если кампания уже была активна (переключение на
+    // другую кампанию не должно смешивать собранные наборы полей). Пустой/
+    // неизвестный/неактивный /start НЕ трогает существующий campaign_id —
+    // campaignActivationId в этом случае просто null.
+    if (campaignActivationId) {
+      currentCard = activateCampaign(currentCard, campaignActivationId);
+    }
 
     // 1b. ПОСЛЕДНИЕ РЕПЛИКИ ПЕРЕПИСКИ — контекст этого хода для Extractor
     // и Responder. currentCard — агрегат фактов, а recentHistory позволяет
@@ -185,6 +229,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })()
       : null;
 
+    // CAMPAIGN MODE: вычисляем, какой campaign-field сейчас ожидается, ДО
+    // вызова Extractor-а — это и есть тот вопрос, на который отвечает
+    // (или не отвечает) текущее сообщение клиента (см. lib/campaignFlow.ts
+    // routeCampaign — currentCard уже отражает состояние ПОСЛЕ прошлого
+    // хода, поэтому "что ещё не собрано" = "что мы спросили прошлым
+    // сообщением").
+    const campaignRoutingBefore: CampaignRouting | null = currentCard.campaign_id
+      ? routeCampaign(currentCard)
+      : null;
+
+    // CAMPAIGN MODE: пока карточка собирает required_info/optional_info,
+    // любое присланное фото пересылаем мастеру СРАЗУ, а не только
+    // упоминаем "yes" в текстовой сводке позже — ей нужно реально увидеть
+    // фото (например крупный план кожи), а не знать факт его отправки.
+    // Независимо от итогового nextStep этого хода (поле может быть принято
+    // или не принято Extractor-ом как достаточно крупное/близкое).
+    if (campaignRoutingBefore?.pendingField && hasPhoto && chatId && message.message_id) {
+      try {
+        await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
+      } catch (campaignPhotoForwardErr) {
+        console.error('Campaign field photo forward failed:', campaignPhotoForwardErr);
+      }
+    }
+
     let extracted = await runExtractor({
       currentCard,
       messageText,
@@ -194,16 +262,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       recentHistory,
       photoFileId,
       otherActiveProject: otherProjectSummary,
+      activeCampaign: campaignRoutingBefore
+        ? {
+            title: campaignRoutingBefore.campaign.title,
+            offer: campaignRoutingBefore.campaign.offer,
+            pendingField: campaignRoutingBefore.pendingField,
+          }
+        : null,
     });
 
-    // 2b. ВТОРОЙ АКТИВНЫЙ ПРОЕКТ. Сообщение не про самый свежий проект
+    // 2b. ВТОРОЙ АКТИВНЫЙ ПРОЕКТ. Не относится к campaign-режиму (карточка
+    // кампании не ведёт tattoo-воронку, второй проект там не имеет смысла)
+    // — для активной кампании весь этот блок пропускается целиком.
+    //
+    // Для обычного клиента: сообщение не про самый свежий проект
     // (is_new_project_request) — но прежде чем считать, что начинается ещё
     // (третий) проект, проверяем: может, оно про уже существующий ВТОРОЙ
     // активный проект клиента (переключение между двумя, а не новый).
     // Второй прогон Extractor-а стоит дороже одного сообщения, но это
     // редкий ход — переключение между проектами, а не каждое сообщение.
     let isCreatingSecondProject = false;
-    if (extracted.is_new_project_request && secondaryRecord) {
+    if (currentCard.campaign_id) {
+      // no-op — campaign cards never run the second-project hand-off logic.
+    } else if (extracted.is_new_project_request && secondaryRecord) {
       const secondaryCard = recordToClientCard(telegramId, secondaryRecord.fields);
       const secondaryHistory = recentDialogForModel(parseDialogHistory(secondaryRecord));
       const extractedForSecondary = await runExtractor({
@@ -252,11 +333,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // 3. Слить новую карточку. mergeClientCard умеет реально сбрасывать
     // проектные поля при явной новой идее и защищает уже забронированный
-    // проект от перезаписи второй татуировкой.
-    const mergedCard: ClientCard = mergeClientCard(currentCard, extracted, {
+    // проект от перезаписи второй татуировкой. campaign_id/campaign_collected/
+    // campaign_handoff_sent не упомянуты ни в одной ветке mergeClientCard,
+    // поэтому переживают слияние как есть (через `...current`).
+    let mergedCard: ClientCard = mergeClientCard(currentCard, extracted, {
       hasPhotoThisMessage: hasPhoto,
       photoHasCaption: hasPhoto && !!photoCaption,
     });
+
+    // CAMPAIGN MODE: сворачиваем ответ клиента на campaignRoutingBefore.pendingField
+    // в campaign_collected. Делается отдельно от mergeClientCard (которая не
+    // знает о кампаниях) — см. lib/campaignFlow.ts applyCampaignAnswer.
+    if (campaignRoutingBefore) {
+      mergedCard = applyCampaignAnswer(
+        mergedCard,
+        campaignRoutingBefore.pendingField,
+        extracted.campaign_field_answer
+      );
+    }
 
     const signals: MessageSignals = {
       is_admin_sender: isAdminSender,
@@ -272,6 +366,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       service_fit_reason: extracted.service_fit_reason,
       is_new_project_request: extracted.is_new_project_request,
       photo_purpose: extracted.photo_purpose,
+      campaign_field_answer: extracted.campaign_field_answer,
     };
 
     // СТРАХОВКА: Extractor получает recentHistory и обычно сам верно
@@ -325,6 +420,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // только определяем, в какую сторону движется диалог).
     let nextStep = getNextStep(mergedCard, signals);
 
+    // CAMPAIGN MODE: тот же routing, что произвёл nextStep выше (чистая
+    // функция, повторный вызов безопасен) — нужен, чтобы знать, КАКОЕ
+    // campaign-поле сейчас спрашивается, для Responder-а и уведомления
+    // мастеру. Не путать с campaignRoutingBefore (это было ДО слияния
+    // ответа клиента в карточку).
+    const campaignRouting: CampaignRouting | null = mergedCard.campaign_id
+      ? routeCampaign(mergedCard, signals)
+      : null;
+    const campaignSelfBooksSlots = campaignRouting?.campaign.booking_mode === 'self_book_slot';
+
     // 5. CALENDAR — подгружаем АКТУАЛЬНЫЙ список слотов только когда
     // текущий state действительно находится в слот-флоу. Раньше одного
     // routeChosen + phone было достаточно, поэтому уже забронированный
@@ -345,17 +450,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       'unclear_slot_choice',
       'confirm_slot_awaiting_payment',
       'confirm_consultation_booked',
+      // Кампейн-эквиваленты (см. lib/campaignFlow.ts, booking_mode:
+      // self_book_slot) — отдельный тег [КАМПЕЙН], тот же механизм.
+      'campaign_show_slots',
+      'campaign_no_slots',
+      'campaign_confirm_slot',
     ];
-    const needsFreshSlots = routeChosen && hasPhone && slotLookupSteps.includes(nextStep);
+    const needsFreshSlots =
+      (routeChosen && hasPhone && slotLookupSteps.includes(nextStep)) ||
+      (campaignSelfBooksSlots && slotLookupSteps.includes(nextStep));
 
     // Если первый проход уже валидно подтвердил бронь по списку, который
     // реально показывали клиенту, не пересчитываем подтверждение по свежему
     // top-N: настоящую проверку занятости делает bookSlot() по event id.
     const alreadyConfirmed =
-      nextStep === 'confirm_slot_awaiting_payment' || nextStep === 'confirm_consultation_booked';
+      nextStep === 'confirm_slot_awaiting_payment' ||
+      nextStep === 'confirm_consultation_booked' ||
+      nextStep === 'campaign_confirm_slot';
 
     if (needsFreshSlots) {
-      const slotType: SlotType = mergedCard.direct_tattoo_allowed === 'yes' ? 'tattoo' : 'consultation';
+      const slotType: BookingType = campaignSelfBooksSlots
+        ? 'campaign'
+        : mergedCard.direct_tattoo_allowed === 'yes'
+          ? 'tattoo'
+          : 'consultation';
       try {
         const slots = await getAvailableSlots(slotType, 3);
         liveCard = { ...mergedCard, slot_options: slots.map((s) => s.id) };
@@ -378,10 +496,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // удалось (слот увели секунду назад) — откатываем на повторный
     // выбор, не притворяясь, что всё прошло гладко.
     if (
-      (nextStep === 'confirm_slot_awaiting_payment' || nextStep === 'confirm_consultation_booked') &&
+      (nextStep === 'confirm_slot_awaiting_payment' ||
+        nextStep === 'confirm_consultation_booked' ||
+        nextStep === 'campaign_confirm_slot') &&
       signals.client_picked_slot_id
     ) {
-      const slotType: SlotType = nextStep === 'confirm_slot_awaiting_payment' ? 'tattoo' : 'consultation';
+      const slotType: BookingType =
+        nextStep === 'confirm_slot_awaiting_payment'
+          ? 'tattoo'
+          : nextStep === 'campaign_confirm_slot'
+            ? 'campaign'
+            : 'consultation';
       const result = await bookSlot(
         signals.client_picked_slot_id,
         slotType,
@@ -398,20 +523,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           slot_options: freshSlots.map((s) => s.id),
         };
         slotsDisplay = freshSlots.map(formatSlotForDisplay);
-        nextStep = 'slot_taken_pick_again';
+        nextStep = nextStep === 'campaign_confirm_slot' ? 'campaign_show_slots' : 'slot_taken_pick_again';
       } else {
         const pickedIndex = liveCard.slot_options?.indexOf(signals.client_picked_slot_id) ?? -1;
         const pickedDisplay = pickedIndex >= 0 ? slotsDisplay?.[pickedIndex] ?? null : null;
         const isTattooBooking = nextStep === 'confirm_slot_awaiting_payment';
+        const isCampaignBooking = nextStep === 'campaign_confirm_slot';
         const pickedStartIso =
-          isTattooBooking && pickedIndex >= 0 ? rawSlots?.[pickedIndex]?.start ?? null : null;
+          (isTattooBooking || isCampaignBooking) && pickedIndex >= 0
+            ? rawSlots?.[pickedIndex]?.start ?? null
+            : null;
         liveCard = {
           ...liveCard,
           chosen_slot_id: signals.client_picked_slot_id,
           booked_slot_display: pickedDisplay,
           booked_slot_start_iso: pickedStartIso,
           payment_reminder_sent: null,
-          booked_at: isTattooBooking ? new Date().toISOString() : liveCard.booked_at,
+          booked_at: isTattooBooking || isCampaignBooking ? new Date().toISOString() : liveCard.booked_at,
           payment_reminder_early_sent: isTattooBooking ? null : liveCard.payment_reminder_early_sent,
         };
       }
@@ -482,6 +610,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       lastClientMessage: responderLastMessage,
       recentHistory,
       slotsDisplay,
+      campaign: campaignRouting?.campaign ?? null,
+      campaignPendingField: campaignRouting?.pendingField ?? null,
     });
 
     // 9b. РЕКВИЗИТЫ ПРЕДОПЛАТЫ. На шаге подтверждения тату дописываем
@@ -516,6 +646,43 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         );
       } catch (notifySecondErr) {
         console.error('Second-project master notification failed:', notifySecondErr);
+      }
+    }
+
+    // 10d. CAMPAIGN NOTIFICATIONS — хэндофф (master_approval), подтверждённая
+    // бронь [КАМПЕЙН]-слота, и одноразовый пинг "пул пуст" (self_book_slot).
+    // Отдельно от buildMasterNotification ниже — тому шагу неоткуда взять
+    // campaign/collected без лишних параметров.
+    if (campaignRouting) {
+      try {
+        const notifyLabel = finalCard.client_name || clientLabel;
+        if (nextStep === 'campaign_handoff') {
+          const note = buildCampaignHandoffNotification(
+            campaignRouting.campaign,
+            finalCard.campaign_collected ?? {},
+            notifyLabel,
+            username
+          );
+          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
+        } else if (nextStep === 'campaign_confirm_slot') {
+          const whenDisplay = finalCard.booked_slot_display ?? 'см. календарь [КАМПЕЙН]';
+          const note = buildCampaignSlotBookedNotification(
+            campaignRouting.campaign,
+            finalCard.campaign_collected ?? {},
+            notifyLabel,
+            username,
+            whenDisplay
+          );
+          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
+        } else if (
+          nextStep === 'campaign_no_slots' &&
+          liveCard.campaign_collected?.__no_slots_pinged !== '1'
+        ) {
+          const note = buildCampaignNoSlotsNotification(campaignRouting.campaign, notifyLabel, username);
+          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
+        }
+      } catch (campaignNotifyErr) {
+        console.error('Campaign notification failed:', campaignNotifyErr);
       }
     }
 
@@ -604,6 +771,11 @@ function recordToClientCard(
     force_client_mode: fields.force_client_mode ?? null,
     service_fit: fields.service_fit ?? null,
     second_project_flagged: fields.second_project_flagged ?? null,
+    campaign_id: fields.campaign_id ?? null,
+    ...(() => {
+      const { collected, handoff_sent } = parseCampaignData(fields.campaign_data);
+      return { campaign_collected: collected, campaign_handoff_sent: handoff_sent };
+    })(),
   };
 }
 
@@ -668,6 +840,8 @@ function clientCardToAirtableFields(
     force_client_mode: card.force_client_mode,
     service_fit: card.service_fit,
     second_project_flagged: card.second_project_flagged,
+    campaign_id: card.campaign_id,
+    campaign_data: serializeCampaignData(card),
   };
 }
 

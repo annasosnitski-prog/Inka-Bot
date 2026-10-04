@@ -11,8 +11,13 @@ on:
       - "lib/responderVoiceV2.txt"
       - "lib/responder.ts"
       - "lib/adminPrompt.txt"
+      - "lib/campaignExtractorOverlay.txt"
+      - "lib/campaignResponderOverlay.txt"
+      - "lib/campaignFlow.ts"
+      - "lib/campaigns.ts"
       - "scripts/priceEval.ts"
       - "scripts/dialogEval.ts"
+      - "scripts/campaignDialogEval.ts"
   push:
     branches: [main]
     paths:
@@ -24,8 +29,13 @@ on:
       - "lib/responderVoiceV2.txt"
       - "lib/responder.ts"
       - "lib/adminPrompt.txt"
+      - "lib/campaignExtractorOverlay.txt"
+      - "lib/campaignResponderOverlay.txt"
+      - "lib/campaignFlow.ts"
+      - "lib/campaigns.ts"
       - "scripts/priceEval.ts"
       - "scripts/dialogEval.ts"
+      - "scripts/campaignDialogEval.ts"
   workflow_dispatch: {}
 
 jobs:
@@ -41,5 +51,8 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       - run: npm run eval:dialog
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - run: npm run eval:campaign-dialog
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

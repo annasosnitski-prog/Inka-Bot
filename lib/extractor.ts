@@ -27,13 +27,19 @@ function getExtractorPrompt(): string {
   if (cachedPrompt) return cachedPrompt;
   const promptPath = path.join(process.cwd(), 'lib', 'extractorPrompt.txt');
   const overlayPath = path.join(process.cwd(), 'lib', 'extractorContractV2.txt');
+  const campaignOverlayPath = path.join(process.cwd(), 'lib', 'campaignExtractorOverlay.txt');
   const template = fs.readFileSync(promptPath, 'utf-8');
   const base = template.replace('{{PRICING_RULES}}', getPricingRules());
   // Contract overlay is intentionally appended last: it only overrides the
   // output contract / new routing signals while preserving the battle-tested
   // pricing and extraction rules in the production prompt.
   const overlay = fs.readFileSync(overlayPath, 'utf-8');
-  cachedPrompt = `${base}\n\n${overlay}`;
+  // Campaign overlay is appended unconditionally too, but it only takes
+  // effect when active_campaign is non-null in the per-call input (see
+  // ExtractorInput.activeCampaign below) — otherwise the model is told to
+  // ignore it entirely, same pattern as the v2 overlay above.
+  const campaignOverlay = fs.readFileSync(campaignOverlayPath, 'utf-8');
+  cachedPrompt = `${base}\n\n${overlay}\n\n${campaignOverlay}`;
   return cachedPrompt;
 }
 
@@ -72,6 +78,21 @@ export interface ExtractorOutput {
   service_fit_reason: string | null;
   is_new_project_request: boolean;
   photo_purpose: PhotoPurpose;
+
+  // Campaign mode only (see lib/campaignFlow.ts). Always present in the
+  // JSON schema but only meaningful when ExtractorInput.activeCampaign was
+  // non-null for this call.
+  campaign_field_answer: string | null;
+}
+
+// Minimal campaign context handed to the Extractor so it knows a) this is
+// not the normal tattoo funnel and b) which generic field the client's
+// message is presumed to be answering right now. Deliberately generic —
+// no campaign-specific copy lives in code, only data from lib/campaigns.ts.
+export interface ActiveCampaignContext {
+  title: string;
+  offer: string;
+  pendingField: string | null;
 }
 
 // Краткая сводка ВТОРОГО активного проекта того же клиента (если есть) —
@@ -95,6 +116,7 @@ export interface ExtractorInput {
   recentHistory: RecentDialogTurn[];
   photoFileId: string | null;
   otherActiveProject?: OtherActiveProjectSummary | null;
+  activeCampaign?: ActiveCampaignContext | null;
 }
 
 export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutput> {
@@ -104,6 +126,7 @@ export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutp
     {
       current_card: input.currentCard,
       other_active_project: input.otherActiveProject ?? null,
+      active_campaign: input.activeCampaign ?? null,
       is_admin_sender: input.isAdminSender,
       recent_history: input.recentHistory,
       message: {
@@ -187,6 +210,10 @@ function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput {
   normalized.is_new_project_request = normalized.is_new_project_request === true;
   normalized.photo_purpose = normalized.photo_purpose ?? null;
   normalized.service_fit = normalized.service_fit ?? null;
+  normalized.campaign_field_answer =
+    typeof normalized.campaign_field_answer === 'string' && normalized.campaign_field_answer.trim()
+      ? normalized.campaign_field_answer.trim()
+      : null;
 
   return normalized;
 }

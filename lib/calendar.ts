@@ -53,19 +53,34 @@ export type SlotType = keyof typeof SLOT_TAG; // 'consultation' | 'tattoo'
 // русском); старые слова остаются синонимами при вводе команд, см.
 // lib/addSlotParser.ts. Старых событий с прежними тегами в календаре нет,
 // обратная совместимость по чтению не нужна.
-export type SlotTag = '[ТАТУ]' | '[ПРИЁМ]' | '[ЧАТ]' | '[ОКНО]';
-const ALL_TAGS: SlotTag[] = ['[ТАТУ]', '[ПРИЁМ]', '[ЧАТ]', '[ОКНО]'];
+// [КАМПЕЙН] — пятый тег, отдельный пул для рекрутинг/рекламных кампаний
+// (см. lib/campaigns.ts, lib/campaignFlow.ts). Как ОКНО/ЧАТ — мастер
+// создаёт его пустым через /добавить, бот сам предлагает и бронирует.
+// В отличие от ОКНО/ЧАТ у него нет "сестринского" Дневник-тега — кампания
+// не синхронизируется с Дневником, это полностью отдельный пул, который
+// не пересекается с обычными клиентскими слотами ни по тегу, ни по смыслу.
+export type SlotTag = '[ТАТУ]' | '[ПРИЁМ]' | '[ЧАТ]' | '[ОКНО]' | '[КАМПЕЙН]';
+const ALL_TAGS: SlotTag[] = ['[ТАТУ]', '[ПРИЁМ]', '[ЧАТ]', '[ОКНО]', '[КАМПЕЙН]'];
+
+// Тип запроса на бронирование клиентом — шире SlotType (который привязан
+// к Дневник-тегам ТАТУ/ПРИЁМ): кампания не ведёт Дневник-сессии, поэтому
+// у неё нет своего SlotType, но она всё равно должна уметь запросить
+// свободные слоты и забронировать один — через тот же getAvailableSlots/
+// bookSlot, просто с другим тегом.
+export type BookingType = SlotType | 'campaign';
 
 // Какой тег бот вообще может предложить клиенту. Единственный — ОКНО
-// для тату, ЧАТ для консультации; [ТАТУ]/[ПРИЁМ] сюда не попадают
-// никогда (это Дневник-сессии, см. шапку файла). Раньше был доп.
-// параметр smallTattoo, разделявший маленькое/большое тату на два
-// разных тега — Аня решила, что это одно и то же по смыслу (любая
-// прямая тату-бронь через бота — это ОКНО, независимо от размера);
-// какие заявки вообще доходят до прямой брони, уже отфильтровано выше
-// по цепочке, в Extractor-е (direct_tattoo_allowed).
-export function tagsForRequest(type: SlotType): SlotTag[] {
-  return type === 'tattoo' ? ['[ОКНО]'] : ['[ЧАТ]'];
+// для тату, ЧАТ для консультации, КАМПЕЙН для кампейн-лидов;
+// [ТАТУ]/[ПРИЁМ] сюда не попадают никогда (это Дневник-сессии, см.
+// шапку файла). Раньше был доп. параметр smallTattoo, разделявший
+// маленькое/большое тату на два разных тега — Аня решила, что это одно
+// и то же по смыслу (любая прямая тату-бронь через бота — это ОКНО,
+// независимо от размера); какие заявки вообще доходят до прямой брони,
+// уже отфильтровано выше по цепочке, в Extractor-е (direct_tattoo_allowed).
+export function tagsForRequest(type: BookingType): SlotTag[] {
+  if (type === 'tattoo') return ['[ОКНО]'];
+  if (type === 'campaign') return ['[КАМПЕЙН]'];
+  return ['[ЧАТ]'];
 }
 
 // Тег события по началу названия (или null — личное событие без тега).
@@ -84,6 +99,8 @@ export function tagDisplayLabel(tag: SlotTag | null): string {
       return ' (в студии)';
     case '[ОКНО]':
       return '';
+    case '[КАМПЕЙН]':
+      return '';
     default:
       return '';
   }
@@ -91,9 +108,11 @@ export function tagDisplayLabel(tag: SlotTag | null): string {
 
 // Маркер занятости при брони — зависит от ТЕГА слота, а не только от
 // маршрута: чат-конса помечается как раньше ("КОНС ЧАТ"), очная —
-// новым маркером "КОНС ЗАПИСЬ", тату и walk-in ждут предоплату.
-export function busyMarkerForTag(tag: SlotTag | null, type: SlotType): string {
+// новым маркером "КОНС ЗАПИСЬ", тату и walk-in ждут предоплату,
+// кампейн — отдельным маркером (нет предоплаты, нет "чат/очно").
+export function busyMarkerForTag(tag: SlotTag | null, type: BookingType): string {
   if (type === 'tattoo') return 'ОЖИДАЕТ ПРЕДОПЛАТЫ';
+  if (type === 'campaign') return 'КАМПЕЙН ЗАПИСЬ';
   return tag === '[ПРИЁМ]' ? 'КОНС ЗАПИСЬ' : 'КОНС ЧАТ';
 }
 
@@ -106,7 +125,7 @@ export const MASTER_CLOSED_MARKER = 'ЗАКРЫТО МАСТЕРОМ';
 
 // Маркеры занятости — если они уже есть в названии события, слот
 // считается занятым и не попадает в свободные.
-const BUSY_MARKERS = ['ОЖИДАЕТ ПРЕДОПЛАТЫ', 'КОНС ЧАТ', 'КОНС ЗАПИСЬ', 'ЗАНЯТО', MASTER_CLOSED_MARKER];
+const BUSY_MARKERS = ['ОЖИДАЕТ ПРЕДОПЛАТЫ', 'КОНС ЧАТ', 'КОНС ЗАПИСЬ', 'КАМПЕЙН ЗАПИСЬ', 'ЗАНЯТО', MASTER_CLOSED_MARKER];
 
 // Маркер "ЗАНЯТО" — особый: им помечаются ТОЛЬКО события из Дневника
 // (buildDiaryEventSummary), а не брони, которые оформил сам бот. Разница
@@ -126,14 +145,19 @@ export function isBotBooking(summary: string): boolean {
 
 // Семья тега — для /закрой и /удалить: закрывая "тату" мастер имеет в
 // виду и обычную запись, и открытое окно; закрывая "консультацию" — и
-// очную, и чат. Совпадает с тем, как tagsForRequest группирует теги
-// под один клиентский запрос.
-export type SlotFamily = 'tattoo' | 'consultation';
+// очную, и чат; закрывая "кампейн" — только сам [КАМПЕЙН] (своего
+// Дневник-тега у него нет). Совпадает с тем, как tagsForRequest
+// группирует теги под один клиентский запрос.
+export type SlotFamily = 'tattoo' | 'consultation' | 'campaign';
 export function familyOfTag(tag: SlotTag): SlotFamily {
-  return tag === '[ТАТУ]' || tag === '[ОКНО]' ? 'tattoo' : 'consultation';
+  if (tag === '[ТАТУ]' || tag === '[ОКНО]') return 'tattoo';
+  if (tag === '[КАМПЕЙН]') return 'campaign';
+  return 'consultation';
 }
 export function tagsInFamily(family: SlotFamily): SlotTag[] {
-  return family === 'tattoo' ? ['[ТАТУ]', '[ОКНО]'] : ['[ПРИЁМ]', '[ЧАТ]'];
+  if (family === 'tattoo') return ['[ТАТУ]', '[ОКНО]'];
+  if (family === 'campaign') return ['[КАМПЕЙН]'];
+  return ['[ПРИЁМ]', '[ЧАТ]'];
 }
 
 export interface AvailableSlot {
@@ -428,7 +452,7 @@ export function computeDayBlockInfo(items: any[]): DayBlockInfo {
   return { blockedDays, bufferIntervals, blockedConsultationIntervals, blockedTattooIntervals };
 }
 
-export async function getAvailableSlots(type: SlotType, maxResults = 3): Promise<AvailableSlot[]> {
+export async function getAvailableSlots(type: BookingType, maxResults = 3): Promise<AvailableSlot[]> {
   const token = await getAccessToken();
   const wantedTags = tagsForRequest(type);
 
@@ -495,8 +519,13 @@ export async function getAvailableSlots(type: SlotType, maxResults = 3): Promise
         if (family === 'consultation' && overlapsInterval(startMs, endMs, blockedConsultationIntervals)) return false;
         if (family === 'tattoo' && overlapsInterval(startMs, endMs, blockedTattooIntervals)) return false;
 
-        // Лаг 24ч — только для ОКНО/ЧАТ (см. LEAD_TIME_HOURS).
-        if ((eventTag === '[ОКНО]' || eventTag === '[ЧАТ]') && startMs < leadTimeMs) return false;
+        // Лаг 24ч — для всех клиент-бронируемых тегов (см. LEAD_TIME_HOURS).
+        if (
+          (eventTag === '[ОКНО]' || eventTag === '[ЧАТ]' || eventTag === '[КАМПЕЙН]') &&
+          startMs < leadTimeMs
+        ) {
+          return false;
+        }
       }
       return true;
     })
@@ -524,7 +553,7 @@ export interface BookSlotResult {
 
 export async function bookSlot(
   eventId: string,
-  type: SlotType,
+  type: BookingType,
   clientLabel: string, // имя клиента или username
   clientPhone?: string | null // телефон, если уже известен — чтобы Аня могла опознать/связаться по одной записи в календаре
 ): Promise<BookSlotResult> {
@@ -600,7 +629,7 @@ export interface ScheduleEvent {
   start: string; // ISO datetime или YYYY-MM-DD для событий на весь день
   end: string;
   isBusy: boolean; // слот уже занят (маркер занятости в названии)
-  type: SlotType | null; // 'tattoo' | 'consultation' | null (личное событие)
+  type: BookingType | null; // 'tattoo' | 'consultation' | 'campaign' | null (личное событие)
   allDay: boolean;
 }
 
@@ -634,14 +663,17 @@ export async function getSchedule(days = 7): Promise<ScheduleEvent[]> {
   return items.map((event) => {
     const summary: string = event.summary ?? '(без названия)';
     const isBusy = BUSY_MARKERS.some((marker) => summary.includes(marker));
-    // Все 4 тега: [ТАТУ]/[ОКНО] — тату-слоты, [ПРИЁМ]/[ЧАТ] — консы.
-    // Сам тег виден в raw summary, отдельно его не дублируем.
+    // Все 5 тегов: [ТАТУ]/[ОКНО] — тату-слоты, [ПРИЁМ]/[ЧАТ] — консы,
+    // [КАМПЕЙН] — кампейн-лиды. Сам тег виден в raw summary, отдельно
+    // его не дублируем.
     const eventTag = tagOf(summary);
-    const type: SlotType | null =
+    const type: BookingType | null =
       eventTag === '[ТАТУ]' || eventTag === '[ОКНО]'
         ? 'tattoo'
         : eventTag === '[ПРИЁМ]' || eventTag === '[ЧАТ]'
         ? 'consultation'
+        : eventTag === '[КАМПЕЙН]'
+        ? 'campaign'
         : null;
     const allDay = !event.start?.dateTime;
     return {
@@ -977,7 +1009,7 @@ export async function createMasterCloseBlock(
   const token = await getAccessToken();
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CALENDAR_ID)}/events`;
 
-  const tag: SlotTag = family === 'tattoo' ? '[ТАТУ]' : '[ПРИЁМ]';
+  const tag: SlotTag = family === 'tattoo' ? '[ТАТУ]' : family === 'campaign' ? '[КАМПЕЙН]' : '[ПРИЁМ]';
   const summary = name ? `${tag} ${MASTER_CLOSED_MARKER} — ${name}` : `${tag} ${MASTER_CLOSED_MARKER}`;
 
   const body: Record<string, unknown> = {
