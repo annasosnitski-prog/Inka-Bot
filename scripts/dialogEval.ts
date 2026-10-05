@@ -60,6 +60,7 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     campaign_id: null,
     campaign_collected: null,
     campaign_handoff_sent: null,
+    campaign_last_id: null,
     ...over,
   };
 }

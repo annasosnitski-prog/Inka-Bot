@@ -119,6 +119,12 @@ export interface ClientCard {
   // routes all further messages to campaign_followup_chat instead of
   // re-running the collection loop.
   campaign_handoff_sent: YesNo;
+  // Set when the client is auto-switched OUT of an active campaign back
+  // into the normal funnel (see lib/campaignFlow.ts pauseCampaign) — holds
+  // the campaign id so an automatic return (resumeCampaign) later in the
+  // conversation can restore campaign_collected instead of starting the
+  // campaign questionnaire over. null outside of this paused state.
+  campaign_last_id: string | null;
 }
 
 export interface MessageSignals {

@@ -44,7 +44,7 @@ function card(over: Partial<ClientCard> = {}): ClientCard {
     payment_reminder_early_sent: null, reference_asked: null, photos_count: 0,
     has_photo_this_message: false, photo_has_caption: false, force_client_mode: null,
     service_fit: null, second_project_flagged: null,
-    campaign_id: null, campaign_collected: null, campaign_handoff_sent: null,
+    campaign_id: null, campaign_collected: null, campaign_handoff_sent: null, campaign_last_id: null,
     ...over,
   };
 }
@@ -71,6 +71,7 @@ function extracted(over: Partial<ExtractorOutput> = {}): ExtractorOutput {
     client_asks_for_more_slots: false, client_wants_to_reschedule: false,
     client_confirms_booking: null, service_fit: null, service_fit_reason: null,
     is_new_project_request: false, photo_purpose: null, campaign_field_answer: null,
+    campaign_exit_signal: false, campaign_return_signal: false,
     ...over,
   };
 }

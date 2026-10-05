@@ -21,6 +21,8 @@ import { getCampaign } from '../../lib/campaigns';
 import {
   routeCampaign,
   activateCampaign,
+  pauseCampaign,
+  resumeCampaign,
   applyCampaignAnswer,
   parseCampaignData,
   serializeCampaignData,
@@ -243,6 +245,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ? routeCampaign(currentCard)
       : null;
 
+    // CAMPAIGN MODE: АВТОМАТИЧЕСКИЙ ВОЗВРАТ. Только когда карточка СЕЙЧАС в
+    // обычной воронке (campaign_id=null), но была поставлена на паузу из
+    // кампании (campaign_last_id) — даём Extractor-у title/offer той
+    // кампании, чтобы он мог узнать явный возврат к ней (campaign_return_signal,
+    // см. lib/campaignFlow.ts resumeCampaign и campaignExtractorOverlay.txt).
+    const lastCampaignForExtractor =
+      !currentCard.campaign_id && currentCard.campaign_last_id
+        ? getCampaign(currentCard.campaign_last_id)
+        : null;
+
     // CAMPAIGN MODE: пока карточка собирает required_info/optional_info,
     // любое присланное фото пересылаем мастеру СРАЗУ, а не только
     // упоминаем "yes" в текстовой сводке позже — ей нужно реально увидеть
@@ -273,7 +285,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             pendingField: campaignRoutingBefore.pendingField,
           }
         : null,
+      lastCampaign: lastCampaignForExtractor
+        ? { title: lastCampaignForExtractor.title, offer: lastCampaignForExtractor.offer }
+        : null,
     });
+
+    // CAMPAIGN MODE: АВТОМАТИЧЕСКОЕ ПЕРЕКЛЮЧЕНИЕ туда-обратно между кампанией
+    // и обычной воронкой, по сигналам Extractor-а (см. lib/campaignFlow.ts
+    // pauseCampaign/resumeCampaign, campaignExtractorOverlay.txt). Сделано ДО
+    // mergeClientCard/applyCampaignAnswer, чтобы весь остальной пайплайн этого
+    // хода уже видел актуальный campaign_id — переключение не ждёт следующего
+    // сообщения.
+    let campaignSwitchedThisTurn = false;
+    if (currentCard.campaign_id && extracted.campaign_exit_signal) {
+      currentCard = pauseCampaign(currentCard);
+      campaignSwitchedThisTurn = true;
+    } else if (!currentCard.campaign_id && currentCard.campaign_last_id && extracted.campaign_return_signal) {
+      currentCard = resumeCampaign(currentCard);
+      campaignSwitchedThisTurn = true;
+    }
 
     // 2b. ВТОРОЙ АКТИВНЫЙ ПРОЕКТ. Не относится к campaign-режиму (карточка
     // кампании не ведёт tattoo-воронку, второй проект там не имеет смысла)
@@ -348,7 +378,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // CAMPAIGN MODE: сворачиваем ответ клиента на campaignRoutingBefore.pendingField
     // в campaign_collected. Делается отдельно от mergeClientCard (которая не
     // знает о кампаниях) — см. lib/campaignFlow.ts applyCampaignAnswer.
-    if (campaignRoutingBefore) {
+    // Пропускаем, если этим же сообщением произошло переключение туда/обратно
+    // (campaignSwitchedThisTurn) — campaignRoutingBefore.pendingField тогда
+    // описывает вопрос ДО переключения и не про него было это сообщение.
+    if (campaignRoutingBefore && !campaignSwitchedThisTurn) {
       mergedCard = applyCampaignAnswer(
         mergedCard,
         campaignRoutingBefore.pendingField,
@@ -778,8 +811,8 @@ function recordToClientCard(
     second_project_flagged: fields.second_project_flagged ?? null,
     campaign_id: fields.campaign_id ?? null,
     ...(() => {
-      const { collected, handoff_sent } = parseCampaignData(fields.campaign_data);
-      return { campaign_collected: collected, campaign_handoff_sent: handoff_sent };
+      const { collected, handoff_sent, last_id } = parseCampaignData(fields.campaign_data);
+      return { campaign_collected: collected, campaign_handoff_sent: handoff_sent, campaign_last_id: last_id };
     })(),
   };
 }

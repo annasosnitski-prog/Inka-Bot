@@ -66,6 +66,7 @@ function card(over: Partial<ClientCard> = {}): ClientCard {
     campaign_id: null,
     campaign_collected: null,
     campaign_handoff_sent: null,
+    campaign_last_id: null,
     ...over,
   };
 }
@@ -124,6 +125,8 @@ function extracted(over: Partial<ExtractorOutput> = {}): ExtractorOutput {
     is_new_project_request: false,
     photo_purpose: null,
     campaign_field_answer: null,
+    campaign_exit_signal: false,
+    campaign_return_signal: false,
     ...over,
   };
 }

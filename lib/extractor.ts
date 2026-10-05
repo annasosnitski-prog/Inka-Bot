@@ -83,6 +83,16 @@ export interface ExtractorOutput {
   // JSON schema but only meaningful when ExtractorInput.activeCampaign was
   // non-null for this call.
   campaign_field_answer: string | null;
+  // Automatic campaign <-> normal funnel switching (see lib/campaignFlow.ts
+  // pauseCampaign/resumeCampaign). campaign_exit_signal is only meaningful
+  // when ExtractorInput.activeCampaign was non-null (client mid-campaign,
+  // this message clearly isn't about it anymore). campaign_return_signal is
+  // only meaningful when ExtractorInput.lastCampaign was non-null (client
+  // back in the normal funnel, this message clearly signals renewed
+  // interest in the campaign they were paused from). Always present in the
+  // JSON schema, both default to false otherwise.
+  campaign_exit_signal: boolean;
+  campaign_return_signal: boolean;
 }
 
 // Minimal campaign context handed to the Extractor so it knows a) this is
@@ -117,6 +127,12 @@ export interface ExtractorInput {
   photoFileId: string | null;
   otherActiveProject?: OtherActiveProjectSummary | null;
   activeCampaign?: ActiveCampaignContext | null;
+  // Set only when campaign_id is null but the client was previously paused
+  // out of this campaign (card.campaign_last_id) — gives the Extractor the
+  // title/offer it needs to recognize a message as renewed interest in that
+  // same campaign (campaign_return_signal). pendingField is never meaningful
+  // here and is always null.
+  lastCampaign?: Pick<ActiveCampaignContext, 'title' | 'offer'> | null;
 }
 
 export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutput> {
@@ -127,6 +143,7 @@ export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutp
       current_card: input.currentCard,
       other_active_project: input.otherActiveProject ?? null,
       active_campaign: input.activeCampaign ?? null,
+      last_campaign: input.lastCampaign ?? null,
       is_admin_sender: input.isAdminSender,
       recent_history: input.recentHistory,
       message: {
@@ -214,6 +231,8 @@ function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput {
     typeof normalized.campaign_field_answer === 'string' && normalized.campaign_field_answer.trim()
       ? normalized.campaign_field_answer.trim()
       : null;
+  normalized.campaign_exit_signal = normalized.campaign_exit_signal === true;
+  normalized.campaign_return_signal = normalized.campaign_return_signal === true;
 
   return normalized;
 }

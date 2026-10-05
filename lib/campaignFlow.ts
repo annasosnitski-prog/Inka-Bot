@@ -32,6 +32,39 @@ export function activateCampaign(card: ClientCard, campaignId: string): ClientCa
     campaign_id: campaignId,
     campaign_collected: {},
     campaign_handoff_sent: null,
+    campaign_last_id: null,
+  };
+}
+
+// AUTOMATIC EXIT: the client is mid-campaign but this message clearly isn't
+// about the campaign anymore (Extractor set campaign_exit_signal — see
+// campaignExtractorOverlay.txt). Parks the campaign state in
+// campaign_last_id instead of discarding it, so a later resumeCampaign can
+// restore campaign_collected rather than re-asking everything. card.campaign_id
+// is cleared, which is all getNextStep needs to fall through into the normal
+// tattoo funnel starting THIS turn.
+export function pauseCampaign(card: ClientCard): ClientCard {
+  if (!card.campaign_id) return card;
+  return {
+    ...card,
+    campaign_id: null,
+    campaign_last_id: card.campaign_id,
+  };
+}
+
+// AUTOMATIC RETURN: the client is back in the normal funnel but this message
+// clearly signals renewed interest in the SAME campaign they were paused
+// from (Extractor set campaign_return_signal against last_campaign context
+// — see campaignExtractorOverlay.txt). Restores campaign_collected/
+// campaign_handoff_sent exactly as they were at pause time, so routeCampaign
+// picks up at the first still-unanswered required field (or straight to
+// slots/followup if everything was already collected).
+export function resumeCampaign(card: ClientCard): ClientCard {
+  if (!card.campaign_last_id) return card;
+  return {
+    ...card,
+    campaign_id: card.campaign_last_id,
+    campaign_last_id: null,
   };
 }
 
@@ -172,8 +205,9 @@ export function applyCampaignAnswer(
 export function parseCampaignData(raw: unknown): {
   collected: Record<string, string> | null;
   handoff_sent: YesNo;
+  last_id: string | null;
 } {
-  if (!raw || typeof raw !== 'string') return { collected: null, handoff_sent: null };
+  if (!raw || typeof raw !== 'string') return { collected: null, handoff_sent: null, last_id: null };
   try {
     const parsed = JSON.parse(raw);
     const collected =
@@ -181,10 +215,11 @@ export function parseCampaignData(raw: unknown): {
         ? parsed.collected
         : null;
     const handoff_sent: YesNo = parsed?.handoff_sent === true || parsed?.handoff_sent === 'yes' ? 'yes' : null;
-    return { collected, handoff_sent };
+    const last_id = typeof parsed?.last_id === 'string' && parsed.last_id ? parsed.last_id : null;
+    return { collected, handoff_sent, last_id };
   } catch (err) {
     console.error('parseCampaignData failed (non-fatal, treated as no campaign data):', err);
-    return { collected: null, handoff_sent: null };
+    return { collected: null, handoff_sent: null, last_id: null };
   }
 }
 
@@ -192,6 +227,7 @@ export function serializeCampaignData(card: ClientCard): string {
   return JSON.stringify({
     collected: card.campaign_collected ?? {},
     handoff_sent: card.campaign_handoff_sent === 'yes',
+    last_id: card.campaign_last_id ?? null,
   });
 }
 

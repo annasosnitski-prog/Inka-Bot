@@ -14,7 +14,7 @@
 import { getNextStep, getCardPatchForStep, type ClientCard, type MessageSignals, type NextStep } from '../lib/stateMachine';
 import { mergeClientCard } from '../lib/clientCardMerge';
 import type { ExtractorOutput } from '../lib/extractor';
-import { activateCampaign, routeCampaign, applyCampaignAnswer } from '../lib/campaignFlow';
+import { activateCampaign, routeCampaign, applyCampaignAnswer, pauseCampaign, resumeCampaign } from '../lib/campaignFlow';
 
 let passed = 0;
 let failed = 0;
@@ -47,7 +47,7 @@ function freshCard(): ClientCard {
     payment_reminder_early_sent: null, reference_asked: null, photos_count: 0,
     has_photo_this_message: false, photo_has_caption: false, force_client_mode: null,
     service_fit: null, second_project_flagged: null,
-    campaign_id: null, campaign_collected: null, campaign_handoff_sent: null,
+    campaign_id: null, campaign_collected: null, campaign_handoff_sent: null, campaign_last_id: null,
   };
 }
 
@@ -63,6 +63,7 @@ function emptyExtracted(over: Partial<ExtractorOutput> = {}): ExtractorOutput {
     client_asks_for_more_slots: false, client_wants_to_reschedule: false,
     client_confirms_booking: null, service_fit: null, service_fit_reason: null,
     is_new_project_request: false, photo_purpose: null, campaign_field_answer: null,
+    campaign_exit_signal: false, campaign_return_signal: false,
     ...over,
   };
 }
@@ -82,12 +83,24 @@ function simulateTurn(
   const routingBefore = card.campaign_id ? routeCampaign(card) : null;
   const extracted = emptyExtracted(extractedOverrides);
 
-  let merged = mergeClientCard(card, extracted, {
+  // Переключение туда/обратно — та же последовательность, что
+  // pages/api/telegram.ts делает между Extractor-ом и mergeClientCard.
+  let switchedCard = card;
+  let switchedThisTurn = false;
+  if (switchedCard.campaign_id && extracted.campaign_exit_signal) {
+    switchedCard = pauseCampaign(switchedCard);
+    switchedThisTurn = true;
+  } else if (!switchedCard.campaign_id && switchedCard.campaign_last_id && extracted.campaign_return_signal) {
+    switchedCard = resumeCampaign(switchedCard);
+    switchedThisTurn = true;
+  }
+
+  let merged = mergeClientCard(switchedCard, extracted, {
     hasPhotoThisMessage: messageFlags.hasPhoto,
     photoHasCaption: messageFlags.photoHasCaption,
   });
 
-  if (routingBefore) {
+  if (routingBefore && !switchedThisTurn) {
     merged = applyCampaignAnswer(merged, routingBefore.pendingField, extracted.campaign_field_answer);
   }
 
@@ -224,6 +237,57 @@ let cardB = activateCampaign(freshCard(), 'color_texture');
   // Теперь клиент реально отвечает.
   const b3 = simulateTurn(cardB, 'ладно, на плече', { campaign_field_answer: 'плечо' });
   eq('после реального ответа placement записан', b3.card.campaign_collected?.placement, 'плечо');
+}
+
+// ================= СЦЕНАРИЙ C: клиент выходит из кампании и возвращается обратно =================
+console.log('\n▶ Сценарий C: запрос клиента не влезает в офер кампании — автопереключение туда-обратно');
+
+let cardC = activateCampaign(freshCard(), 'color_texture');
+{
+  const c1 = simulateTurn(cardC, '[/start color_texture]');
+  cardC = c1.card;
+}
+{
+  // Клиент отвечает на placement как обычно.
+  const c2 = simulateTurn(cardC, 'давай на предплечье', { campaign_field_answer: 'предплечье' });
+  eq('ход 2: placement записан', c2.card.campaign_collected?.placement, 'предплечье');
+  eq('ход 2: следующий шаг — фото', c2.nextStep, 'campaign_ask_field');
+  cardC = c2.card;
+}
+{
+  // Клиент вместо фото описывает большой отдельный заказ — явно за рамками
+  // офера (не больше 3 см) — Extractor вернул бы campaign_exit_signal=true
+  // И заодно заполнил бы обычные поля по этому сообщению (idea/category).
+  const c3 = simulateTurn(cardC, 'а вообще я хочу дракона на лопатке примерно 20 см, это сколько будет?', {
+    campaign_exit_signal: true,
+    idea: 'дракон',
+    placement: 'лопатка',
+    size: '20 см',
+    category: 'large',
+  });
+  eq('ход 3: campaign_id очищен — ушли из кампании', c3.card.campaign_id, null);
+  eq('ход 3: campaign_last_id запомнен для возможного возврата', c3.card.campaign_last_id, 'color_texture');
+  eq('ход 3: собранный placement кампании НЕ потерян (сохранён для восстановления)', c3.card.campaign_collected?.placement, 'предплечье');
+  eq('ход 3: обычные поля заполнены этим же сообщением, а не null', c3.card.idea, 'дракон');
+  ok('ход 3: шаг — уже обычная воронка, не campaign_*', !c3.nextStep.startsWith('campaign_'), c3.nextStep);
+  cardC = c3.card;
+}
+{
+  // Обычный разговор дальше в нормальной воронке — без случайного возврата.
+  const c4 = simulateTurn(cardC, 'а на лопатке не больно делать?');
+  eq('ход 4: остаёмся в обычной воронке без явного сигнала возврата', c4.card.campaign_id, null);
+  cardC = c4.card;
+}
+{
+  // Клиент явно просится обратно к акции для моделей — Extractor вернул бы
+  // campaign_return_signal=true.
+  const c5 = simulateTurn(cardC, 'слушай, а давай всё-таки по той акции для моделей, бесплатно', {
+    campaign_return_signal: true,
+  });
+  eq('ход 5: campaign_id восстановлен', c5.card.campaign_id, 'color_texture');
+  eq('ход 5: campaign_last_id очищен после возврата', c5.card.campaign_last_id, null);
+  eq('ход 5: ранее собранный placement восстановлен, анкета не начата заново', c5.card.campaign_collected?.placement, 'предплечье');
+  eq('ход 5: шаг сразу спрашивает фото (placement уже есть) — не campaign_intro заново', c5.nextStep, 'campaign_ask_field');
 }
 
 // ================= ИТОГ =================
