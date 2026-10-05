@@ -73,7 +73,12 @@ async function runTurn(
   card: ClientCard,
   history: RecentDialogTurn[],
   clientMessage: string | null,
-  opts: { hasPhoto?: boolean; photoCaption?: string | null; slotsDisplay?: string[] | null } = {}
+  opts: {
+    hasPhoto?: boolean;
+    photoCaption?: string | null;
+    slotsDisplay?: string[] | null;
+    telegramLanguageCode?: string | null;
+  } = {}
 ): Promise<TurnOutcome> {
   const campaignRoutingBefore = card.campaign_id ? routeCampaign(card) : null;
 
@@ -132,6 +137,7 @@ async function runTurn(
     slotsDisplay: opts.slotsDisplay ?? null,
     campaign: campaignRoutingNow?.campaign ?? null,
     campaignPendingField: campaignRoutingNow?.pendingField ?? null,
+    telegramLanguageCode: opts.telegramLanguageCode ?? null,
   });
 
   const newHistory: RecentDialogTurn[] = [
@@ -154,6 +160,31 @@ async function main() {
     console.error('OPENAI_API_KEY не задан в окружении — без него Extractor/Responder не могут вызвать OpenAI.');
     process.exit(1);
   }
+
+  console.log('========================================');
+  console.log('CAMPAIGN DIALOG EVAL — язык первого сообщения (deep link, нет текста клиента)');
+  console.log('========================================\n');
+  // campaign_intro — самый первый ход, lastClientMessage=null (это /start,
+  // не текст клиента, см. pages/api/telegram.ts). Правило "язык клиента по
+  // последнему сообщению" здесь неприменимо — проверяем запасной сигнал
+  // telegramLanguageCode (message.from.language_code из Telegram).
+  const hebrewLetters = /[֐-׿]/;
+  const cyrillicLetters = /[а-яА-ЯёЁ]/;
+
+  for (const lc of ['he', 'en', 'ru', null] as const) {
+    const introCard = activateCampaign(freshCard(), 'color_texture');
+    const t0 = await runTurn(introCard, [], null, { telegramLanguageCode: lc });
+    console.log(`  [/start color_texture], telegram_language_code=${lc ?? 'null'}`);
+    console.log(`  Инка: ${t0.reply}\n`);
+    if (lc === 'he') {
+      check('he → ответ на иврите (есть буквы алфавита иврита)', hebrewLetters.test(t0.reply));
+    } else if (lc === 'en') {
+      check('en → ответ на английском (нет кириллицы/иврита)', !cyrillicLetters.test(t0.reply) && !hebrewLetters.test(t0.reply));
+    } else {
+      check(`${lc ?? 'null'} → по умолчанию русский (есть кириллица)`, cyrillicLetters.test(t0.reply));
+    }
+  }
+  console.log('');
 
   console.log('========================================');
   console.log('CAMPAIGN DIALOG EVAL — color_texture (self_book_slot)');

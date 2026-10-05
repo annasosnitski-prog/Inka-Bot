@@ -41,6 +41,12 @@ export interface ResponderInput {
   slotsDisplay: string[] | null;
   campaign?: CampaignConfig | null;
   campaignPendingField?: string | null;
+  // Telegram's own language_code for this user (from message.from, e.g.
+  // "ru"/"he"/"en") — a FALLBACK hint only, for turns where there's no
+  // client text to detect language from at all (deep-link /start trigger,
+  // a photo with no caption). See responderPrompt.txt's ЯЗЫК section:
+  // last_client_message still wins whenever it's present.
+  telegramLanguageCode?: string | null;
 }
 
 export async function runResponder(input: ResponderInput): Promise<string> {
@@ -59,6 +65,7 @@ export async function runResponder(input: ResponderInput): Promise<string> {
       slots_display: input.slotsDisplay,
       campaign: input.campaign ?? null,
       campaign_pending_field: input.campaignPendingField ?? null,
+      telegram_language_code: input.telegramLanguageCode ?? null,
     },
     null,
     2
