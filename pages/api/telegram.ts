@@ -76,6 +76,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const username = message.from?.username ?? '';
   const firstName = message.from?.first_name ?? '';
+  // Язык интерфейса Telegram клиента — запасной сигнал для Responder-а,
+  // когда у хода вообще нет текста клиента для определения языка (деplink
+  // /start, фото без подписи). См. lib/responderPrompt.txt, раздел ЯЗЫК.
+  const telegramLanguageCode: string | null = message.from?.language_code ?? null;
   const hasPhoto = !!message.photo;
   const photoFileId = hasPhoto ? pickLargestTelegramPhoto(message.photo)?.file_id ?? null : null;
   const photoCaption: string | null = message.caption ?? null;
@@ -612,6 +616,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       slotsDisplay,
       campaign: campaignRouting?.campaign ?? null,
       campaignPendingField: campaignRouting?.pendingField ?? null,
+      telegramLanguageCode,
     });
 
     // 9b. РЕКВИЗИТЫ ПРЕДОПЛАТЫ. На шаге подтверждения тату дописываем
