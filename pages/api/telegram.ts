@@ -22,7 +22,9 @@ import {
   routeCampaign,
   activateCampaign,
   pauseCampaign,
-  resumeCampaign,
+  askCampaignReturn,
+  confirmCampaignReturn,
+  declineCampaignReturn,
   applyCampaignAnswer,
   parseCampaignData,
   serializeCampaignData,
@@ -249,7 +251,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // обычной воронке (campaign_id=null), но была поставлена на паузу из
     // кампании (campaign_last_id) — даём Extractor-у title/offer той
     // кампании, чтобы он мог узнать явный возврат к ней (campaign_return_signal,
-    // см. lib/campaignFlow.ts resumeCampaign и campaignExtractorOverlay.txt).
+    // см. lib/campaignFlow.ts askCampaignReturn/confirmCampaignReturn и
+    // campaignExtractorOverlay.txt). Тот же сигнал на следующий ход, когда
+    // card.campaign_return_pending='yes', читается уже как прямой ответ на
+    // вопрос Инки, а не как новое упоминание темы — см. блок переключения ниже.
     const lastCampaignForExtractor =
       !currentCard.campaign_id && currentCard.campaign_last_id
         ? getCampaign(currentCard.campaign_last_id)
@@ -291,18 +296,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
 
     // CAMPAIGN MODE: АВТОМАТИЧЕСКОЕ ПЕРЕКЛЮЧЕНИЕ туда-обратно между кампанией
-    // и обычной воронкой, по сигналам Extractor-а (см. lib/campaignFlow.ts
-    // pauseCampaign/resumeCampaign, campaignExtractorOverlay.txt). Сделано ДО
-    // mergeClientCard/applyCampaignAnswer, чтобы весь остальной пайплайн этого
-    // хода уже видел актуальный campaign_id — переключение не ждёт следующего
-    // сообщения.
+    // и обычной воронкой (см. lib/campaignFlow.ts). Сделано ДО mergeClientCard/
+    // applyCampaignAnswer, чтобы весь остальной пайплайн этого хода уже видел
+    // актуальный campaign_id — переключение не ждёт следующего сообщения.
+    //
+    // Выход ИЗ активной кампании — мгновенный, тем же ходом: кампания и так
+    // ничего не бронирует до хэндоффа, терять нечего.
+    //
+    // Возврат В кампанию — НЕ мгновенный: к этому моменту клиент мог уже уйти
+    // в обычную платную бронь (цена, слот), и тихо подменить её кампейн-веткой
+    // было бы потерей реального заказа. Поэтому сначала Инка явно спрашивает
+    // (askCampaignReturn → NEXT_STEP campaign_return_confirm), и только когда
+    // клиент подтверждает ЭТИМ ЖЕ сигналом на следующий ход — переключение
+    // применяется по-настоящему (confirmCampaignReturn). Неясный/отрицательный
+    // ответ снимает вопрос, не трогая текущий заказ (declineCampaignReturn).
     let campaignSwitchedThisTurn = false;
     if (currentCard.campaign_id && extracted.campaign_exit_signal) {
       currentCard = pauseCampaign(currentCard);
       campaignSwitchedThisTurn = true;
+    } else if (!currentCard.campaign_id && currentCard.campaign_return_pending === 'yes') {
+      currentCard = extracted.campaign_return_signal
+        ? confirmCampaignReturn(currentCard)
+        : declineCampaignReturn(currentCard);
     } else if (!currentCard.campaign_id && currentCard.campaign_last_id && extracted.campaign_return_signal) {
-      currentCard = resumeCampaign(currentCard);
-      campaignSwitchedThisTurn = true;
+      currentCard = askCampaignReturn(currentCard);
     }
 
     // 2b. ВТОРОЙ АКТИВНЫЙ ПРОЕКТ. Не относится к campaign-режиму (карточка
@@ -649,6 +666,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       slotsDisplay,
       campaign: campaignRouting?.campaign ?? null,
       campaignPendingField: campaignRouting?.pendingField ?? null,
+      // Only meaningful (and only non-null) on campaign_return_confirm —
+      // names the paused campaign so Responder can phrase the yes/no
+      // question naturally instead of vaguely.
+      lastCampaign: nextStep === 'campaign_return_confirm' ? getCampaign(finalCard.campaign_last_id) : null,
       telegramLanguageCode,
     });
 
@@ -811,8 +832,13 @@ function recordToClientCard(
     second_project_flagged: fields.second_project_flagged ?? null,
     campaign_id: fields.campaign_id ?? null,
     ...(() => {
-      const { collected, handoff_sent, last_id } = parseCampaignData(fields.campaign_data);
-      return { campaign_collected: collected, campaign_handoff_sent: handoff_sent, campaign_last_id: last_id };
+      const { collected, handoff_sent, last_id, return_pending } = parseCampaignData(fields.campaign_data);
+      return {
+        campaign_collected: collected,
+        campaign_handoff_sent: handoff_sent,
+        campaign_last_id: last_id,
+        campaign_return_pending: return_pending,
+      };
     })(),
   };
 }

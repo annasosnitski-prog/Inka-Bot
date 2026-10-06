@@ -84,13 +84,19 @@ export interface ExtractorOutput {
   // non-null for this call.
   campaign_field_answer: string | null;
   // Automatic campaign <-> normal funnel switching (see lib/campaignFlow.ts
-  // pauseCampaign/resumeCampaign). campaign_exit_signal is only meaningful
-  // when ExtractorInput.activeCampaign was non-null (client mid-campaign,
-  // this message clearly isn't about it anymore). campaign_return_signal is
-  // only meaningful when ExtractorInput.lastCampaign was non-null (client
-  // back in the normal funnel, this message clearly signals renewed
-  // interest in the campaign they were paused from). Always present in the
-  // JSON schema, both default to false otherwise.
+  // pauseCampaign/askCampaignReturn/confirmCampaignReturn/declineCampaignReturn).
+  // campaign_exit_signal is only meaningful when ExtractorInput.activeCampaign
+  // was non-null (client mid-campaign, this message clearly isn't about it
+  // anymore) — code applies it immediately (pauseCampaign).
+  // campaign_return_signal is only meaningful when ExtractorInput.lastCampaign
+  // was non-null (client back in the normal funnel after a pause), and reads
+  // in one of two ways depending on ExtractorInput.currentCard.campaign_return_pending
+  // (see campaignExtractorOverlay.txt): not yet 'yes' → "does this message
+  // raise the campaign topic" (code then asks a confirming question rather
+  // than switching outright — askCampaignReturn); already 'yes' → "does this
+  // message, as the direct answer to that just-asked question, confirm
+  // switching" (code applies confirmCampaignReturn/declineCampaignReturn).
+  // Always present in the JSON schema, both default to false otherwise.
   campaign_exit_signal: boolean;
   campaign_return_signal: boolean;
 }

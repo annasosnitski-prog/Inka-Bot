@@ -33,13 +33,14 @@ export function activateCampaign(card: ClientCard, campaignId: string): ClientCa
     campaign_collected: {},
     campaign_handoff_sent: null,
     campaign_last_id: null,
+    campaign_return_pending: null,
   };
 }
 
 // AUTOMATIC EXIT: the client is mid-campaign but this message clearly isn't
 // about the campaign anymore (Extractor set campaign_exit_signal — see
 // campaignExtractorOverlay.txt). Parks the campaign state in
-// campaign_last_id instead of discarding it, so a later resumeCampaign can
+// campaign_last_id instead of discarding it, so a later confirmed return can
 // restore campaign_collected rather than re-asking everything. card.campaign_id
 // is cleared, which is all getNextStep needs to fall through into the normal
 // tattoo funnel starting THIS turn.
@@ -49,23 +50,47 @@ export function pauseCampaign(card: ClientCard): ClientCard {
     ...card,
     campaign_id: null,
     campaign_last_id: card.campaign_id,
+    // Can't already be mid-confirmation about returning to a campaign while
+    // still inside one — cleared defensively so a stray leftover value can
+    // never fire campaign_return_confirm right after a fresh pause.
+    campaign_return_pending: null,
   };
 }
 
-// AUTOMATIC RETURN: the client is back in the normal funnel but this message
-// clearly signals renewed interest in the SAME campaign they were paused
-// from (Extractor set campaign_return_signal against last_campaign context
-// — see campaignExtractorOverlay.txt). Restores campaign_collected/
-// campaign_handoff_sent exactly as they were at pause time, so routeCampaign
-// picks up at the first still-unanswered required field (or straight to
-// slots/followup if everything was already collected).
-export function resumeCampaign(card: ClientCard): ClientCard {
+// ASK: the client is back in the normal funnel and this message shows
+// renewed interest in the campaign they were paused from (Extractor set
+// campaign_return_signal against last_campaign context — see
+// campaignExtractorOverlay.txt), but switching would drop whatever the
+// client is currently mid-flow on (a quote, a booking) — so instead of
+// switching immediately, the client is asked to confirm first. getNextStep
+// turns this into campaign_return_confirm, which persists until
+// confirmCampaignReturn or declineCampaignReturn resolves it.
+export function askCampaignReturn(card: ClientCard): ClientCard {
+  if (!card.campaign_last_id) return card;
+  return { ...card, campaign_return_pending: 'yes' as YesNo };
+}
+
+// CONFIRM: the client explicitly confirmed (in reply to the question
+// askCampaignReturn produced) that they want to switch back. Restores
+// campaign_collected/campaign_handoff_sent exactly as they were at pause
+// time, so routeCampaign picks up at the first still-unanswered required
+// field (or straight to slots/followup if everything was already
+// collected).
+export function confirmCampaignReturn(card: ClientCard): ClientCard {
   if (!card.campaign_last_id) return card;
   return {
     ...card,
     campaign_id: card.campaign_last_id,
     campaign_last_id: null,
+    campaign_return_pending: null,
   };
+}
+
+// DECLINE: the client's reply to askCampaignReturn's question was a no (or
+// unclear) — stay paused, clear the pending flag so the question isn't
+// asked again until another genuine mention comes up.
+export function declineCampaignReturn(card: ClientCard): ClientCard {
+  return { ...card, campaign_return_pending: null };
 }
 
 // `signals` is optional because the caller in pages/api/telegram.ts needs
@@ -206,8 +231,11 @@ export function parseCampaignData(raw: unknown): {
   collected: Record<string, string> | null;
   handoff_sent: YesNo;
   last_id: string | null;
+  return_pending: YesNo;
 } {
-  if (!raw || typeof raw !== 'string') return { collected: null, handoff_sent: null, last_id: null };
+  if (!raw || typeof raw !== 'string') {
+    return { collected: null, handoff_sent: null, last_id: null, return_pending: null };
+  }
   try {
     const parsed = JSON.parse(raw);
     const collected =
@@ -216,10 +244,12 @@ export function parseCampaignData(raw: unknown): {
         : null;
     const handoff_sent: YesNo = parsed?.handoff_sent === true || parsed?.handoff_sent === 'yes' ? 'yes' : null;
     const last_id = typeof parsed?.last_id === 'string' && parsed.last_id ? parsed.last_id : null;
-    return { collected, handoff_sent, last_id };
+    const return_pending: YesNo =
+      parsed?.return_pending === true || parsed?.return_pending === 'yes' ? 'yes' : null;
+    return { collected, handoff_sent, last_id, return_pending };
   } catch (err) {
     console.error('parseCampaignData failed (non-fatal, treated as no campaign data):', err);
-    return { collected: null, handoff_sent: null, last_id: null };
+    return { collected: null, handoff_sent: null, last_id: null, return_pending: null };
   }
 }
 
@@ -228,6 +258,7 @@ export function serializeCampaignData(card: ClientCard): string {
     collected: card.campaign_collected ?? {},
     handoff_sent: card.campaign_handoff_sent === 'yes',
     last_id: card.campaign_last_id ?? null,
+    return_pending: card.campaign_return_pending === 'yes',
   });
 }
 
