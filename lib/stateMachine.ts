@@ -121,10 +121,16 @@ export interface ClientCard {
   campaign_handoff_sent: YesNo;
   // Set when the client is auto-switched OUT of an active campaign back
   // into the normal funnel (see lib/campaignFlow.ts pauseCampaign) — holds
-  // the campaign id so an automatic return (resumeCampaign) later in the
-  // conversation can restore campaign_collected instead of starting the
-  // campaign questionnaire over. null outside of this paused state.
+  // the campaign id so a confirmed return later in the conversation
+  // (askCampaignReturn/confirmCampaignReturn) can restore campaign_collected
+  // instead of starting the campaign questionnaire over. null outside of
+  // this paused state.
   campaign_last_id: string | null;
+  // 'yes' while Inka has just asked the client whether to actually switch
+  // back to campaign_last_id (campaign_return_confirm) and is waiting for
+  // an explicit answer — see pages/api/telegram.ts. null the rest of the
+  // time, including once the client confirms or declines.
+  campaign_return_pending: YesNo;
 }
 
 export interface MessageSignals {
@@ -199,7 +205,13 @@ export type NextStep =
   | 'campaign_show_slots'
   | 'campaign_no_slots'
   | 'campaign_confirm_slot'
-  | 'campaign_followup_chat';
+  | 'campaign_followup_chat'
+  // Client is back in the normal funnel but just got asked whether to
+  // actually switch to the campaign they were paused from (see
+  // card.campaign_return_pending, lib/campaignFlow.ts). Persists — i.e.
+  // getNextStep keeps returning it — until the client's answer resolves it
+  // one way or the other.
+  | 'campaign_return_confirm';
 
 function hasSlots(card: ClientCard): boolean {
   return !!card.slot_options && card.slot_options.length > 0;
@@ -228,6 +240,16 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   if (card.campaign_id) {
     const campaignRouting = routeCampaign(card, signals);
     if (campaignRouting) return campaignRouting.step;
+  }
+
+  // Client is in the normal funnel, but pages/api/telegram.ts just asked
+  // (or is still asking) whether to switch back to campaign_last_id — keep
+  // returning this step so the question never silently drops; code outside
+  // getNextStep resolves campaign_return_pending from the client's answer
+  // before the NEXT call to getNextStep, so this is never a real infinite
+  // loop, only a persisted "still waiting" state.
+  if (!card.campaign_id && card.campaign_return_pending === 'yes') {
+    return 'campaign_return_confirm';
   }
 
   // v2 service gate: unsupported work must never reach quote/booking. The

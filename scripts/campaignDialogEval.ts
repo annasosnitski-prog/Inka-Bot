@@ -47,7 +47,7 @@ function freshCard(): ClientCard {
     payment_reminder_early_sent: null, reference_asked: null, photos_count: 0,
     has_photo_this_message: false, photo_has_caption: false, force_client_mode: null,
     service_fit: null, second_project_flagged: null,
-    campaign_id: null, campaign_collected: null, campaign_handoff_sent: null, campaign_last_id: null,
+    campaign_id: null, campaign_collected: null, campaign_handoff_sent: null, campaign_last_id: null, campaign_return_pending: null,
   };
 }
 

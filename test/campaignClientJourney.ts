@@ -14,7 +14,15 @@
 import { getNextStep, getCardPatchForStep, type ClientCard, type MessageSignals, type NextStep } from '../lib/stateMachine';
 import { mergeClientCard } from '../lib/clientCardMerge';
 import type { ExtractorOutput } from '../lib/extractor';
-import { activateCampaign, routeCampaign, applyCampaignAnswer, pauseCampaign, resumeCampaign } from '../lib/campaignFlow';
+import {
+  activateCampaign,
+  routeCampaign,
+  applyCampaignAnswer,
+  pauseCampaign,
+  askCampaignReturn,
+  confirmCampaignReturn,
+  declineCampaignReturn,
+} from '../lib/campaignFlow';
 
 let passed = 0;
 let failed = 0;
@@ -47,7 +55,7 @@ function freshCard(): ClientCard {
     payment_reminder_early_sent: null, reference_asked: null, photos_count: 0,
     has_photo_this_message: false, photo_has_caption: false, force_client_mode: null,
     service_fit: null, second_project_flagged: null,
-    campaign_id: null, campaign_collected: null, campaign_handoff_sent: null, campaign_last_id: null,
+    campaign_id: null, campaign_collected: null, campaign_handoff_sent: null, campaign_last_id: null, campaign_return_pending: null,
   };
 }
 
@@ -85,14 +93,19 @@ function simulateTurn(
 
   // Переключение туда/обратно — та же последовательность, что
   // pages/api/telegram.ts делает между Extractor-ом и mergeClientCard.
+  // Выход — мгновенный. Возврат — в два хода: сперва спросить
+  // (askCampaignReturn), затем подтвердить/отклонить на следующем ходе.
   let switchedCard = card;
   let switchedThisTurn = false;
   if (switchedCard.campaign_id && extracted.campaign_exit_signal) {
     switchedCard = pauseCampaign(switchedCard);
     switchedThisTurn = true;
+  } else if (!switchedCard.campaign_id && switchedCard.campaign_return_pending === 'yes') {
+    switchedCard = extracted.campaign_return_signal
+      ? confirmCampaignReturn(switchedCard)
+      : declineCampaignReturn(switchedCard);
   } else if (!switchedCard.campaign_id && switchedCard.campaign_last_id && extracted.campaign_return_signal) {
-    switchedCard = resumeCampaign(switchedCard);
-    switchedThisTurn = true;
+    switchedCard = askCampaignReturn(switchedCard);
   }
 
   let merged = mergeClientCard(switchedCard, extracted, {
@@ -279,15 +292,50 @@ let cardC = activateCampaign(freshCard(), 'color_texture');
   cardC = c4.card;
 }
 {
-  // Клиент явно просится обратно к акции для моделей — Extractor вернул бы
-  // campaign_return_signal=true.
-  const c5 = simulateTurn(cardC, 'слушай, а давай всё-таки по той акции для моделей, бесплатно', {
+  // Клиент упоминает тему кампании ("текстуры, те цветные") — Extractor
+  // вернул бы campaign_return_signal=true (режим A: новое упоминание).
+  // Бот НЕ переключает сразу — сначала спрашивает.
+  const c5 = simulateTurn(cardC, 'но я все же хочу текстуры, вот те цветные', {
     campaign_return_signal: true,
   });
-  eq('ход 5: campaign_id восстановлен', c5.card.campaign_id, 'color_texture');
-  eq('ход 5: campaign_last_id очищен после возврата', c5.card.campaign_last_id, null);
-  eq('ход 5: ранее собранный placement восстановлен, анкета не начата заново', c5.card.campaign_collected?.placement, 'предплечье');
-  eq('ход 5: шаг сразу спрашивает фото (placement уже есть) — не campaign_intro заново', c5.nextStep, 'campaign_ask_field');
+  eq('ход 5: campaign_id всё ещё null — не переключили молча', c5.card.campaign_id, null);
+  eq('ход 5: campaign_return_pending взведён — Инка сейчас спросит', c5.card.campaign_return_pending, 'yes');
+  eq('ход 5: шаг — уточняющий вопрос, не campaign_*', c5.nextStep, 'campaign_return_confirm');
+  cardC = c5.card;
+}
+{
+  // Клиент подтверждает — Extractor вернул бы campaign_return_signal=true
+  // (режим B: прямой ответ на прямой вопрос Инки).
+  const c6 = simulateTurn(cardC, 'да, именно акцию', { campaign_return_signal: true });
+  eq('ход 6: campaign_id восстановлен', c6.card.campaign_id, 'color_texture');
+  eq('ход 6: campaign_last_id очищен после возврата', c6.card.campaign_last_id, null);
+  eq('ход 6: campaign_return_pending снят', c6.card.campaign_return_pending, null);
+  eq('ход 6: ранее собранный placement восстановлен, анкета не начата заново', c6.card.campaign_collected?.placement, 'предплечье');
+  eq('ход 6: шаг сразу спрашивает фото (placement уже есть) — не campaign_intro заново', c6.nextStep, 'campaign_ask_field');
+}
+
+// ================= СЦЕНАРИЙ D: клиент отвечает "нет" на уточняющий вопрос =================
+console.log('\n▶ Сценарий D: уточняющий вопрос про возврат — клиент отвечает отказом, заказ не трогаем');
+
+let cardD = activateCampaign(freshCard(), 'color_texture');
+cardD = simulateTurn(cardD, '[/start color_texture]').card;
+cardD = simulateTurn(cardD, 'давай на предплечье', { campaign_field_answer: 'предплечье' }).card;
+cardD = simulateTurn(cardD, 'хочу дракона на лопатке, 20 см', {
+  campaign_exit_signal: true,
+  idea: 'дракон',
+  category: 'large',
+}).card;
+{
+  const d1 = simulateTurn(cardD, 'и ещё хочу вот такие цветные текстуры', { campaign_return_signal: true });
+  eq('ход 1: взведён вопрос про возврат', d1.card.campaign_return_pending, 'yes');
+  cardD = d1.card;
+}
+{
+  // Явный отказ — Extractor вернул бы campaign_return_signal=false.
+  const d2 = simulateTurn(cardD, 'нет, это просто стиль для моей тату', { campaign_return_signal: false });
+  eq('ход 2: campaign_id остался null — текущий заказ не тронут', d2.card.campaign_id, null);
+  eq('ход 2: campaign_return_pending снят, вопрос не повторяется', d2.card.campaign_return_pending, null);
+  eq('ход 2: campaign_last_id сохранён — можно спросить снова при новом упоминании', d2.card.campaign_last_id, 'color_texture');
 }
 
 // ================= ИТОГ =================

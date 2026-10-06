@@ -41,6 +41,12 @@ export interface ResponderInput {
   slotsDisplay: string[] | null;
   campaign?: CampaignConfig | null;
   campaignPendingField?: string | null;
+  // Set only for NEXT_STEP = campaign_return_confirm (see
+  // lib/stateMachine.ts, lib/campaignFlow.ts askCampaignReturn): the
+  // campaign the client is being asked whether to switch back to. campaign
+  // itself stays null on this step (the client hasn't actually re-entered
+  // it yet), so this is the only way Responder knows what to name.
+  lastCampaign?: CampaignConfig | null;
   // Telegram's own language_code for this user (from message.from, e.g.
   // "ru"/"he"/"en") — a FALLBACK hint only, for turns where there's no
   // client text to detect language from at all (deep-link /start trigger,
@@ -65,6 +71,7 @@ export async function runResponder(input: ResponderInput): Promise<string> {
       slots_display: input.slotsDisplay,
       campaign: input.campaign ?? null,
       campaign_pending_field: input.campaignPendingField ?? null,
+      last_campaign: input.lastCampaign ?? null,
       telegram_language_code: input.telegramLanguageCode ?? null,
     },
     null,
