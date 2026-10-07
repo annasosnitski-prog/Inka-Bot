@@ -163,6 +163,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({ ok: true });
   }
 
+  // Ставим true только после того, как клиент реально получил ответ на этот
+  // ход (шаг 10) — используется в catch ниже, чтобы не оставить клиента без
+  // вообще никакого ответа при сбое (OpenAI/Airtable/Calendar), и чтобы не
+  // слать ему дублирующий "что-то пошло не так" после уже отправленного ответа.
+  let clientReplySent = false;
+
   try {
     // 1. Найти ВСЕ проекты этого telegram_id. Клиент может вести до двух
     // независимых татуировок одновременно — вторая заводит себе отдельную
@@ -680,12 +686,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const payBlock = buildPaymentDetailsBlock();
       if (payBlock) {
         finalReply = replyText ? `${replyText}\n\n${payBlock}` : payBlock;
+      } else {
+        // PAYMENT_BIT и PAYMENT_BANK не заданы — buildPaymentDetailsBlock
+        // сама это уже логирует (console.warn), но лог никто не читает в
+        // моменте: клиент тем временем получает подтверждение брони БЕЗ
+        // реквизитов и не может оплатить. Будим мастера напрямую.
+        try {
+          await sendTelegramMessage(
+            MASTER_TELEGRAM_ID,
+            '⚠️ PAYMENT_BIT и PAYMENT_BANK не заданы — клиенту отправлено подтверждение брони без реквизитов оплаты. Проверь переменные окружения в Vercel.'
+          );
+        } catch (payAlertErr) {
+          console.error('Payment-details-missing alert to master failed:', payAlertErr);
+        }
       }
     }
 
     // 10. Отправить ответ, если он не пустой.
     if (chatId && finalReply) {
       await sendTelegramMessage(chatId, finalReply);
+      clientReplySent = true;
     }
 
     // 10b. ЛОГ ДИАЛОГА.
@@ -775,9 +795,54 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   } catch (err) {
     console.error('INKA-BOT pipeline error:', err);
+
+    // ЗАЩИТА ОТ ТИХОГО ОТКАЗА. Раньше при сбое внутри пайплайна (протухший
+    // OPENAI_API_KEY, Airtable/Calendar недоступны и т.п.) клиент не получал
+    // вообще никакого ответа — ни штатного, ни сообщения об ошибке — а
+    // Telegram всё равно получал 200 и не повторял доставку. Теперь клиент
+    // хотя бы видит, что что-то не так, а мастер узнаёт сразу, а не по
+    // жалобе клиента или логам Vercel постфактум.
+    if (chatId && !clientReplySent) {
+      try {
+        await sendTelegramMessage(
+          chatId,
+          'что-то пошло не так на моей стороне 🙏 напиши, пожалуйста, чуть позже — я уже разбираюсь.'
+        );
+      } catch (fallbackErr) {
+        console.error('Fallback client message failed:', fallbackErr);
+      }
+    }
+    try {
+      await sendTelegramMessage(
+        MASTER_TELEGRAM_ID,
+        `⚠️ Сбой в обработке сообщения клиента (telegram_id=${telegramId}): ${sanitizeErrorForMaster(err)}`
+      );
+    } catch (notifyErr) {
+      console.error('Error notification to master failed:', notifyErr);
+    }
   }
 
   return res.status(200).json({ ok: true });
+}
+
+// Короткое, безопасное для пересылки мастеру описание ошибки: тип + сообщение,
+// с вырезанными секретами (на случай, если текст ошибки случайно содержит
+// значение токена/ключа — например из сетевого клиента), и обрезкой длины,
+// чтобы не прислать Ане стектрейс в личку.
+function sanitizeErrorForMaster(err: unknown): string {
+  let msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  const secrets = [
+    process.env.AIRTABLE_TOKEN,
+    process.env.TELEGRAM_BOT_TOKEN,
+    process.env.OPENAI_API_KEY,
+    process.env.GOOGLE_PRIVATE_KEY,
+    process.env.DIARY_SYNC_SECRET,
+    process.env.CRON_SECRET,
+  ].filter((v): v is string => !!v && v.length > 8);
+  for (const secret of secrets) {
+    msg = msg.split(secret).join('[скрыто]');
+  }
+  return msg.slice(0, 300);
 }
 
 // ----------------------------------------------------------
