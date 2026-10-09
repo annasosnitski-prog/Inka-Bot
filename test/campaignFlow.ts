@@ -166,7 +166,14 @@ console.log('\n▶ 5. после сбора required_info (+ опциональ�
   // Клиент присылает нормальный крупный план — Extractor засчитывает "yes".
   c = applyCampaignAnswer(c, 'photo_of_placement', 'yes');
   routing = routeCampaign(c);
-  eq('хорошее фото принято → required_info полностью собран → campaign_no_slots (слотов ещё не загружали)', routing?.step, 'campaign_no_slots');
+  eq('хорошее фото принято → спрашивает предпочитаемый канал связи', `${routing?.step}:${routing?.pendingField}`, 'campaign_ask_field:preferred_contact');
+  patch = getCardPatchForStep('campaign_ask_field', c, sig());
+  c = { ...c, ...patch };
+
+  // Клиент выбирает Telegram — Extractor нормализует ответ в "telegram".
+  c = applyCampaignAnswer(c, 'preferred_contact', 'telegram');
+  routing = routeCampaign(c);
+  eq('канал связи выбран → required_info полностью собран → campaign_no_slots (слотов ещё не загружали)', routing?.step, 'campaign_no_slots');
 }
 
 // ================= 5b. self_book_slot — показ слотов, бронь, завершение =================
@@ -177,6 +184,7 @@ console.log('\n▶ 5b. self_book_slot: показ слотов → бронь к
   let c = activateCampaign(card(), 'color_texture');
   c = applyCampaignAnswer(c, 'placement', 'предплечье');
   c = applyCampaignAnswer(c, 'photo_of_placement', 'yes');
+  c = applyCampaignAnswer(c, 'preferred_contact', 'telegram');
 
   // pages/api/telegram.ts подгрузило свежие [КАМПЕЙН]-слоты из календаря.
   c = { ...c, slot_options: ['ev1', 'ev2'] };
@@ -207,6 +215,7 @@ console.log('\n▶ 5c. self_book_slot: пустой пул [КАМПЕЙН] → 
   let c = activateCampaign(card(), 'color_texture');
   c = applyCampaignAnswer(c, 'placement', 'плечо');
   c = applyCampaignAnswer(c, 'photo_of_placement', 'yes');
+  c = applyCampaignAnswer(c, 'preferred_contact', 'whatsapp');
   // pages/api/telegram.ts попробовало найти слоты — пул пуст.
   c = { ...c, slot_options: [] };
 
@@ -261,7 +270,11 @@ console.log('\n▶ 8. повторный /start с другой кампание
   let c = activateCampaign(card(), 'color_texture');
   c = applyCampaignAnswer(c, 'placement', 'предплечье');
   c = applyCampaignAnswer(c, 'photo_of_placement', 'yes');
-  ok('до переключения: оба поля color_texture собраны', !!c.campaign_collected?.placement && !!c.campaign_collected?.photo_of_placement);
+  c = applyCampaignAnswer(c, 'preferred_contact', 'telegram');
+  ok(
+    'до переключения: все поля color_texture собраны',
+    !!c.campaign_collected?.placement && !!c.campaign_collected?.photo_of_placement && !!c.campaign_collected?.preferred_contact
+  );
 
   // Клиент переходит по ДРУГОЙ кампейн-ссылке (используется здесь только
   // как механический пример другого id — реестр кампаний пока содержит

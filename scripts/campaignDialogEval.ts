@@ -252,13 +252,22 @@ async function main() {
     card = applyCampaignAnswer(card, 'photo_of_placement', 'yes');
   }
 
+  // Ход 5b: фото принято — теперь должен спросить предпочитаемый канал
+  // связи (telegram/whatsapp), это третий required-поле этой кампании.
+  if (card.campaign_collected?.preferred_contact === undefined) {
+    t = await runTurn(card, history, 'в телеграме удобнее, здесь и останемся');
+    logTurn('в телеграме удобнее, здесь и останемся', t);
+    check('ход 5b: канал связи распознан как telegram', t.card.campaign_collected?.preferred_contact === 'telegram');
+    card = t.card; history = t.history;
+  }
+
   // Ход 6: все обязательные поля собраны — должен решить, что дальше
   // (self_book_slot → слоты). Подставляем две свежих "времени" из
   // отдельного пула [КАМПЕЙН], как это бы сделал реальный getAvailableSlots.
   const slotsDisplay = ['вторник, 12 мая, 15:00', 'среда, 13 мая, 11:00'];
   card = { ...card, slot_options: ['ev1', 'ev2'] };
   let routing = routeCampaign(card);
-  check('после фото: required_info полностью собран → campaign_show_slots', routing?.step === 'campaign_show_slots');
+  check('после фото и канала связи: required_info полностью собран → campaign_show_slots', routing?.step === 'campaign_show_slots');
   let patch = getCardPatchForStep('campaign_show_slots', card, { is_admin_sender: false, is_prompt_injection: false, is_out_of_scope: false, is_wrong_layout: false, client_picked_slot_id: null, client_wants_other_slots: false, client_asks_for_more_slots: false, client_wants_to_reschedule: false, client_confirms_booking: null, campaign_field_answer: null });
   card = { ...card, ...patch };
   const replyShowSlots = await runResponder({
