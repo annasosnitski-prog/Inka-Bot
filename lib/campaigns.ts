@@ -69,7 +69,10 @@ const CAMPAIGNS: CampaignConfig[] = [
     // бронь (см. buildCampaignSlotBookedNotification / forwardTelegramMessage
     // в pages/api/telegram.ts — сама фотография пересылается мастеру
     // отдельно, текстовая карточка несёт только "yes/нет" как факт).
-    required_info: ['placement', 'photo_of_placement'],
+    // preferred_contact — какой канал клиенту удобнее для связи с Аней
+    // (телега/вотсап), не номер телефона — см. campaignExtractorOverlay.txt
+    // за нормализацией ответа в "telegram"/"whatsapp".
+    required_info: ['placement', 'photo_of_placement', 'preferred_contact'],
     optional_info: [],
     booking_mode: 'self_book_slot',
     active: true,
