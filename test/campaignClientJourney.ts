@@ -173,9 +173,17 @@ eq('после deep link campaign_id = color_texture', card.campaign_id, 'color_
 
 {
   // Turn 3b: клиент пересылает нормальный крупный план кожи — засчитано.
+  // required_info ещё не полностью собран — остался preferred_contact.
   const t3b = simulateTurn(card, '[фото кожи крупно]', { campaign_field_answer: 'yes' }, { hasPhoto: true, photoHasCaption: false });
-  ok('ход 3b: хорошее фото принято, required_info полностью собран', t3b.nextStep !== 'campaign_ask_field');
+  eq('ход 3b: хорошее фото принято, спрашивает канал связи', t3b.nextStep, 'campaign_ask_field');
   card = t3b.card;
+}
+
+{
+  // Turn 3b2: клиент выбирает канал связи — Extractor нормализует в "telegram".
+  const t3b2 = simulateTurn(card, 'давай в телеге', { campaign_field_answer: 'telegram' });
+  ok('ход 3b2: канал связи записан, required_info полностью собран', t3b2.nextStep !== 'campaign_ask_field');
+  card = t3b2.card;
   console.log(`    → campaign_handoff_sent пока: ${card.campaign_handoff_sent ?? 'null'} (рано — слоты ещё не смотрели)`);
 }
 
