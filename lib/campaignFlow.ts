@@ -145,6 +145,16 @@ export function routeCampaign(card: ClientCard, signals?: MessageSignals | null)
     ) {
       return { step: 'campaign_confirm_slot', pendingField: null, campaign };
     }
+    // Client was shown slots and explicitly said none work ("ничего не
+    // подходит" etc, see extractorPrompt.txt client_wants_other_slots) —
+    // without this check, routing fell through to campaign_show_slots
+    // again (slot_options unchanged), so Responder would freelance a
+    // "I'll let you know" reply with nothing behind it: no master ping,
+    // no waiting-state recorded. This makes the decline a real, pinged
+    // dead-end, same as an empty pool.
+    if (slotsAvailable && signals?.client_wants_other_slots) {
+      return { step: 'campaign_slots_declined_waiting', pendingField: null, campaign };
+    }
     return {
       step: slotsAvailable ? 'campaign_show_slots' : 'campaign_no_slots',
       pendingField: null,
@@ -182,6 +192,15 @@ export function getCampaignCardPatch(
       // demand only once, not on every message while the pool is empty.
       collected['__no_slots_pinged'] = '1';
       return { campaign_collected: collected };
+    case 'campaign_slots_declined_waiting':
+      // Client declined every shown slot. Clear slot_options so the NEXT
+      // message routes into campaign_no_slots on its own (empty pool,
+      // same as any other empty-pool case) instead of re-showing the
+      // same now-declined options forever. Also pre-set __no_slots_pinged
+      // so that immediate follow-up doesn't double-ping the master right
+      // after the decline ping pages/api/telegram.ts sends for this step.
+      collected['__no_slots_pinged'] = '1';
+      return { campaign_collected: collected, slot_options: null };
     case 'campaign_confirm_slot':
       // Booking already happened in pages/api/telegram.ts (bookSlot) by the
       // time this patch runs; here we just close out the campaign funnel
@@ -326,5 +345,23 @@ export function buildCampaignNoSlotsNotification(
   return (
     `🧪 По кампании «${campaign.title}» сейчас нет открытых слотов [КАМПЕЙН], а ${who} уже готов(а) записаться. ` +
     `Добавь слот через /добавить кампейн ... — бот предложит его сам.`
+  );
+}
+
+// booking_mode: self_book_slot — client was shown slot(s) and said none of
+// them work, a different dead-end than an empty pool (see
+// campaign_slots_declined_waiting in campaignFlow.ts routeCampaign). Аня
+// needs to know the specific reason: there WAS a slot, this client just
+// couldn't make it, so she may want to offer them a different time
+// directly rather than only waiting for a fresh [КАМПЕЙН] slot to open.
+export function buildCampaignSlotsDeclinedNotification(
+  campaign: CampaignConfig,
+  clientLabel: string,
+  username: string
+): string {
+  const who = username ? `${clientLabel} (@${username})` : clientLabel;
+  return (
+    `🧪 По кампании «${campaign.title}» — ${who} посмотрел(а) предложенные времена [КАМПЕЙН], но ни одно не подошло. ` +
+    `Бот сказал клиенту, что ты напишешь, когда появится новое время — стоит либо предложить время напрямую, либо добавить слот через /добавить кампейн ...`
   );
 }

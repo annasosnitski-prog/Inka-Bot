@@ -31,6 +31,7 @@ import {
   buildCampaignHandoffNotification,
   buildCampaignSlotBookedNotification,
   buildCampaignNoSlotsNotification,
+  buildCampaignSlotsDeclinedNotification,
   type CampaignRouting,
 } from '../../lib/campaignFlow';
 
@@ -758,6 +759,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           liveCard.campaign_collected?.__no_slots_pinged !== '1'
         ) {
           const note = buildCampaignNoSlotsNotification(campaignRouting.campaign, notifyLabel, username);
+          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
+        } else if (nextStep === 'campaign_slots_declined_waiting') {
+          const note = buildCampaignSlotsDeclinedNotification(campaignRouting.campaign, notifyLabel, username);
           await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
         }
       } catch (campaignNotifyErr) {

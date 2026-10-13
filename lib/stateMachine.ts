@@ -204,6 +204,7 @@ export type NextStep =
   | 'campaign_handoff'
   | 'campaign_show_slots'
   | 'campaign_no_slots'
+  | 'campaign_slots_declined_waiting'
   | 'campaign_confirm_slot'
   | 'campaign_followup_chat'
   // Client is back in the normal funnel but just got asked whether to
