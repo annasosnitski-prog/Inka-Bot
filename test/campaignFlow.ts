@@ -235,6 +235,51 @@ console.log('\n▶ 5c. self_book_slot: пустой пул [КАМПЕЙН] → 
   eq('слот появился → campaign_show_slots на следующем ходе', getNextStep(c, sig()), 'campaign_show_slots');
 }
 
+// ================= 5d. self_book_slot — клиент отказывается от показанных слотов =================
+// Баг из прода (Аяла): клиент сказал "ни одно не подходит" на показанные
+// слоты, бот ответил "передам Ане/напишу" — но мастер не получала пинг,
+// потому что routeCampaign просто повторял campaign_show_slots с теми же
+// слотами, никак не обрабатывая client_wants_other_slots.
+console.log('\n▶ 5d. self_book_slot: отказ от показанных слотов → уточнение дня/времени → пинг мастеру');
+{
+  let c = activateCampaign(card(), 'color_texture');
+  c = applyCampaignAnswer(c, 'placement', 'голень');
+  c = applyCampaignAnswer(c, 'photo_of_placement', 'yes');
+  c = applyCampaignAnswer(c, 'preferred_contact', 'telegram');
+  c = { ...c, slot_options: ['ev1', 'ev2'], lead_status: 'slots_shown' };
+
+  const declineSignals = sig({ client_wants_other_slots: true });
+  eq(
+    'клиент говорит "ничего не подходит" → campaign_slots_decline_clarify (уточняем день/время, не сразу в waiting)',
+    getNextStep(c, declineSignals),
+    'campaign_slots_decline_clarify'
+  );
+
+  const clarifyPatch = getCardPatchForStep('campaign_slots_decline_clarify', c, declineSignals);
+  eq('патч clarify: ставит маркер __decline_clarify_asked', clarifyPatch.campaign_collected?.__decline_clarify_asked, '1');
+  c = { ...c, ...clarifyPatch };
+
+  // Следующее сообщение — ответ клиента на "день или время?", каким бы он
+  // ни был текстом (не повторный client_wants_other_slots) — маршрут идёт
+  // дальше по марkеру __decline_clarify_asked, не зависает на переспросе.
+  eq(
+    'ответ клиента на уточнение (любой текст) → campaign_slots_declined_waiting',
+    getNextStep(c, sig()),
+    'campaign_slots_declined_waiting'
+  );
+
+  const patch = getCardPatchForStep('campaign_slots_declined_waiting', c, sig());
+  eq('патч: slot_options очищены (не предлагаем те же отклонённые варианты снова)', patch.slot_options, null);
+  eq('патч: __no_slots_pinged сразу проставлен (следующий ход не дублирует пинг)', patch.campaign_collected?.__no_slots_pinged, '1');
+  eq('патч: __decline_clarify_asked сброшен (новый цикл слотов сможет снова уточнить)', patch.campaign_collected?.__decline_clarify_asked, undefined);
+  c = { ...c, ...patch };
+
+  // Следующий ход без новых слотов — обычный campaign_no_slots, без
+  // повторного пинга (это уже решает код в pages/api/telegram.ts по
+  // тому же __no_slots_pinged, здесь проверяем только маршрут).
+  eq('следующий ход (слотов ещё нет) → campaign_no_slots, не зависает на declined', getNextStep(c, sig()), 'campaign_no_slots');
+}
+
 // ================= 6. Обычный клиент без campaign_id — воронка не тронута =================
 console.log('\n▶ 6. обычный клиент без campaign_id идёт по прежнему flow');
 {

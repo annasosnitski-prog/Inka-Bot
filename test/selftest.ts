@@ -256,9 +256,31 @@ eq('выбор устаревшего слота → slot_taken_pick_again',
   'slot_taken_pick_again');
 eq('непонятный ответ на слоты → unclear_slot_choice',
   step({ lead_status: 'slots_shown', phone: '05011' }), 'unclear_slot_choice');
-eq('просит другие слоты → slot_change_requested_waiting',
+eq('просит другие слоты → slot_preference_clarify (уточняем день/время, не сразу в лист ожидания)',
   step({ lead_status: 'slots_shown', phone: '05011' }, { client_wants_other_slots: true }),
-  'slot_change_requested_waiting');
+  'slot_preference_clarify');
+{
+  const patch = getCardPatchForStep('slot_preference_clarify', baseCard({ lead_status: 'slots_shown', phone: '05011' }), sig());
+  eq('патч slot_preference_clarify: lead_status=slots_shown_clarifying', patch.lead_status, 'slots_shown_clarifying');
+}
+
+console.log('\n▶ getNextStep — slot_preference_clarify (ответ клиента про день/время идёт дальше, не зависает)');
+eq('любой ответ на уточнение (не номер слота) → slot_change_requested_waiting',
+  step({ lead_status: 'slots_shown_clarifying', phone: '05011' }), 'slot_change_requested_waiting');
+eq('клиент передумал и назвал номер слота → confirm_slot_awaiting_payment, не waiting',
+  step({ lead_status: 'slots_shown_clarifying', phone: '05011' }, { client_picked_slot_id: 'ev1' }),
+  'confirm_slot_awaiting_payment');
+eq('клиент назвал номер уже занятого слота → slot_taken_pick_again',
+  step({ lead_status: 'slots_shown_clarifying', phone: '05011' }, { client_picked_slot_id: 'ghost' }),
+  'slot_taken_pick_again');
+{
+  const patch = getCardPatchForStep(
+    'slot_change_requested_waiting',
+    baseCard({ lead_status: 'slots_shown_clarifying', phone: '05011' }),
+    sig()
+  );
+  eq('патч slot_change_requested_waiting: lead_status=waiting_slots (как и раньше)', patch.lead_status, 'waiting_slots');
+}
 
 console.log('\n▶ getNextStep — booked & payment & edge order');
 eq('скрин предоплаты → payment_screenshot_received',
