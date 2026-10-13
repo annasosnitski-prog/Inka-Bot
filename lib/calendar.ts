@@ -452,7 +452,11 @@ export function computeDayBlockInfo(items: any[]): DayBlockInfo {
   return { blockedDays, bufferIntervals, blockedConsultationIntervals, blockedTattooIntervals };
 }
 
-export async function getAvailableSlots(type: BookingType, maxResults = 3): Promise<AvailableSlot[]> {
+export async function getAvailableSlots(
+  type: BookingType,
+  maxResults = 3,
+  excludeIds?: string[] | null
+): Promise<AvailableSlot[]> {
   const token = await getAccessToken();
   const wantedTags = tagsForRequest(type);
 
@@ -536,6 +540,12 @@ export async function getAvailableSlots(type: BookingType, maxResults = 3): Prom
       end: event.end?.dateTime ?? event.end?.date,
       tag: tagOf(event.summary ?? '') as SlotTag,
     }))
+    // excludeIds — слоты, которые этому конкретному клиенту уже показывали
+    // и он от них отказался (см. waiting-list-check.ts / telegram.ts). Это
+    // открытый пул, общий для всех клиентов — отказ одного не убирает слот
+    // из календаря для других, поэтому фильтрация именно здесь, на уровне
+    // конкретного запроса, а не в самом календаре.
+    .filter((slot) => !excludeIds || !excludeIds.includes(slot.id))
     .slice(0, maxResults);
 
   return freeSlots;

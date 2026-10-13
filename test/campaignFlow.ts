@@ -11,7 +11,14 @@ import { getNextStep, getCardPatchForStep, type ClientCard, type MessageSignals 
 import { mergeClientCard } from '../lib/clientCardMerge';
 import type { ExtractorOutput } from '../lib/extractor';
 import { getCampaign } from '../lib/campaigns';
-import { routeCampaign, activateCampaign, applyCampaignAnswer, parseCampaignData, serializeCampaignData } from '../lib/campaignFlow';
+import {
+  routeCampaign,
+  activateCampaign,
+  applyCampaignAnswer,
+  parseCampaignData,
+  serializeCampaignData,
+  getCampaignDeclinedSlotIds,
+} from '../lib/campaignFlow';
 
 let passed = 0;
 let failed = 0;
@@ -272,12 +279,45 @@ console.log('\n▶ 5d. self_book_slot: отказ от показанных сл
   eq('патч: slot_options очищены (не предлагаем те же отклонённые варианты снова)', patch.slot_options, null);
   eq('патч: __no_slots_pinged сразу проставлен (следующий ход не дублирует пинг)', patch.campaign_collected?.__no_slots_pinged, '1');
   eq('патч: __decline_clarify_asked сброшен (новый цикл слотов сможет снова уточнить)', patch.campaign_collected?.__decline_clarify_asked, undefined);
+  // Баг, о котором спросила Аня: бот должен запомнить, что ev1/ev2 этому
+  // клиенту уже не подошли, чтобы следующий подбор слотов их не предлагал
+  // снова (см. getCampaignDeclinedSlotIds, используется в pages/api/telegram.ts
+  // и pages/api/waiting-list-check.ts как excludeIds для getAvailableSlots).
+  eq('патч: ev1/ev2 запомнены как отклонённые', patch.campaign_collected?.__declined_slot_ids, 'ev1,ev2');
   c = { ...c, ...patch };
+  eq('getCampaignDeclinedSlotIds читает их обратно', getCampaignDeclinedSlotIds(c).sort().join(','), 'ev1,ev2');
 
   // Следующий ход без новых слотов — обычный campaign_no_slots, без
   // повторного пинга (это уже решает код в pages/api/telegram.ts по
   // тому же __no_slots_pinged, здесь проверяем только маршрут).
   eq('следующий ход (слотов ещё нет) → campaign_no_slots, не зависает на declined', getNextStep(c, sig()), 'campaign_no_slots');
+}
+
+// ================= 5e. self_book_slot — второй цикл отказа копит id, а не теряет первый =================
+console.log('\n▶ 5e. self_book_slot: повторный отказ накапливает отклонённые id, не перезатирает');
+{
+  let c = activateCampaign(card(), 'color_texture');
+  c = applyCampaignAnswer(c, 'placement', 'голень');
+  c = applyCampaignAnswer(c, 'photo_of_placement', 'yes');
+  c = applyCampaignAnswer(c, 'preferred_contact', 'telegram');
+  // Первый цикл уже отказан (как в 5d) — ev1 запомнен.
+  c = {
+    ...c,
+    campaign_collected: { ...c.campaign_collected, __declined_slot_ids: 'ev1' },
+    slot_options: ['ev9', 'ev10'],
+    lead_status: 'slots_shown',
+  };
+
+  const declineSignals = sig({ client_wants_other_slots: true });
+  eq('отказ от нового показа (ev9/ev10) снова ведёт в clarify', getNextStep(c, declineSignals), 'campaign_slots_decline_clarify');
+  const clarifyPatch = getCardPatchForStep('campaign_slots_decline_clarify', c, declineSignals);
+  c = { ...c, ...clarifyPatch };
+  const patch = getCardPatchForStep('campaign_slots_declined_waiting', c, sig());
+  eq(
+    'второй отказ: ev1 (старое) и ev9,ev10 (новое) — все вместе, без потерь',
+    patch.campaign_collected?.__declined_slot_ids?.split(',').sort().join(','),
+    'ev1,ev10,ev9'
+  );
 }
 
 // ================= 6. Обычный клиент без campaign_id — воронка не тронута =================
