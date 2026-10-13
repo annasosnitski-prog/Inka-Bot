@@ -997,6 +997,8 @@ function buildMasterNotification(
       return `🆕 ${who} написал про вторую тату при активной записи. Текущая бронь не изменена. Новый запрос: ${lastMessage}`;
     case 'reschedule_requested_ping_master':
       return `🔄 ${who} просит перенести запись — напиши насчёт нового времени.`;
+    case 'all_done':
+      return `⏸ ${who} после озвученной цены не готов(а) записываться сейчас. Его слова: "${lastMessage}"`;
     case 'slot_change_requested_waiting':
     case 'no_more_slots_waiting':
       return `⏳ ${who} в листе ожидания — подходящих слотов сейчас нет.`;
