@@ -761,7 +761,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const note = buildCampaignNoSlotsNotification(campaignRouting.campaign, notifyLabel, username);
           await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
         } else if (nextStep === 'campaign_slots_declined_waiting') {
-          const note = buildCampaignSlotsDeclinedNotification(campaignRouting.campaign, notifyLabel, username);
+          // Reached right after Inka asked what doesn't fit (day/time) and
+          // whether there's a preference (campaign_slots_decline_clarify) —
+          // lastMessageForRecord here IS that answer, client's own words.
+          const note = buildCampaignSlotsDeclinedNotification(
+            campaignRouting.campaign,
+            notifyLabel,
+            username,
+            lastMessageForRecord
+          );
           await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
         }
       } catch (campaignNotifyErr) {
@@ -1000,6 +1008,10 @@ function buildMasterNotification(
     case 'all_done':
       return `⏸ ${who} после озвученной цены не готов(а) записываться сейчас. Его слова: "${lastMessage}"`;
     case 'slot_change_requested_waiting':
+      // Reached only right after Inka asked what doesn't fit (day/time) and
+      // whether there's a preference (see NextStep slot_preference_clarify)
+      // — lastMessage here IS that answer, in the client's own words.
+      return `⏳ ${who} посмотрел(а) предложенные времена, но ни одно не подошло. Предпочтение по дню/времени: "${lastMessage}" — подходящих вариантов пока нет, спишись, когда появятся.`;
     case 'no_more_slots_waiting':
       return `⏳ ${who} в листе ожидания — подходящих слотов сейчас нет.`;
     default:

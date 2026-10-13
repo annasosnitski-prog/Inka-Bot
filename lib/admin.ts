@@ -353,6 +353,8 @@ function leadStatusLabel(status: any): string {
       return 'хочет записаться';
     case 'slots_shown':
       return 'показаны слоты';
+    case 'slots_shown_clarifying':
+      return 'уточняем предпочтение по времени после отказа от слотов';
     case 'consultation_booked':
       return 'консультация забронирована';
     case 'tattoo_booked_waiting_payment':

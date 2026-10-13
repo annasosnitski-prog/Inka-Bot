@@ -240,7 +240,7 @@ console.log('\n▶ 5c. self_book_slot: пустой пул [КАМПЕЙН] → 
 // слоты, бот ответил "передам Ане/напишу" — но мастер не получала пинг,
 // потому что routeCampaign просто повторял campaign_show_slots с теми же
 // слотами, никак не обрабатывая client_wants_other_slots.
-console.log('\n▶ 5d. self_book_slot: отказ от показанных слотов → пинг мастеру, не пустое обещание');
+console.log('\n▶ 5d. self_book_slot: отказ от показанных слотов → уточнение дня/времени → пинг мастеру');
 {
   let c = activateCampaign(card(), 'color_texture');
   c = applyCampaignAnswer(c, 'placement', 'голень');
@@ -250,14 +250,28 @@ console.log('\n▶ 5d. self_book_slot: отказ от показанных сл
 
   const declineSignals = sig({ client_wants_other_slots: true });
   eq(
-    'клиент говорит "ничего не подходит" → campaign_slots_declined_waiting, не повтор тех же слотов',
+    'клиент говорит "ничего не подходит" → campaign_slots_decline_clarify (уточняем день/время, не сразу в waiting)',
     getNextStep(c, declineSignals),
+    'campaign_slots_decline_clarify'
+  );
+
+  const clarifyPatch = getCardPatchForStep('campaign_slots_decline_clarify', c, declineSignals);
+  eq('патч clarify: ставит маркер __decline_clarify_asked', clarifyPatch.campaign_collected?.__decline_clarify_asked, '1');
+  c = { ...c, ...clarifyPatch };
+
+  // Следующее сообщение — ответ клиента на "день или время?", каким бы он
+  // ни был текстом (не повторный client_wants_other_slots) — маршрут идёт
+  // дальше по марkеру __decline_clarify_asked, не зависает на переспросе.
+  eq(
+    'ответ клиента на уточнение (любой текст) → campaign_slots_declined_waiting',
+    getNextStep(c, sig()),
     'campaign_slots_declined_waiting'
   );
 
-  const patch = getCardPatchForStep('campaign_slots_declined_waiting', c, declineSignals);
+  const patch = getCardPatchForStep('campaign_slots_declined_waiting', c, sig());
   eq('патч: slot_options очищены (не предлагаем те же отклонённые варианты снова)', patch.slot_options, null);
   eq('патч: __no_slots_pinged сразу проставлен (следующий ход не дублирует пинг)', patch.campaign_collected?.__no_slots_pinged, '1');
+  eq('патч: __decline_clarify_asked сброшен (новый цикл слотов сможет снова уточнить)', patch.campaign_collected?.__decline_clarify_asked, undefined);
   c = { ...c, ...patch };
 
   // Следующий ход без новых слотов — обычный campaign_no_slots, без

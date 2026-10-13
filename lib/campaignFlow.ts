@@ -152,8 +152,19 @@ export function routeCampaign(card: ClientCard, signals?: MessageSignals | null)
     // "I'll let you know" reply with nothing behind it: no master ping,
     // no waiting-state recorded. This makes the decline a real, pinged
     // dead-end, same as an empty pool.
-    if (slotsAvailable && signals?.client_wants_other_slots) {
-      return { step: 'campaign_slots_declined_waiting', pendingField: null, campaign };
+    //
+    // Before pinging, ask what specifically doesn't fit (day/time) and
+    // whether there's a preference — __decline_clarify_asked (set by
+    // getCampaignCardPatch below) marks that question as already sent, so
+    // THIS message (whatever it says) is treated as the answer rather than
+    // re-checking client_wants_other_slots again.
+    if (slotsAvailable) {
+      if (collected['__decline_clarify_asked'] === '1') {
+        return { step: 'campaign_slots_declined_waiting', pendingField: null, campaign };
+      }
+      if (signals?.client_wants_other_slots) {
+        return { step: 'campaign_slots_decline_clarify', pendingField: null, campaign };
+      }
     }
     return {
       step: slotsAvailable ? 'campaign_show_slots' : 'campaign_no_slots',
@@ -192,14 +203,23 @@ export function getCampaignCardPatch(
       // demand only once, not on every message while the pool is empty.
       collected['__no_slots_pinged'] = '1';
       return { campaign_collected: collected };
+    case 'campaign_slots_decline_clarify':
+      // Marks the day/time clarifying question as asked, so routeCampaign
+      // treats the NEXT message as its answer rather than re-checking
+      // client_wants_other_slots (see routeCampaign above).
+      collected['__decline_clarify_asked'] = '1';
+      return { campaign_collected: collected };
     case 'campaign_slots_declined_waiting':
-      // Client declined every shown slot. Clear slot_options so the NEXT
-      // message routes into campaign_no_slots on its own (empty pool,
-      // same as any other empty-pool case) instead of re-showing the
-      // same now-declined options forever. Also pre-set __no_slots_pinged
-      // so that immediate follow-up doesn't double-ping the master right
-      // after the decline ping pages/api/telegram.ts sends for this step.
+      // Client just answered the day/time clarifying question. Clear
+      // slot_options so the NEXT message routes into campaign_no_slots on
+      // its own (empty pool, same as any other empty-pool case) instead of
+      // re-showing the same now-declined options forever. Also pre-set
+      // __no_slots_pinged so that immediate follow-up doesn't double-ping
+      // the master right after the decline ping pages/api/telegram.ts
+      // sends for this step, and clear __decline_clarify_asked so a FUTURE
+      // decline cycle (new slots offered, declined again) asks again.
       collected['__no_slots_pinged'] = '1';
+      delete collected['__decline_clarify_asked'];
       return { campaign_collected: collected, slot_options: null };
     case 'campaign_confirm_slot':
       // Booking already happened in pages/api/telegram.ts (bookSlot) by the
@@ -357,11 +377,13 @@ export function buildCampaignNoSlotsNotification(
 export function buildCampaignSlotsDeclinedNotification(
   campaign: CampaignConfig,
   clientLabel: string,
-  username: string
+  username: string,
+  preference: string
 ): string {
   const who = username ? `${clientLabel} (@${username})` : clientLabel;
   return (
     `🧪 По кампании «${campaign.title}» — ${who} посмотрел(а) предложенные времена [КАМПЕЙН], но ни одно не подошло. ` +
-    `Бот сказал клиенту, что ты напишешь, когда появится новое время — стоит либо предложить время напрямую, либо добавить слот через /добавить кампейн ...`
+    `Предпочтение по дню/времени: "${preference}". ` +
+    `Бот сказал клиенту, что ты поищешь и вернёшься с предложением — стоит либо предложить время напрямую, либо добавить слот через /добавить кампейн ...`
   );
 }

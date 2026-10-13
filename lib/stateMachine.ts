@@ -23,6 +23,12 @@ export type LeadStatus =
   | 'estimated'
   | 'wants_booking'
   | 'slots_shown'
+  // Client just declined every offered slot — Inka asked what specifically
+  // doesn't fit (day/time) and whether there's a preference, and this
+  // message is pending that answer. A distinct lead_status (not a new
+  // column) so it survives a serverless restart via the existing Airtable
+  // select field — see getNextStep/getCardPatchForStep 'slot_preference_clarify'.
+  | 'slots_shown_clarifying'
   | 'consultation_booked'
   | 'tattoo_booked_waiting_payment'
   | 'waiting_slots'
@@ -186,6 +192,7 @@ export type NextStep =
   | 'show_consultation_slots'
   | 'slot_taken_pick_again'
   | 'unclear_slot_choice'
+  | 'slot_preference_clarify'
   | 'slot_change_requested_waiting'
   | 'no_more_slots_waiting'
   | 'waiting_slots_followup_chat'
@@ -204,6 +211,7 @@ export type NextStep =
   | 'campaign_handoff'
   | 'campaign_show_slots'
   | 'campaign_no_slots'
+  | 'campaign_slots_decline_clarify'
   | 'campaign_slots_declined_waiting'
   | 'campaign_confirm_slot'
   | 'campaign_followup_chat'
@@ -317,6 +325,26 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   // A photo with no caption needs one small clarification before diagnosis.
   if (card.has_photo_this_message && !card.photo_has_caption) return 'handle_photo_no_caption';
 
+  // Client just declined every offered slot and was asked what specifically
+  // doesn't fit (day/time) and whether there's a preference — THIS message
+  // is that answer, whatever it says. Treated as free text, not re-checked
+  // against client_wants_other_slots (that Extractor signal is tuned to
+  // detect a decline, not to recognize a reply to our own follow-up
+  // question). client_picked_slot_id is only recognized by the Extractor
+  // when lead_status = "slots_shown" exactly (see extractorPrompt.txt), so
+  // it won't normally fire here even if the client names a number instead
+  // of a preference — this branch just keeps that path safe if it ever does.
+  if (card.lead_status === 'slots_shown_clarifying') {
+    if (signals.client_picked_slot_id) {
+      const isValidChoice = hasSlots(card) && card.slot_options!.includes(signals.client_picked_slot_id);
+      if (!isValidChoice) return 'slot_taken_pick_again';
+      return card.direct_tattoo_allowed === 'yes'
+        ? 'confirm_slot_awaiting_payment'
+        : 'confirm_consultation_booked';
+    }
+    return 'slot_change_requested_waiting';
+  }
+
   // Slots already shown: interpret the client's choice before anything else.
   if (card.lead_status === 'slots_shown') {
     if (signals.client_picked_slot_id) {
@@ -326,7 +354,10 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
         ? 'confirm_slot_awaiting_payment'
         : 'confirm_consultation_booked';
     }
-    if (signals.client_wants_other_slots) return 'slot_change_requested_waiting';
+    // Before treating the decline as a dead-end, ask what specifically
+    // doesn't fit and whether there's a preferred day/time — the answer
+    // comes back on the next turn via slots_shown_clarifying above.
+    if (signals.client_wants_other_slots) return 'slot_preference_clarify';
     if (signals.client_asks_for_more_slots) {
       if (hasSlots(card)) {
         return card.direct_tattoo_allowed === 'yes'
@@ -462,6 +493,8 @@ export function getCardPatchForStep(
       return { ...patch, spam_count: 3, lead_status: 'blocked' };
     case 'reschedule_requested_ping_master':
       return { ...patch, lead_status: 'waiting_slots_pinged' };
+    case 'slot_preference_clarify':
+      return { ...patch, lead_status: 'slots_shown_clarifying' };
     case 'slot_change_requested_waiting':
     case 'no_more_slots_waiting':
       return { ...patch, chosen_slot_id: null, lead_status: 'waiting_slots' };
