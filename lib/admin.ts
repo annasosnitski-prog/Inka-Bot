@@ -28,6 +28,7 @@ import {
   findClientsByName,
   findAllClientRecordsByTelegramId,
   upsertClient,
+  updateClient,
   type ClientRecord,
 } from './airtable';
 import { parseDialogHistory, formatDialogHistory, hasUnparsableDialogHistory } from './dialogLog';
@@ -112,6 +113,91 @@ export function isScheduleRequest(text: string): boolean {
   return /запис|расписан|календар/i.test(t);
 }
 
+// Естественная фраза "я договорилась/записала клиента вживую, в бот не
+// заносила" — Аня хотела такое распознавание без отдельной команды (см.
+// обсуждение в проекте). Дёшевый regex-фильтр ПЕРЕД LLM-классификатором:
+// большинство сообщений мастера это свободный диалог/команды, не стоит
+// звать лишний запрос на каждое. Ловит широко (ложные срабатывания не
+// страшны — classifyCloseClientIntent всё равно переспросит модель и
+// может вернуть is_close_request=false).
+const CLOSE_CLIENT_HINT =
+  /записал|записала|записан|забронир|договорил|вживую|без бота|мимо бота|уже не актуал|сама с ней|сам с ним|в таблиц\w* не/i;
+export function looksLikeCloseClientRequest(text: string): boolean {
+  return CLOSE_CLIENT_HINT.test(text);
+}
+
+// LLM-классификация (не regex) — ровно тот случай, когда Ане не нужно
+// помнить точный синтаксис: модель сама решает, похоже ли сообщение на
+// "клиент уже обо всём договорился со мной напрямую, бот ему больше не
+// нужен", и достаёт имя из текста в любом падеже/формулировке.
+async function classifyCloseClientIntent(
+  raw: string
+): Promise<{ isCloseRequest: boolean; clientName: string | null } | null> {
+  const systemPrompt =
+    'Ты распознаёшь намерение мастера тату-студии в свободном сообщении админ-боту ' +
+    '(без команд). Определи: говорит ли она, что КОНКРЕТНЫЙ клиент уже договорился с ' +
+    'ней о записи НАПРЯМУЮ, минуя бота (вживую, по телефону, лично) — и поэтому бот ' +
+    'должен перестать писать этому клиенту о свободных слотах/записи. ' +
+    'Ответь СТРОГО JSON: {"is_close_request": boolean, "client_name": string|null}. ' +
+    'client_name — имя или @username клиента ровно как в тексте (в исходном падеже), ' +
+    'или null, если имя не упомянуто или смысл сообщения другой.';
+
+  const text = await callOpenAIChat({
+    model: 'gpt-5.4-mini',
+    temperature: 0,
+    responseFormatJson: true,
+    label: 'AdminCloseIntent',
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: raw },
+    ],
+  });
+
+  try {
+    const parsed = JSON.parse(text);
+    return {
+      isCloseRequest: parsed.is_close_request === true,
+      clientName: typeof parsed.client_name === 'string' ? parsed.client_name : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Отмечает клиента как закрытого вне бота — реюз lead_status='blocked'
+// (единственное в коде определение "закрытой" записи, см.
+// isProjectRecordClosed в lib/airtable.ts): getNextStep в stateMachine.ts
+// для него всегда возвращает silence_blocked, так что бот больше не
+// пишет клиенту сам и не подхватывает его в cron'ах вроде
+// waiting-list-check. Если клиент напишет что-то новое сам — обычный
+// клиентский пайплайн это сообщение всё равно получит и может решить
+// иначе (silence_blocked только не инициирует сам, не глушит входящие).
+async function handleCloseClient(msg: AdminMessage, nameArg: string): Promise<string> {
+  const t = await resolveTarget(msg, nameArg);
+  if (t.kind === 'no_query') {
+    return 'про какого клиента речь? напиши имя точнее или перешли его сообщение боту.';
+  }
+  if (t.kind === 'none') {
+    return 'не нашла такого клиента в базе — проверь имя или перешли его сообщение боту.';
+  }
+  if (t.kind === 'ambiguous') {
+    return ambiguousList(t.records);
+  }
+
+  await updateClient(t.record.id, {
+    lead_status: 'blocked',
+    updated_at: new Date().toISOString(),
+  });
+
+  const f = t.record.fields;
+  const who = f.name
+    ? `${f.name}${f.username ? ` (@${f.username})` : ''}`
+    : f.username
+    ? `@${f.username}`
+    : 'клиент';
+  return `поняла, отметила ${who} как закрытого — бот больше не будет писать про свободные слоты. если позже что-то новое понадобится, просто напиши мне снова.`;
+}
+
 export async function runAdmin(msg: AdminMessage): Promise<AdminResult> {
   const raw = (msg.text ?? '').trim();
 
@@ -173,6 +259,20 @@ export async function runAdmin(msg: AdminMessage): Promise<AdminResult> {
   // который календарь не видит.
   if (isScheduleRequest(raw)) {
     return { reply: await handleSchedule(raw) };
+  }
+
+  // "Я договорилась с клиентом вживую, в таблицу не заносила" — без
+  // отдельной команды, по смыслу сообщения (см. classifyCloseClientIntent
+  // выше). Дёшевый regex-фильтр первым, чтобы не звать LLM на каждое
+  // обычное сообщение.
+  if (looksLikeCloseClientRequest(raw)) {
+    const intent = await classifyCloseClientIntent(raw).catch((err) => {
+      console.error('classifyCloseClientIntent failed:', err);
+      return null;
+    });
+    if (intent?.isCloseRequest) {
+      return { reply: await handleCloseClient(msg, intent.clientName ?? '') };
+    }
   }
 
   // Всё остальное — свободный диалог. С ПАМЯТЬЮ: подтягиваем последние

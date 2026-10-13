@@ -196,6 +196,34 @@ export async function findSilentQuotedLeads(): Promise<ClientRecord[]> {
   return data.records ?? [];
 }
 
+// Клиенты, затихшие ДО цены (поздоровались, что-то спросили и пропали —
+// см. обсуждение в проекте) — источник для /api/early-lead-reminder.
+// В отличие от findSilentQuotedLeads НЕ фильтруем по lead_status: на
+// ранних шагах воронки lead_status не используется для роутинга (не
+// участвует ни в одном сравнении в getNextStep), так что опираться на
+// него тут бессмысленно и даже опасно — findSilentQuotedLeads зависит
+// от точного lead_status="new", трогать это поле на раннем этапе нельзя,
+// иначе сломаем ЕЁ фильтр. Идемпотентность — через отдельное поле
+// early_reminder_sent (Аня добавляет новую колонку вручную в Airtable,
+// typecast создаёт только новые ОПЦИИ в существующих колонках, не сами
+// колонки — см. комментарий про dialog_history в lib/dialogLog.ts).
+export async function findSilentEarlyLeads(): Promise<ClientRecord[]> {
+  const formula =
+    `AND({price_shown} != "yes", {wants_to_book} = "", {lead_status} != "blocked", {early_reminder_sent} != "yes")`;
+  const url = `${AIRTABLE_API_URL}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=100`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Airtable early-lead search failed: ${res.status} ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  return data.records ?? [];
+}
+
 // Клиенты в листе ожидания слотов (тату ИЛИ консультация) — источник для
 // cron-джобы /api/waiting-list-check, которая сама проверяет календарь и,
 // если появились варианты, пишет клиенту напрямую, не дожидаясь, пока он

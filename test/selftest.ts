@@ -37,7 +37,7 @@ import {
   MASTER_CLOSED_MARKER,
   type AvailableSlot,
 } from '../lib/calendar';
-import { formatInvoice, isScheduleRequest, isSlotCommandLine } from '../lib/admin';
+import { formatInvoice, isScheduleRequest, isSlotCommandLine, looksLikeCloseClientRequest } from '../lib/admin';
 import { formatDialogHistory, type DialogEntry } from '../lib/dialogLog';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from '../lib/addSlotParser';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
@@ -356,6 +356,14 @@ ok(
     'переведи для меня текст на иврит: привет 🙂 в этот раз я могу принять тебя на два часа позже. но давай дальше уже постараемся держаться согласованного времени, потому что когда запись несколько раз переносится, мне сложно нормально собрать день.'
   )
 );
+
+console.log('\n▶ looksLikeCloseClientRequest (дешёвый фильтр ПЕРЕД LLM-классификатором)');
+ok('«Таня записана на вторник, в таблицу не вносила» → true',
+  looksLikeCloseClientRequest('Таня записана на вторник, в таблицу не вносила'));
+ok('«я сама с ней договорилась» → true', looksLikeCloseClientRequest('я сама с ней договорилась'));
+ok('«забронировала ей время вживую» → true', looksLikeCloseClientRequest('забронировала ей время вживую'));
+ok('«как дела» → false', !looksLikeCloseClientRequest('как дела'));
+ok('«покажи расписание» → false', !looksLikeCloseClientRequest('покажи расписание'));
 
 console.log('\n▶ isSlotCommandLine (пачка команд календаря одним сообщением)');
 // Реальный баг: Аня прислала 6 строк "/добавить чат ..."/"/добавить окно
