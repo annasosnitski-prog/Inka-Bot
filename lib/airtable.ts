@@ -217,6 +217,31 @@ export async function findClientsWaitingForSlots(): Promise<ClientRecord[]> {
   return data.records ?? [];
 }
 
+// Campaign (self_book_slot) clients currently waiting for a new slot —
+// either the pool was empty from the start (campaign_no_slots) or they
+// declined every offered option (campaign_slots_declined_waiting). Unlike
+// the regular funnel, a campaign card's lead_status stays 'slots_shown'
+// forever (see lib/campaignFlow.ts getCampaignCardPatch 'campaign_show_slots'),
+// so it can't be used as the waiting marker here — '__no_slots_pinged' in
+// the campaign_data JSON blob is set by both of those steps and nothing
+// else, so it doubles as one. {slot_options} = '' excludes a client who
+// just got a fresh batch from waiting-list-check itself moments earlier.
+export async function findCampaignClientsWaitingForSlots(): Promise<ClientRecord[]> {
+  const formula = `AND(NOT({campaign_id} = ''), FIND('"__no_slots_pinged":"1"', {campaign_data}) > 0, {slot_options} = '')`;
+  const url = `${AIRTABLE_API_URL}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=100`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Airtable campaign waiting-list search failed: ${res.status} ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  return data.records ?? [];
+}
+
 export async function createClient(fields: Record<string, any>): Promise<ClientRecord> {
   const res = await fetch(AIRTABLE_API_URL, {
     method: 'POST',

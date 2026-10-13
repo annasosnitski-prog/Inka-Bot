@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/waiting-list-check",
-      "schedule": "0 11 * * *"
+      "schedule": "30 14 * * *"
     }
   ]
 }

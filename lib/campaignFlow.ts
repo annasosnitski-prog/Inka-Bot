@@ -209,11 +209,21 @@ export function getCampaignCardPatch(
       // client_wants_other_slots (see routeCampaign above).
       collected['__decline_clarify_asked'] = '1';
       return { campaign_collected: collected };
-    case 'campaign_slots_declined_waiting':
-      // Client just answered the day/time clarifying question. Clear
-      // slot_options so the NEXT message routes into campaign_no_slots on
-      // its own (empty pool, same as any other empty-pool case) instead of
-      // re-showing the same now-declined options forever. Also pre-set
+    case 'campaign_slots_declined_waiting': {
+      // Client just answered the day/time clarifying question. Remember
+      // which slot ids this client already declined (accumulated across
+      // the whole campaign, never cleared — the campaign's slot pool is
+      // small and master-managed, unlike the regular funnel's calendar) so
+      // the next fetch (see getCampaignDeclinedSlotIds, pages/api/telegram.ts)
+      // can exclude them instead of offering the exact same options again.
+      const declinedSoFar = new Set(
+        (collected['__declined_slot_ids'] ?? '').split(',').filter(Boolean)
+      );
+      for (const id of card.slot_options ?? []) declinedSoFar.add(id);
+      collected['__declined_slot_ids'] = Array.from(declinedSoFar).join(',');
+      // Clear slot_options so the NEXT message routes into campaign_no_slots
+      // on its own (empty pool, same as any other empty-pool case) instead
+      // of re-showing the same now-declined options forever. Also pre-set
       // __no_slots_pinged so that immediate follow-up doesn't double-ping
       // the master right after the decline ping pages/api/telegram.ts
       // sends for this step, and clear __decline_clarify_asked so a FUTURE
@@ -221,6 +231,7 @@ export function getCampaignCardPatch(
       collected['__no_slots_pinged'] = '1';
       delete collected['__decline_clarify_asked'];
       return { campaign_collected: collected, slot_options: null };
+    }
     case 'campaign_confirm_slot':
       // Booking already happened in pages/api/telegram.ts (bookSlot) by the
       // time this patch runs; here we just close out the campaign funnel
@@ -233,6 +244,15 @@ export function getCampaignCardPatch(
       // collected map.
       return { campaign_collected: collected };
   }
+}
+
+// Slot ids this client has already declined for their active campaign (see
+// the '__declined_slot_ids' accumulator set in getCampaignCardPatch above).
+// Used by pages/api/telegram.ts to exclude them from the next calendar
+// fetch instead of offering the exact same options again.
+export function getCampaignDeclinedSlotIds(card: ClientCard): string[] {
+  const raw = card.campaign_collected?.['__declined_slot_ids'] ?? '';
+  return raw.split(',').filter(Boolean);
 }
 
 // Called by pages/api/telegram.ts right after the Extractor runs, to fold

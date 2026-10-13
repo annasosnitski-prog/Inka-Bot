@@ -32,6 +32,7 @@ import {
   buildCampaignSlotBookedNotification,
   buildCampaignNoSlotsNotification,
   buildCampaignSlotsDeclinedNotification,
+  getCampaignDeclinedSlotIds,
   type CampaignRouting,
 } from '../../lib/campaignFlow';
 
@@ -535,8 +536,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         : mergedCard.direct_tattoo_allowed === 'yes'
           ? 'tattoo'
           : 'consultation';
+      // Don't re-offer slots this exact client already declined. Regular
+      // funnel: slot_options survives a decline unchanged (see
+      // getCardPatchForStep 'slot_change_requested_waiting'/'no_more_slots_waiting')
+      // so it's only meaningful here once the card is actually in a
+      // waiting cycle — otherwise (e.g. unclear_slot_choice/slot_taken_pick_again,
+      // reached straight from lead_status='slots_shown') it's the
+      // CURRENTLY offered batch and must not be excluded. Campaign funnel
+      // tracks its own accumulator separately (campaign_collected never
+      // gets cleared on decline, see getCampaignDeclinedSlotIds).
+      const isWaitingCycle =
+        mergedCard.lead_status === 'waiting_slots' || mergedCard.lead_status === 'waiting_slots_pinged';
+      const excludeIds = campaignSelfBooksSlots
+        ? getCampaignDeclinedSlotIds(mergedCard)
+        : isWaitingCycle
+          ? mergedCard.slot_options
+          : null;
       try {
-        const slots = await getAvailableSlots(slotType, 3);
+        const slots = await getAvailableSlots(slotType, 3, excludeIds);
         liveCard = { ...mergedCard, slot_options: slots.map((s) => s.id) };
         slotsDisplay = slots.map(formatSlotForDisplay);
         rawSlots = slots;
