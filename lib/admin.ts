@@ -617,11 +617,23 @@ async function handleDeleteSlot(arg: string): Promise<string> {
 
 let cachedPrompt: string | null = null;
 
+// Имя мастера в этом промпте — Аня по умолчанию (текущий деплой), другой
+// деплой того же кода задаёт MASTER_NAME в окружении. ВАЖНО: само имя
+// меняется, но глагольные окончания вокруг него в adminPrompt.txt ("Аня
+// занята", "Аня прислала") — женского рода. Для деплоя с мастером другого
+// пола текст самого adminPrompt.txt нужно переписать (согласовать род),
+// одной подстановки имени для этого недостаточно.
+function getMasterName(): string {
+  return (process.env.MASTER_NAME ?? '').trim() || 'Аня';
+}
+
 function getAdminPrompt(): string {
   if (cachedPrompt) return cachedPrompt;
   const promptPath = path.join(process.cwd(), 'lib', 'adminPrompt.txt');
   const template = fs.readFileSync(promptPath, 'utf-8');
-  cachedPrompt = template.replace('{{PRICING_RULES}}', getPricingRules());
+  cachedPrompt = template
+    .replace('{{PRICING_RULES}}', getPricingRules())
+    .replace(/\{\{MASTER_NAME\}\}/g, getMasterName());
   return cachedPrompt;
 }
 
