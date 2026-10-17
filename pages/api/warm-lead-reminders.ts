@@ -26,7 +26,9 @@ import { findSilentQuotedLeads, updateClient } from '../../lib/airtable';
 import { sendTelegramMessage } from '../../lib/telegramApi';
 import { shouldSendWarmLeadReminder } from '../../lib/reminderWindows';
 
-const MASTER_TELEGRAM_ID = 457343487;
+// telegram_id мастера — свой для каждого деплоя (см. MASTER_NAME в lib/admin.ts
+// про аналогичный параметр имени). По умолчанию — текущий деплой (Аня).
+const MASTER_TELEGRAM_ID = Number(process.env.MASTER_TELEGRAM_ID) || 457343487;
 const SILENCE_WINDOW_HOURS = 20;
 
 function safeEqual(a: string, b: string): boolean {

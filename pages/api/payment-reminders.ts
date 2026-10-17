@@ -34,7 +34,9 @@ import { sendTelegramMessage } from '../../lib/telegramApi';
 import { getDepositAmount } from '../../lib/paymentConfig';
 import { shouldSendLatePaymentReminder, shouldSendEarlyPaymentReminder } from '../../lib/reminderWindows';
 
-const MASTER_TELEGRAM_ID = 457343487;
+// telegram_id мастера — свой для каждого деплоя (см. MASTER_NAME в lib/admin.ts
+// про аналогичный параметр имени). По умолчанию — текущий деплой (Аня).
+const MASTER_TELEGRAM_ID = Number(process.env.MASTER_TELEGRAM_ID) || 457343487;
 const REMINDER_WINDOW_HOURS = 36;
 const EARLY_WINDOW_HOURS = 24;
 

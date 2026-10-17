@@ -58,7 +58,9 @@ import { parseCampaignData } from '../../lib/campaignFlow';
 // Тот же ID мастера, что и в payment-reminders/warm-lead-reminders —
 // сюда же уходит короткое уведомление, что бот сам написал клиенту
 // (Аня иначе узнаёт об этом только если клиент ей перескажет).
-const MASTER_TELEGRAM_ID = 457343487;
+// telegram_id мастера — свой для каждого деплоя (см. MASTER_NAME в lib/admin.ts
+// про аналогичный параметр имени). По умолчанию — текущий деплой (Аня).
+const MASTER_TELEGRAM_ID = Number(process.env.MASTER_TELEGRAM_ID) || 457343487;
 
 // Общий пул на тип слота (а не персональный fetch на клиента) — с запасом
 // над тем, что получит один клиент (3), чтобы после персонального
