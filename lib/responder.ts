@@ -10,6 +10,7 @@ import path from 'path';
 import type { ClientCard, NextStep } from './stateMachine';
 import { callOpenAIChat } from './openai';
 import { getDepositAmount } from './paymentConfig';
+import { applyMasterGenderPlaceholders } from './masterGender';
 import type { RecentDialogTurn } from './dialogLog';
 import type { CampaignConfig } from './campaigns';
 
@@ -29,7 +30,7 @@ function getResponderPrompt(): string {
   // when the per-call input's campaign is non-null — otherwise the model is
   // told to ignore it entirely, same pattern as the v2 overlay above.
   const campaignOverlay = fs.readFileSync(campaignOverlayPath, 'utf-8');
-  cachedPrompt = `${base}\n\n${overlay}\n\n${campaignOverlay}`;
+  cachedPrompt = applyMasterGenderPlaceholders(`${base}\n\n${overlay}\n\n${campaignOverlay}`);
   return cachedPrompt;
 }
 

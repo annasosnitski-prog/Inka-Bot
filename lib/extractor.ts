@@ -20,6 +20,7 @@ import { callOpenAIChat, type ChatContentPart } from './openai';
 import { getTelegramFileDataUrl } from './telegramApi';
 import type { RecentDialogTurn } from './dialogLog';
 import { getPricingRules } from './pricingRules';
+import { applyMasterGenderPlaceholders } from './masterGender';
 
 let cachedPrompt: string | null = null;
 
@@ -55,7 +56,7 @@ function getExtractorPrompt(): string {
     );
     full = `${full}\n\n${fs.readFileSync(consultationOverlayPath, 'utf-8')}`;
   }
-  cachedPrompt = full;
+  cachedPrompt = applyMasterGenderPlaceholders(full);
   return cachedPrompt;
 }
 
