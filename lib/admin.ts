@@ -618,22 +618,49 @@ async function handleDeleteSlot(arg: string): Promise<string> {
 let cachedPrompt: string | null = null;
 
 // Имя мастера в этом промпте — Аня по умолчанию (текущий деплой), другой
-// деплой того же кода задаёт MASTER_NAME в окружении. ВАЖНО: само имя
-// меняется, но глагольные окончания вокруг него в adminPrompt.txt ("Аня
-// занята", "Аня прислала") — женского рода. Для деплоя с мастером другого
-// пола текст самого adminPrompt.txt нужно переписать (согласовать род),
-// одной подстановки имени для этого недостаточно.
+// деплой того же кода задаёт MASTER_NAME в окружении. Род мастера
+// (MASTER_GENDER=female|male, по умолчанию female) управляет согласованием
+// глаголов/местоимений вокруг имени в adminPrompt.txt через отдельные
+// плейсхолдеры — см. getGenderedReplacements().
 function getMasterName(): string {
   return (process.env.MASTER_NAME ?? '').trim() || 'Аня';
+}
+
+function getMasterGender(): 'female' | 'male' {
+  return (process.env.MASTER_GENDER ?? '').trim().toLowerCase() === 'male'
+    ? 'male'
+    : 'female';
+}
+
+// Родительный падеж имени ("ассистентка тату-мастера Ани/Платона") нельзя
+// вывести автоматически из любого имени — для нового деплоя задаётся
+// явно через MASTER_NAME_GENITIVE. Если не задано, используем само имя
+// как грубое приближение (лучше, чем жёстко вшитое "Ани").
+function getMasterNameGenitive(): string {
+  return (process.env.MASTER_NAME_GENITIVE ?? '').trim() || getMasterName();
+}
+
+function getGenderedReplacements(): Record<string, string> {
+  const isMale = getMasterGender() === 'male';
+  return {
+    MASTER_NAME_GEN: getMasterNameGenitive(),
+    MASTER_BUSY: isMale ? 'занят' : 'занята',
+    MASTER_SENT: isMale ? 'прислал' : 'прислала',
+    MASTER_PRONOUN: isMale ? 'он' : 'она',
+  };
 }
 
 function getAdminPrompt(): string {
   if (cachedPrompt) return cachedPrompt;
   const promptPath = path.join(process.cwd(), 'lib', 'adminPrompt.txt');
   const template = fs.readFileSync(promptPath, 'utf-8');
-  cachedPrompt = template
+  let result = template
     .replace('{{PRICING_RULES}}', getPricingRules())
     .replace(/\{\{MASTER_NAME\}\}/g, getMasterName());
+  for (const [key, value] of Object.entries(getGenderedReplacements())) {
+    result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+  }
+  cachedPrompt = result;
   return cachedPrompt;
 }
 
