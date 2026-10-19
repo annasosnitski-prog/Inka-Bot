@@ -39,7 +39,9 @@ import {
 // Master's own Telegram ID — admin/test mode detection.
 // Admin requests are handled by the dedicated admin module below and do not
 // enter the client state machine unless /client mode was explicitly enabled.
-const MASTER_TELEGRAM_ID = 457343487;
+// telegram_id мастера — свой для каждого деплоя (см. MASTER_NAME в lib/admin.ts
+// про аналогичный параметр имени). По умолчанию — текущий деплой (Аня).
+const MASTER_TELEGRAM_ID = Number(process.env.MASTER_TELEGRAM_ID) || 457343487;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {

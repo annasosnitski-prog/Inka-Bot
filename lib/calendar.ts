@@ -35,7 +35,11 @@
 
 import { createHash } from 'crypto';
 
+// Свой календарь для каждого деплоя — см. MASTER_TELEGRAM_ID в pages/api/*.ts
+// и MASTER_NAME в lib/admin.ts про аналогичные параметры. По умолчанию —
+// текущий деплой (Аня).
 const CALENDAR_ID =
+  (process.env.GOOGLE_CALENDAR_ID ?? '').trim() ||
   '5e40406c76b8c676638fea6ef53cd3207a2ec754c6d0c5113d04a1a52d5c820d@group.calendar.google.com';
 
 const SLOT_TAG = {

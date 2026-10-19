@@ -20,8 +20,13 @@ import { callOpenAIChat, type ChatContentPart } from './openai';
 import { getTelegramFileDataUrl } from './telegramApi';
 import type { RecentDialogTurn } from './dialogLog';
 import { getPricingRules } from './pricingRules';
+import { applyMasterGenderPlaceholders } from './masterGender';
 
 let cachedPrompt: string | null = null;
+
+function isConsultationOnly(): boolean {
+  return (process.env.CONSULTATION_ONLY ?? '').trim().toLowerCase() === 'true';
+}
 
 function getExtractorPrompt(): string {
   if (cachedPrompt) return cachedPrompt;
@@ -39,7 +44,19 @@ function getExtractorPrompt(): string {
   // ExtractorInput.activeCampaign below) — otherwise the model is told to
   // ignore it entirely, same pattern as the v2 overlay above.
   const campaignOverlay = fs.readFileSync(campaignOverlayPath, 'utf-8');
-  cachedPrompt = `${base}\n\n${overlay}\n\n${campaignOverlay}`;
+  let full = `${base}\n\n${overlay}\n\n${campaignOverlay}`;
+  // CONSULTATION_ONLY=true (другой деплой того же кода — мастер без
+  // прямой записи, все проекты крупные) — та же схема приоритета:
+  // overlay добавляется последним и перебивает ШАГ 4 основного prompt.
+  if (isConsultationOnly()) {
+    const consultationOverlayPath = path.join(
+      process.cwd(),
+      'lib',
+      'consultationOnlyOverlay.txt'
+    );
+    full = `${full}\n\n${fs.readFileSync(consultationOverlayPath, 'utf-8')}`;
+  }
+  cachedPrompt = applyMasterGenderPlaceholders(full);
   return cachedPrompt;
 }
 

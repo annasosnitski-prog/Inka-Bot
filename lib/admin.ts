@@ -46,6 +46,7 @@ import { callOpenAIChat, type ChatContentPart } from './openai';
 import { getDepositAmount } from './paymentConfig';
 import { getTelegramFileDataUrl } from './telegramApi';
 import { getPricingRules } from './pricingRules';
+import { applyMasterGenderPlaceholders } from './masterGender';
 
 export interface AdminMessage {
   text: string | null;
@@ -621,7 +622,8 @@ function getAdminPrompt(): string {
   if (cachedPrompt) return cachedPrompt;
   const promptPath = path.join(process.cwd(), 'lib', 'adminPrompt.txt');
   const template = fs.readFileSync(promptPath, 'utf-8');
-  cachedPrompt = template.replace('{{PRICING_RULES}}', getPricingRules());
+  const withPricing = template.replace('{{PRICING_RULES}}', getPricingRules());
+  cachedPrompt = applyMasterGenderPlaceholders(withPricing);
   return cachedPrompt;
 }
 
