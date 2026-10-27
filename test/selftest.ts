@@ -43,7 +43,7 @@ import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from '../l
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
 import { isProjectRecordClosed, resolveActiveProjects } from '../lib/airtable';
 import { getDepositAmount } from '../lib/paymentConfig';
-import { pickLargestTelegramPhoto } from '../lib/telegramApi';
+import { pickVisionTelegramPhoto } from '../lib/telegramApi';
 import {
   shouldSendLatePaymentReminder,
   shouldSendEarlyPaymentReminder,
@@ -697,15 +697,33 @@ eq('оба yes (не должно случаться) → tattoo (приорит
 eq('оба null/no → null (маршрут ещё не выбран)', pickWaitingListSlotType(null, null), null);
 eq('мусорные значения → null, не падает', pickWaitingListSlotType(undefined, 'maybe'), null);
 
-console.log('\n▶ pickLargestTelegramPhoto — выбор самого большого размера для вижна');
+console.log('\n▶ pickVisionTelegramPhoto — средний размер для вижна, не самый большой');
 eq(
-  'берёт последний элемент (Telegram шлёт от меньшего к большему)',
-  pickLargestTelegramPhoto([{ file_id: 'small' }, { file_id: 'medium' }, { file_id: 'big' }])?.file_id,
+  'без width (старый клиент) → как раньше, последний элемент',
+  pickVisionTelegramPhoto([{ file_id: 'small' }, { file_id: 'medium' }, { file_id: 'big' }])?.file_id,
   'big'
 );
-eq('один размер → его и берёт', pickLargestTelegramPhoto([{ file_id: 'only' }])?.file_id, 'only');
-eq('пустой массив → null', pickLargestTelegramPhoto([]), null);
-eq('undefined → null (нет фото)', pickLargestTelegramPhoto(undefined), null);
+eq(
+  'с width → берёт первый размер >= целевой ширины, не самый большой',
+  pickVisionTelegramPhoto([
+    { file_id: 's', width: 90 },
+    { file_id: 'm', width: 800 },
+    { file_id: 'l', width: 1280 },
+    { file_id: 'xl', width: 2560 },
+  ])?.file_id,
+  'l'
+);
+eq(
+  'все размеры меньше целевой ширины → берёт самый большой из доступных',
+  pickVisionTelegramPhoto([
+    { file_id: 's', width: 90 },
+    { file_id: 'm', width: 320 },
+  ])?.file_id,
+  'm'
+);
+eq('один размер → его и берёт', pickVisionTelegramPhoto([{ file_id: 'only' }])?.file_id, 'only');
+eq('пустой массив → null', pickVisionTelegramPhoto([]), null);
+eq('undefined → null (нет фото)', pickVisionTelegramPhoto(undefined), null);
 
 console.log('\n▶ isProjectRecordClosed — какие строки клиента считаются активными (несколько проектов на telegram_id)');
 ok('заблокированный лид закрыт', isProjectRecordClosed({ lead_status: 'blocked' }));
