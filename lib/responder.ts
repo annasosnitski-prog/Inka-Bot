@@ -11,6 +11,7 @@ import type { ClientCard, NextStep } from './stateMachine';
 import { callOpenAIChat } from './openai';
 import { getDepositAmount } from './paymentConfig';
 import { applyMasterGenderPlaceholders } from './masterGender';
+import { getPricingProfile } from './pricingRules';
 import type { RecentDialogTurn } from './dialogLog';
 import type { CampaignConfig } from './campaigns';
 
@@ -30,7 +31,15 @@ function getResponderPrompt(): string {
   // when the per-call input's campaign is non-null — otherwise the model is
   // told to ignore it entirely, same pattern as the v2 overlay above.
   const campaignOverlay = fs.readFileSync(campaignOverlayPath, 'utf-8');
-  cachedPrompt = applyMasterGenderPlaceholders(`${base}\n\n${overlay}\n\n${campaignOverlay}`);
+  let full = `${base}\n\n${overlay}\n\n${campaignOverlay}`;
+  // PRICING_PROFILE=platon (другой деплой — мастер без прямой записи,
+  // своя логика раскрытия итоговой суммы и голоса про референс) —
+  // overlay добавляется последним, как и остальные.
+  if (getPricingProfile() === 'platon') {
+    const platonOverlayPath = path.join(process.cwd(), 'lib', 'platonResponderOverlay.txt');
+    full = `${full}\n\n${fs.readFileSync(platonOverlayPath, 'utf-8')}`;
+  }
+  cachedPrompt = applyMasterGenderPlaceholders(full.replace(/\{\{DEPOSIT\}\}/g, getDepositAmount()));
   return cachedPrompt;
 }
 
