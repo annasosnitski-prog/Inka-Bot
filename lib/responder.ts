@@ -10,6 +10,7 @@ import path from 'path';
 import type { ClientCard, NextStep } from './stateMachine';
 import { callOpenAIChat } from './openai';
 import { getDepositAmount } from './paymentConfig';
+import { isAltPricing } from './pricingRules';
 import { applyMasterGenderPlaceholders } from './masterGender';
 import type { RecentDialogTurn } from './dialogLog';
 import type { CampaignConfig } from './campaigns';
@@ -22,7 +23,8 @@ function getResponderPrompt(): string {
   const overlayPath = path.join(process.cwd(), 'lib', 'responderVoiceV2.txt');
   const campaignOverlayPath = path.join(process.cwd(), 'lib', 'campaignResponderOverlay.txt');
   const raw = fs.readFileSync(promptPath, 'utf-8');
-  const base = raw.replace(/\{\{DEPOSIT\}\}/g, getDepositAmount());
+  const depositAmount = getDepositAmount();
+  const base = raw.replace(/\{\{DEPOSIT\}\}/g, depositAmount);
   // Appended last on purpose: v2 overrides only the voice/archetype contract
   // and the new NEXT_STEP wording, preserving existing operational rules.
   const overlay = fs.readFileSync(overlayPath, 'utf-8');
@@ -30,7 +32,19 @@ function getResponderPrompt(): string {
   // when the per-call input's campaign is non-null — otherwise the model is
   // told to ignore it entirely, same pattern as the v2 overlay above.
   const campaignOverlay = fs.readFileSync(campaignOverlayPath, 'utf-8');
-  cachedPrompt = applyMasterGenderPlaceholders(`${base}\n\n${overlay}\n\n${campaignOverlay}`);
+  let full = `${base}\n\n${overlay}\n\n${campaignOverlay}`;
+  // ALT_PRICING_RULES=true (see lib/pricingRules.ts) — this master's price
+  // disclosure rule is the opposite of the base quote_price step (allowed
+  // to reveal a total range under 6000₪, see lib/altPricingResponderOverlay.txt),
+  // so it's appended last to override just that one step.
+  if (isAltPricing()) {
+    const altOverlayPath = path.join(process.cwd(), 'lib', 'altPricingResponderOverlay.txt');
+    const altOverlay = fs
+      .readFileSync(altOverlayPath, 'utf-8')
+      .replace(/\{\{DEPOSIT\}\}/g, depositAmount);
+    full = `${full}\n\n${altOverlay}`;
+  }
+  cachedPrompt = applyMasterGenderPlaceholders(full);
   return cachedPrompt;
 }
 
