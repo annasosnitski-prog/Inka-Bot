@@ -15,7 +15,7 @@ import { runAdmin } from '../../lib/admin';
 import { appendDialogTurn, parseDialogHistory, recentDialogForModel } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { BookingType, AvailableSlot } from '../../lib/calendar';
-import { sendTelegramMessage, forwardTelegramMessage, pickLargestTelegramPhoto } from '../../lib/telegramApi';
+import { sendTelegramMessage, forwardTelegramMessage, pickVisionTelegramPhoto } from '../../lib/telegramApi';
 import { getDepositAmount } from '../../lib/paymentConfig';
 import { getCampaign } from '../../lib/campaigns';
 import {
@@ -87,7 +87,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // /start, фото без подписи). См. lib/responderPrompt.txt, раздел ЯЗЫК.
   const telegramLanguageCode: string | null = message.from?.language_code ?? null;
   const hasPhoto = !!message.photo;
-  const photoFileId = hasPhoto ? pickLargestTelegramPhoto(message.photo)?.file_id ?? null : null;
+  const photoFileId = hasPhoto ? pickVisionTelegramPhoto(message.photo)?.file_id ?? null : null;
   const photoCaption: string | null = message.caption ?? null;
   let messageText: string | null = message.text ?? message.caption ?? null;
 

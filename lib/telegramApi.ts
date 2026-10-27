@@ -60,13 +60,28 @@ export interface TelegramPhotoSize {
   file_size?: number;
 }
 
+// Целевая ширина для вижн-вызовов (Extractor/Admin): им нужно различить
+// "чистая кожа / тату / шрам" и прочитать референс, не разглядеть пиксели
+// — а OpenAI считает токены по размеру картинки. Самый большой размер от
+// Telegram (иногда 1280px+) стоит заметно дороже без выигрыша в качестве
+// этих проверок, поэтому берём средний размер из присланного Telegram
+// набора, а не последний (самый большой).
+const VISION_TARGET_WIDTH = 1024;
+
 // Чистая функция (без сети) — вынесена отдельно, чтобы её можно было
-// протестировать без реального Telegram API.
-export function pickLargestTelegramPhoto(
+// протестировать без реального Telegram API. Если Telegram не прислал
+// width (бывает у старых клиентов) — падаем назад на "взять последний",
+// как раньше, а не угадываем размер.
+export function pickVisionTelegramPhoto(
   sizes: TelegramPhotoSize[] | undefined
 ): TelegramPhotoSize | null {
   if (!sizes || sizes.length === 0) return null;
-  return sizes[sizes.length - 1];
+  const withWidth = sizes.filter((s): s is TelegramPhotoSize & { width: number } =>
+    typeof s.width === 'number'
+  );
+  if (withWidth.length === 0) return sizes[sizes.length - 1];
+  const sorted = [...withWidth].sort((a, b) => a.width - b.width);
+  return sorted.find((s) => s.width >= VISION_TARGET_WIDTH) ?? sorted[sorted.length - 1];
 }
 
 // Скачивает файл по file_id и возвращает его как data URL

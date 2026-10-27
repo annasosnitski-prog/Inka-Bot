@@ -55,6 +55,35 @@ export interface ResponderInput {
   telegramLanguageCode?: string | null;
 }
 
+// Шаги, где точность стоит дороже экономии, остаются на полноразмерной
+// модели; остальные (где ответ — по сути фиксированная фраза на этот шаг)
+// переведены на mini. Два вида критичных шагов:
+// 1) цена и подтверждения брони/хендоффа — клиент действует по тексту бота
+//    (оплата, итоговое время; баг из прода с ценой без "за сеанс" — см.
+//    scripts/dialogEval.ts);
+// 2) "*_followup_chat" и ask_wants_to_book — на этих шагах Responder должен
+//    по-настоящему ответить на произвольный вопрос клиента, а не просто
+//    озвучить шаг. eval:dialog (2026-10-27, сценарий D) показал, что здесь
+//    gpt-5.4-mini теряет содержание вопроса ("а что если нужно больше
+//    одной встречи?" → общий вопрос вместо ответа) — поэтому эти шаги
+//    тоже остаются на gpt-5.4.
+const PRECISION_CRITICAL_STEPS: ReadonlySet<NextStep> = new Set<NextStep>([
+  'quote_price',
+  'confirm_slot_awaiting_payment',
+  'confirm_consultation_booked',
+  'campaign_handoff',
+  'campaign_confirm_slot',
+  'ask_wants_to_book',
+  'waiting_slots_followup_chat',
+  'booked_followup_chat',
+  'declined_followup_chat',
+  'campaign_followup_chat',
+]);
+
+function pickResponderModel(step: NextStep): string {
+  return PRECISION_CRITICAL_STEPS.has(step) ? 'gpt-5.4' : 'gpt-5.4-mini';
+}
+
 export async function runResponder(input: ResponderInput): Promise<string> {
   if (input.nextStep === 'silence_blocked') {
     return '';
@@ -79,7 +108,7 @@ export async function runResponder(input: ResponderInput): Promise<string> {
   );
 
   const text = await callOpenAIChat({
-    model: 'gpt-5.4',
+    model: pickResponderModel(input.nextStep),
     temperature: 0.7,
     label: 'Responder',
     messages: [
