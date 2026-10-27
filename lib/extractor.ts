@@ -19,7 +19,7 @@ import type {
 import { callOpenAIChat, type ChatContentPart } from './openai';
 import { getTelegramFileDataUrl } from './telegramApi';
 import type { RecentDialogTurn } from './dialogLog';
-import { getPricingRules } from './pricingRules';
+import { getPricingRules, isAltPricing } from './pricingRules';
 import { applyMasterGenderPlaceholders } from './masterGender';
 
 let cachedPrompt: string | null = null;
@@ -55,6 +55,19 @@ function getExtractorPrompt(): string {
       'consultationOnlyOverlay.txt'
     );
     full = `${full}\n\n${fs.readFileSync(consultationOverlayPath, 'utf-8')}`;
+  }
+  // ALT_PRICING_RULES=true (see lib/pricingRules.ts) — this master's
+  // service_fit criteria for realism/color differ from the v2 contract
+  // overlay above (he does realism on a black base; color is only
+  // excluded when it's the base of the work, not an accent), so this is
+  // appended last to override just those two bullets.
+  if (isAltPricing()) {
+    const altExtractorOverlayPath = path.join(
+      process.cwd(),
+      'lib',
+      'altPricingExtractorOverlay.txt'
+    );
+    full = `${full}\n\n${fs.readFileSync(altExtractorOverlayPath, 'utf-8')}`;
   }
   cachedPrompt = applyMasterGenderPlaceholders(full);
   return cachedPrompt;

@@ -49,6 +49,20 @@ ok(
 );
 ok('responder-оверлей содержит порог 6000₪ из ТЗ', responderOverlay.includes('6000'));
 
+console.log('\n▶ Extractor-оверлей переопределяет service_fit для реализма/цвета');
+const extractorOverlay = fs.readFileSync(
+  path.join(process.cwd(), 'lib', 'altPricingExtractorOverlay.txt'),
+  'utf-8'
+);
+ok(
+  'extractor-оверлей явно говорит, что реализм САМ ПО СЕБЕ не повод для not_offered',
+  extractorOverlay.includes('НЕ повод для')
+);
+ok(
+  'extractor-оверлей переключает критерий на "цвет как основа", а не реализм',
+  extractorOverlay.includes('ЦВЕТ — ОСНОВА')
+);
+
 console.log(`\n${'='.repeat(40)}`);
 console.log(`ИТОГО: ${passed} passed, ${failed} failed`);
 console.log('='.repeat(40));
