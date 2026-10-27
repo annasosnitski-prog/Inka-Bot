@@ -67,6 +67,13 @@ export interface ResponderInput {
 //    gpt-5.4-mini теряет содержание вопроса ("а что если нужно больше
 //    одной встречи?" → общий вопрос вместо ответа) — поэтому эти шаги
 //    тоже остаются на gpt-5.4.
+// 3) campaign_intro/campaign_ask_field — здесь Responder пересказывает
+//    offer кампании (lib/campaigns.ts, обычно на русском) клиенту на ЕГО
+//    языке. CI (eval:campaign-dialog, 2026-10-27) поймал на mini смешение
+//    языков: ответ на английском оставил непереведённое русское слово
+//    ("расходники"). Полный перевод офера — та же категория риска, что и
+//    (2), поэтому эти два шага тоже на gpt-5.4; остальные campaign_*-шаги
+//    (слоты, подтверждения полей) — заготовленные фразы, mini их не ломает.
 const PRECISION_CRITICAL_STEPS: ReadonlySet<NextStep> = new Set<NextStep>([
   'quote_price',
   'confirm_slot_awaiting_payment',
@@ -78,6 +85,8 @@ const PRECISION_CRITICAL_STEPS: ReadonlySet<NextStep> = new Set<NextStep>([
   'booked_followup_chat',
   'declined_followup_chat',
   'campaign_followup_chat',
+  'campaign_intro',
+  'campaign_ask_field',
 ]);
 
 function pickResponderModel(step: NextStep): string {
