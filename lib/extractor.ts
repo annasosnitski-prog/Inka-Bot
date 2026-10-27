@@ -19,7 +19,7 @@ import type {
 import { callOpenAIChat, type ChatContentPart } from './openai';
 import { getTelegramFileDataUrl } from './telegramApi';
 import type { RecentDialogTurn } from './dialogLog';
-import { getPricingRules } from './pricingRules';
+import { getPricingRules, getPricingProfile } from './pricingRules';
 import { applyMasterGenderPlaceholders } from './masterGender';
 
 let cachedPrompt: string | null = null;
@@ -55,6 +55,12 @@ function getExtractorPrompt(): string {
       'consultationOnlyOverlay.txt'
     );
     full = `${full}\n\n${fs.readFileSync(consultationOverlayPath, 'utf-8')}`;
+  }
+  // PRICING_PROFILE=platon — переопределяет один пункт service_fit
+  // (реализм сам по себе не "not_offered" для этого мастера, см. файл).
+  if (getPricingProfile() === 'platon') {
+    const platonOverlayPath = path.join(process.cwd(), 'lib', 'platonExtractorOverlay.txt');
+    full = `${full}\n\n${fs.readFileSync(platonOverlayPath, 'utf-8')}`;
   }
   cachedPrompt = applyMasterGenderPlaceholders(full);
   return cachedPrompt;
