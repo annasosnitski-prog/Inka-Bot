@@ -21,13 +21,17 @@ export function getPricingProfile(): string {
   return (process.env.PRICING_PROFILE ?? '').trim().toLowerCase();
 }
 
-function getPricingRulesFileName(): string {
-  return getPricingProfile() === 'platon' ? 'pricingRulesPlaton.txt' : 'pricingRules.txt';
-}
-
 export function getPricingRules(): string {
   if (cachedRules) return cachedRules;
-  const rulesPath = path.join(process.cwd(), 'lib', getPricingRulesFileName());
+  // Пути — литералы прямо в вызове readFileSync (как и в responder.ts/
+  // extractor.ts/admin.ts): Next.js/Vercel трассирует файлы для серверless-
+  // бандла статическим анализом и не видит путь, собранный через отдельную
+  // функцию — из-за этого pricingRulesPlaton.txt не попадал в прод-бандл
+  // (ENOENT у Платона).
+  const rulesPath =
+    getPricingProfile() === 'platon'
+      ? path.join(process.cwd(), 'lib', 'pricingRulesPlaton.txt')
+      : path.join(process.cwd(), 'lib', 'pricingRules.txt');
   cachedRules = fs.readFileSync(rulesPath, 'utf-8');
   return cachedRules;
 }
