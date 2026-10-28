@@ -20,6 +20,7 @@
 // максимум один раз за всю историю переписки.
 // ============================================================
 
+import { getMasterTelegramId } from '../../lib/masterTelegramId';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { timingSafeEqual } from 'crypto';
 import { findSilentQuotedLeads, updateClient } from '../../lib/airtable';
@@ -28,7 +29,7 @@ import { shouldSendWarmLeadReminder } from '../../lib/reminderWindows';
 
 // telegram_id мастера — свой для каждого деплоя (см. MASTER_NAME в lib/admin.ts
 // про аналогичный параметр имени). По умолчанию — текущий деплой (Аня).
-const MASTER_TELEGRAM_ID = Number(process.env.MASTER_TELEGRAM_ID) || 457343487;
+const MASTER_TELEGRAM_ID = getMasterTelegramId();
 const SILENCE_WINDOW_HOURS = 20;
 
 function safeEqual(a: string, b: string): boolean {

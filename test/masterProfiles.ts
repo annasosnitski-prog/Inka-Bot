@@ -8,6 +8,7 @@ import { buildExtractorPrompt, normalizeExtractorOutput, type ExtractorOutput } 
 import { buildResponderPrompt, clientPriceReasons, projectTotalEstimate } from '../lib/responder';
 import { buildAdminPrompt } from '../lib/admin';
 import { getCampaign } from '../lib/campaigns';
+import { resolveMasterTelegramId } from '../lib/masterTelegramId';
 import { inkaRepliesSinceStep, lastInkaStep, type DialogEntry } from '../lib/dialogLog';
 
 let passed = 0;
@@ -191,6 +192,17 @@ ok('старые реплики без шага → null', inkaRepliesSinceStep(
 
 ok('lastInkaStep: последний ответ Инки', lastInkaStep(h(['ask_wants_to_book', 'price_followup_chat'])) === 'price_followup_chat');
 ok('lastInkaStep: старая история → undefined', lastInkaStep(h([undefined])) === undefined);
+
+// Telegram-id мастера: чужой запасной id только для Ани
+ok('id из env', resolveMasterTelegramId('123456', 'platon') === 123456);
+ok('Платон без id → null (не id Ани)', resolveMasterTelegramId(undefined, 'platon') === null);
+ok('Платон с мусором → null', resolveMasterTelegramId('abc', 'platon') === null);
+ok('Аня без id → запасной старого деплоя', resolveMasterTelegramId('', 'anya') === 457343487);
+
+// Ответ про цену: нет общего правила "меньше заливки = больше проработки"
+const core = buildResponderPrompt();
+ok('нет общего вывода про заливку и проработку', !/меньше заливки\s*—\s*больше проработки/.test(core) && !/заливки мало, а значит больше/.test(core.replace(/Плохо:[^\n]*\n[^\n]*\n/g, '')));
+ok('аргумент цены только из price_reasons', /ТОЛЬКО тем, что названо в\s+price_reasons/.test(core));
 
 console.log(`\nMASTER PROFILES: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

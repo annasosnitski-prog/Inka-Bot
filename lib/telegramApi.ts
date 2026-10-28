@@ -18,11 +18,17 @@ async function callTelegramApi(method: string, body: Record<string, unknown>): P
     return false;
   }
   const url = `https://api.telegram.org/bot${token}/${method}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    console.error(`Telegram ${method} network error:`, err);
+    return false;
+  }
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
     console.error(`Telegram ${method} failed: ${res.status} ${errText}`);
@@ -31,14 +37,15 @@ async function callTelegramApi(method: string, body: Record<string, unknown>): P
   return true;
 }
 
-export async function sendTelegramMessage(chatId: number, text: string): Promise<void> {
-  await callTelegramApi('sendMessage', { chat_id: chatId, text });
+// Возвращает true, только если Telegram принял сообщение.
+export async function sendTelegramMessage(chatId: number, text: string): Promise<boolean> {
+  return callTelegramApi('sendMessage', { chat_id: chatId, text });
 }
 
 // Сообщение с HTML-разметкой (кликабельные ссылки). Текст должен быть
 // заранее экранирован через escapeHtml.
-export async function sendTelegramHtml(chatId: number, html: string): Promise<void> {
-  await callTelegramApi('sendMessage', {
+export async function sendTelegramHtml(chatId: number, html: string): Promise<boolean> {
+  return callTelegramApi('sendMessage', {
     chat_id: chatId,
     text: html,
     parse_mode: 'HTML',

@@ -23,6 +23,7 @@
 // сбрасываются автоматически при следующей брони (см. telegram.ts).
 // ============================================================
 
+import { getMasterTelegramId } from '../../lib/masterTelegramId';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { timingSafeEqual } from 'crypto';
 import {
@@ -36,7 +37,7 @@ import { shouldSendLatePaymentReminder, shouldSendEarlyPaymentReminder } from '.
 
 // telegram_id мастера — свой для каждого деплоя (см. MASTER_NAME в lib/admin.ts
 // про аналогичный параметр имени). По умолчанию — текущий деплой (Аня).
-const MASTER_TELEGRAM_ID = Number(process.env.MASTER_TELEGRAM_ID) || 457343487;
+const MASTER_TELEGRAM_ID = getMasterTelegramId();
 const REMINDER_WINDOW_HOURS = 36;
 const EARLY_WINDOW_HOURS = 24;
 

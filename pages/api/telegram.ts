@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { getMasterTelegramId } from '../../lib/masterTelegramId';
 import {
   upsertClient,
   createClient,
@@ -48,7 +49,13 @@ import {
 // enter the client state machine unless /client mode was explicitly enabled.
 // telegram_id мастера — свой для каждого деплоя (см. MASTER_NAME в lib/admin.ts
 // про аналогичный параметр имени). По умолчанию — текущий деплой (Аня).
-const MASTER_TELEGRAM_ID = Number(process.env.MASTER_TELEGRAM_ID) || 457343487;
+const MASTER_TELEGRAM_ID = getMasterTelegramId();
+
+// Шаги, ответ клиенту на которых обещает передачу мастеру: пинг мастеру
+// отправляется ДО ответа и проверяется (см. шаг 9c).
+const HANDOFF_STEPS = new Set<string>(['master_contact_requested', 'reschedule_requested_ping_master', 'campaign_handoff']);
+const HANDOFF_FAILED_REPLY =
+  'Не получилось передать это мастеру прямо сейчас. Напиши мне ещё раз чуть позже, и я попробую снова.';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -439,7 +446,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       photo_purpose: extracted.photo_purpose,
       campaign_field_answer: extracted.campaign_field_answer,
       booking_cta_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'ask_wants_to_book'),
-      client_has_open_question: extracted.client_has_open_question,
+      // Страховка на случай промаха Extractor: вопросительный знак в
+      // сообщении значит, что сначала нужен ответ, а не вопрос про запись.
+      client_has_open_question: extracted.client_has_open_question || lastMessageForRecord.includes('?'),
       client_undecided: extracted.client_undecided,
       client_wants_master_contact: extracted.client_wants_master_contact,
       undecided_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'undecided_followup_chat'),
@@ -761,22 +770,70 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // Все уведомления мастеру о клиенте идут со ссылками «написать»:
+    // с телефона мастер не может искать клиента по Telegram-id.
+    const sendMasterNote = (text: string): Promise<boolean> =>
+      sendTelegramHtml(
+        MASTER_TELEGRAM_ID,
+        `${escapeHtml(text)}\n\nНаписать: ${clientContactLinks(telegramId, username, finalCard.phone ?? '')}`
+      );
+
+    // Текст пинга мастеру для этого шага (null — пинг не нужен).
+    // Просьба о разговоре с мастером пингует его один раз подряд: пока
+    // Инка уже ответила "передала", повторные сообщения не спамят мастера.
+    const notifyLabel = finalCard.client_name || clientLabel;
+    const repeatMasterContact =
+      nextStep === 'master_contact_requested' &&
+      lastInkaStep(parseDialogHistory(existing)) === 'master_contact_requested';
+    const contactDetails = [
+      finalCard.phone ? `телефон ${finalCard.phone}` : null,
+      finalCard.contact_channel === 'whatsapp' ? 'удобнее вотсап' : finalCard.contact_channel === 'telegram' ? 'удобнее телеграм' : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    const masterNote: string | null =
+      nextStep === 'campaign_handoff' && campaignRouting
+        ? buildCampaignHandoffNotification(
+            campaignRouting.campaign,
+            finalCard.campaign_collected ?? {},
+            notifyLabel,
+            username
+          )
+        : repeatMasterContact
+          ? contactAnswerToMaster && contactDetails
+            ? `📞 ${username ? `${notifyLabel} (@${username})` : notifyLabel} оставил(а) контакт для связи: ${contactDetails}.`
+            : null
+          : buildMasterNotification(nextStep, notifyLabel, username, lastMessageForRecord, contactDetails);
+
+    // 9c. ПЕРЕДАЧА МАСТЕРУ ДО ОТВЕТА КЛИЕНТУ. Если ответ обещает "передала
+    // мастеру", сначала убеждаемся, что Telegram принял пинг (одна повторная
+    // попытка). Иначе клиенту честно говорим, что не вышло, и не пишем в
+    // лог шаг передачи, чтобы следующая просьба отправилась заново.
+    let masterNoteHandled = false;
+    let loggedStep: string = nextStep;
+    if (masterNote && HANDOFF_STEPS.has(nextStep)) {
+      masterNoteHandled = true;
+      let delivered = false;
+      try {
+        delivered = (await sendMasterNote(masterNote)) || (await sendMasterNote(masterNote));
+      } catch (handoffErr) {
+        console.error('Master handoff notification failed:', handoffErr);
+      }
+      if (!delivered) {
+        console.error(`Master handoff NOT delivered for step ${nextStep}; client told honestly`);
+        finalReply = HANDOFF_FAILED_REPLY;
+        loggedStep = 'master_handoff_failed';
+      }
+    }
+
     // 10. Отправить ответ, если он не пустой.
     if (chatId && finalReply) {
       await sendTelegramMessage(chatId, finalReply);
       clientReplySent = true;
     }
 
-    // Все уведомления мастеру о клиенте идут со ссылками «написать»:
-    // с телефона мастер не может искать клиента по Telegram-id.
-    const sendMasterNote = (text: string) =>
-      sendTelegramHtml(
-        MASTER_TELEGRAM_ID,
-        `${escapeHtml(text)}\n\nНаписать: ${clientContactLinks(telegramId, username, finalCard.phone ?? '')}`
-      );
-
     // 10b. ЛОГ ДИАЛОГА.
-    await appendDialogTurn(existing, lastMessageForRecord, finalReply, nextStep);
+    await appendDialogTurn(existing, lastMessageForRecord, finalReply, loggedStep);
 
     // 10c. НОВЫЙ ВТОРОЙ ПРОЕКТ — одноразовое уведомление в момент создания
     // отдельной записи (не завязано на nextStep: клиент по этой новой
@@ -784,7 +841,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // старому статичному hand-off тексту).
     if (isCreatingSecondProject) {
       try {
-        const notifyLabel = finalCard.client_name || clientLabel;
         const who = username ? `${notifyLabel} (@${username})` : notifyLabel;
         await sendMasterNote(
           `🆕 ${who} начал(а) второй, независимый проект при активной записи. Текущая бронь не изменена — веду второй проект отдельно, как обычного нового клиента.`
@@ -800,15 +856,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // campaign/collected без лишних параметров.
     if (campaignRouting) {
       try {
-        const notifyLabel = finalCard.client_name || clientLabel;
         if (nextStep === 'campaign_handoff') {
-          const note = buildCampaignHandoffNotification(
-            campaignRouting.campaign,
-            finalCard.campaign_collected ?? {},
-            notifyLabel,
-            username
-          );
-          await sendMasterNote(note);
+          // уже отправлено в шаге 9c, до ответа клиенту
         } else if (nextStep === 'campaign_confirm_slot') {
           const whenDisplay = finalCard.booked_slot_display ?? 'см. календарь [КАМПЕЙН]';
           const note = buildCampaignSlotBookedNotification(
@@ -845,24 +894,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // 11. ПИНГ МАСТЕРУ. Шаги, которые обещают "передала мастеру" или
     // требуют действия Ани, должны иметь реальный пинг, а не только текст.
     try {
-      const notifyLabel = finalCard.client_name || clientLabel;
-      // Просьба о разговоре с мастером пингует его один раз подряд: пока
-      // Инка уже ответила "передала", повторные сообщения не спамят мастера.
-      const repeatMasterContact =
-        nextStep === 'master_contact_requested' &&
-        lastInkaStep(parseDialogHistory(existing)) === 'master_contact_requested';
-      const contactDetails = [
-        finalCard.phone ? `телефон ${finalCard.phone}` : null,
-        finalCard.contact_channel === 'whatsapp' ? 'удобнее вотсап' : finalCard.contact_channel === 'telegram' ? 'удобнее телеграм' : null,
-      ]
-        .filter(Boolean)
-        .join(', ');
-      const masterNote = repeatMasterContact
-        ? contactAnswerToMaster && contactDetails
-          ? `📞 ${username ? `${notifyLabel} (@${username})` : notifyLabel} оставил(а) контакт для связи: ${contactDetails}.`
-          : null
-        : buildMasterNotification(nextStep, notifyLabel, username, lastMessageForRecord, contactDetails);
-      if (masterNote) {
+      if (masterNote && masterNoteHandled) {
+        // отправлено в шаге 9c
+      } else if (masterNote) {
         await sendMasterNote(masterNote);
         if (
           nextStep === 'payment_screenshot_received' &&

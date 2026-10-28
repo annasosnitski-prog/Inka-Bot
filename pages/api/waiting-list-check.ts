@@ -41,6 +41,7 @@
 // календарное.
 // ============================================================
 
+import { getMasterTelegramId } from '../../lib/masterTelegramId';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { timingSafeEqual } from 'crypto';
 import {
@@ -60,7 +61,7 @@ import { parseCampaignData } from '../../lib/campaignFlow';
 // (Аня иначе узнаёт об этом только если клиент ей перескажет).
 // telegram_id мастера — свой для каждого деплоя (см. MASTER_NAME в lib/admin.ts
 // про аналогичный параметр имени). По умолчанию — текущий деплой (Аня).
-const MASTER_TELEGRAM_ID = Number(process.env.MASTER_TELEGRAM_ID) || 457343487;
+const MASTER_TELEGRAM_ID = getMasterTelegramId();
 
 // Общий пул на тип слота (а не персональный fetch на клиента) — с запасом
 // над тем, что получит один клиент (3), чтобы после персонального
