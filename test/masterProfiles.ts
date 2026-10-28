@@ -137,6 +137,8 @@ for (const [label, build] of [
     r.includes('Платон, он напишет') && a.includes('Аня, она напишет'));
   ok('responder: all_done без запрета на выяснение, есть undecided_followup_chat',
     a.includes('undecided_followup_chat') && !a.includes('барьер не выясняем') && !a.includes('Барьер не выясняем'));
+  ok('responder: master_contact_requested задаёт вопрос про канал/номер, когда связи нет',
+    a.includes('КАК МАСТЕР СВЯЖЕТСЯ') && a.includes('сюда в телеграм или в вотсап'));
   ok('responder: нет выдумывания скидок и способов связи', a.includes('скидок и особых') && a.includes('Способов связи'));
 }
 

@@ -438,6 +438,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       undecided_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'undecided_followup_chat'),
     };
 
+    // Клиент ответил на вопрос Инки о связи с мастером (номер/канал) — это
+    // продолжение того же обращения, а не новая тема: остаёмся на шаге и
+    // передаём мастеру контакт.
+    const contactAnswerToMaster =
+      !signals.client_wants_master_contact &&
+      lastInkaStep(parseDialogHistory(existing)) === 'master_contact_requested' &&
+      !!(extracted.phone || extracted.contact_channel);
+    if (contactAnswerToMaster) signals.client_wants_master_contact = true;
+
     // СТРАХОВКА: Extractor получает recentHistory и обычно сам верно
     // связывает короткий ответ с последним вопросом Инки, но не всегда —
     // единичный сбой распознавания на этом шаге отправляет клиента в
@@ -828,9 +837,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const repeatMasterContact =
         nextStep === 'master_contact_requested' &&
         lastInkaStep(parseDialogHistory(existing)) === 'master_contact_requested';
+      const contactDetails = [
+        finalCard.phone ? `телефон ${finalCard.phone}` : null,
+        finalCard.contact_channel === 'whatsapp' ? 'удобнее вотсап' : finalCard.contact_channel === 'telegram' ? 'удобнее телеграм' : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
       const masterNote = repeatMasterContact
-        ? null
-        : buildMasterNotification(nextStep, notifyLabel, username, lastMessageForRecord);
+        ? contactAnswerToMaster && contactDetails
+          ? `📞 ${username ? `${notifyLabel} (@${username})` : notifyLabel} оставил(а) контакт для связи: ${contactDetails}.`
+          : null
+        : buildMasterNotification(nextStep, notifyLabel, username, lastMessageForRecord, contactDetails);
       if (masterNote) {
         await sendTelegramMessage(MASTER_TELEGRAM_ID, masterNote);
         if (
@@ -1035,7 +1052,8 @@ function buildMasterNotification(
   step: NextStep,
   clientLabel: string,
   username: string,
-  lastMessage: string
+  lastMessage: string,
+  contactDetails = ''
 ): string | null {
   const who = username ? `${clientLabel} (@${username})` : clientLabel;
   switch (step) {
@@ -1052,7 +1070,7 @@ function buildMasterNotification(
     case 'all_done':
       return `⏸ ${who} после озвученной цены не готов(а) записываться сейчас. Его слова: "${lastMessage}"`;
     case 'master_contact_requested':
-      return `💬 ${who} хочет поговорить с тобой напрямую — напиши ему сам. Последнее сообщение: "${lastMessage}"`;
+      return `💬 ${who} хочет поговорить с тобой напрямую — напиши сам.${contactDetails ? ` Контакт: ${contactDetails}.` : ' Номера и канала пока нет — Инка спросила, ответ придёт отдельным сообщением.'} Последнее сообщение: "${lastMessage}"`;
     case 'slot_change_requested_waiting':
       // Reached only right after Inka asked what doesn't fit (day/time) and
       // whether there's a preference (see NextStep slot_preference_clarify)
