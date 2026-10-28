@@ -67,6 +67,9 @@ export interface ExtractorOutput {
   client_asks_for_more_slots: boolean;
   client_wants_to_reschedule: boolean;
   client_confirms_booking: 'yes' | 'no' | null;
+  // В этом сообщении есть вопрос/возражение/наблюдение, на которое нужно
+  // ответить по существу (а не короткая реакция или ответ на вопрос Инки).
+  client_has_open_question: boolean;
 
   // v2 transient contract signals. They describe THIS message only.
   service_fit: ServiceFit;
@@ -228,6 +231,7 @@ export function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput 
 
   normalized.service_fit_reason = normalized.service_fit_reason ?? null;
   normalized.is_new_project_request = normalized.is_new_project_request === true;
+  normalized.client_has_open_question = normalized.client_has_open_question === true;
   normalized.photo_purpose = normalized.photo_purpose ?? null;
   normalized.service_fit = normalized.service_fit ?? null;
   normalized.campaign_field_answer =

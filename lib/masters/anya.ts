@@ -13,6 +13,7 @@ export const anya: MasterProfile = {
   website: 'inkanya.co.il',
   depositAmount: '200',
   consultationOnly: false,
+  totalEstimateDisclosureLimit: 2500,
   campaigns: [
     {
       id: 'color_texture',
@@ -44,6 +45,7 @@ export const anya: MasterProfile = {
     (cache.pricing ??= fs.readFileSync(path.join(process.cwd(), 'lib', 'masters', 'anya', 'pricing.txt'), 'utf-8')),
   serviceScope: () =>
     (cache.scope ??= fs.readFileSync(path.join(process.cwd(), 'lib', 'masters', 'anya', 'scope.txt'), 'utf-8')),
-  responderRules: () =>
-    (cache.responder ??= fs.readFileSync(path.join(process.cwd(), 'lib', 'masters', 'anya', 'responder.txt'), 'utf-8')),
+  responderRules: () => '',
+  valueContext: () =>
+    (cache.value ??= fs.readFileSync(path.join(process.cwd(), 'lib', 'masters', 'anya', 'value.txt'), 'utf-8')),
 };

@@ -11,7 +11,8 @@
     "eval:dialog": "tsc scripts/dialogEval.ts --outDir .eval-build --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck --strict && node .eval-build/scripts/dialogEval.js",
     "eval:campaign-dialog": "tsc scripts/campaignDialogEval.ts --outDir .eval-build --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck --strict && node .eval-build/scripts/campaignDialogEval.js",
     "eval:price:platon": "tsc scripts/priceEvalPlaton.ts --outDir .eval-build --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck --strict && node .eval-build/scripts/priceEvalPlaton.js",
-    "eval:dialog:platon": "tsc scripts/dialogEvalPlaton.ts --outDir .eval-build --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck --strict && node .eval-build/scripts/dialogEvalPlaton.js"
+    "eval:dialog:platon": "tsc scripts/dialogEvalPlaton.ts --outDir .eval-build --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck --strict && node .eval-build/scripts/dialogEvalPlaton.js",
+    "eval:voice": "tsc scripts/voiceEval.ts --outDir .eval-build --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck --strict && (MASTER_PROFILE=platon node .eval-build/scripts/voiceEval.js; a=$?; MASTER_PROFILE=anya node .eval-build/scripts/voiceEval.js; b=$?; [ $a -eq 0 ] && [ $b -eq 0 ])"
   },
   "dependencies": {
     "next": "14.2.5",

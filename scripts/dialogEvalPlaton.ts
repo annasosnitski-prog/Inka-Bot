@@ -1,9 +1,10 @@
 // ============================================================
 // INKA-BOT — Dialog eval, профиль Платона (MASTER_PROFILE=platon)
-// НЕ часть `npm test`: правило раскрытия общей суммы, голос про референс
-// (lib/masters/platon/responder.txt) и разговор о цене (КОММЕРСАНТ в
-// lib/prompts/responder.txt) — инструкции для модели, проверяются только
-// живым вызовом Responder.
+// НЕ часть `npm test`: раскрытие общей суммы с порогом Платона 6000₪,
+// голос про референс (lib/masters/platon/responder.txt) и разговор о цене
+// (КОММЕРСАНТ в lib/prompts/responder.txt) — инструкции для модели,
+// проверяются только живым вызовом Responder. Голос и манера — в
+// scripts/voiceEval.ts.
 //
 // Запуск: OPENAI_API_KEY=... npm run eval:dialog:platon
 // ============================================================
@@ -141,7 +142,7 @@ const objectionCard = baseCard({
   price_quoted: '2800',
   price_shown: 'yes',
   price_factors:
-    'много негативного пространства и тонкой авторской проработки; большая зона — вся рука || project, 4-6 сеансов',
+    'много негативного пространства и тонкой авторской проработки; большая зона — вся рука || project, 4-6 сеансов, итог ≈ 11200–16800₪',
 });
 const objectionHistory: RecentDialogTurn[] = [
   { from: 'client', text: 'сколько будет стоить?' },
@@ -157,7 +158,9 @@ const cases: Case[] = [
     nextStep: 'price_followup_chat',
     lastClientMessage: 'почему так дорого?',
     recentHistory: objectionHistory,
-    check: all(expectNoBookingCta, expectPerSession),
+    // "за сеанс" уже сказано в истории — повторять не обязательно; важно
+    // ответить причиной, а не CTA.
+    check: all(expectNoBookingCta, mentions(/негатив|воздух|просвет|проработ|зона|рук/i, 'причина из price_reasons')),
   },
   {
     name: '6 — "но работа же не плотная": признать наблюдение и назвать, что держит цену',
@@ -209,7 +212,7 @@ const cases: Case[] = [
       category: 'large',
       idea: 'полурукав, чёрный блэкворк без декора',
       price_quoted: '2500',
-      price_factors: 'плотная заливка чёрным без декора || large, 2-4 сеанса по внутренней оценке',
+      price_factors: 'плотная заливка чёрным без декора || large, 2 сеанса по внутренней оценке, итог ≈ 5000–6000₪',
     }),
     nextStep: 'quote_price',
     lastClientMessage: 'а сколько это всё вместе будет стоить примерно?',
@@ -222,7 +225,7 @@ const cases: Case[] = [
       idea: 'полный рукав, воздушная абстракция',
       size: 'full_sleeve',
       price_quoted: '3300',
-      price_factors: 'воздушная абстракция с негативным пространством; вся рука целиком || project, ориентир 4-6 сеансов',
+      price_factors: 'воздушная абстракция с негативным пространством; вся рука целиком || project, ориентир 4-6 сеансов, итог ≈ 13200–19800₪',
     }),
     nextStep: 'quote_price',
     lastClientMessage: 'а сколько это будет стоить?',
@@ -235,7 +238,7 @@ const cases: Case[] = [
       idea: 'полный рукав, воздушная абстракция',
       size: 'full_sleeve',
       price_quoted: '3300',
-      price_factors: 'воздушная абстракция с негативным пространством; вся рука целиком || project, ориентир 4-6 сеансов',
+      price_factors: 'воздушная абстракция с негативным пространством; вся рука целиком || project, ориентир 4-6 сеансов, итог ≈ 13200–19800₪',
     }),
     nextStep: 'quote_price',
     lastClientMessage: 'а сколько это будет стоить?',
@@ -248,7 +251,7 @@ const cases: Case[] = [
       idea: 'полный рукав, воздушная абстракция',
       size: 'full_sleeve',
       price_quoted: '3300',
-      price_factors: 'воздушная абстракция с негативным пространством; вся рука целиком || project, ориентир 4-6 сеансов',
+      price_factors: 'воздушная абстракция с негативным пространством; вся рука целиком || project, ориентир 4-6 сеансов, итог ≈ 13200–19800₪',
     }),
     nextStep: 'quote_price',
     lastClientMessage:

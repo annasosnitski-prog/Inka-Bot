@@ -68,6 +68,7 @@ function sig(over: Partial<MessageSignals> = {}): MessageSignals {
 
 function extracted(over: Partial<ExtractorOutput> = {}): ExtractorOutput {
   return {
+    client_has_open_question: false,
     intent: 'unclear', idea: null, placement: null, size: null, existing_tattoo: null,
     skin_notes: null, first_tattoo: null, category: null, active_work_time_estimate: null,
     direct_tattoo_allowed: null, consultation_needed: null, price_quoted: null,

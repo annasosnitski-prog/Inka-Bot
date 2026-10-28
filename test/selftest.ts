@@ -152,6 +152,17 @@ eq('явное "хочу записаться" в price_followup_chat → дал
   step({ wants_to_book: null }, { booking_cta_replies_ago: 1, client_confirms_booking: 'yes' }), 'ask_phone');
 eq('явный отказ после ответа на вопросы → all_done',
   step({ wants_to_book: null }, { booking_cta_replies_ago: 1, client_confirms_booking: 'no' }), 'all_done');
+eq('открытый вопрос клиента, CTA ещё не было → ответ без CTA',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: null, client_has_open_question: true }), 'price_followup_chat');
+eq('открытый вопрос клиента, интервал давно прошёл → всё равно ответ без CTA',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 5, client_has_open_question: true }), 'price_followup_chat');
+eq('интервал не запускает CTA сам: цепочка вопросов → только ответы',
+  [null, 0, 1, 2, 3].every((ago) =>
+    step({ wants_to_book: null }, { booking_cta_replies_ago: ago, client_has_open_question: true }) === 'price_followup_chat'), true);
+eq('нет открытого вопроса, но CTA был только что → без повтора',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 1, client_has_open_question: false }), 'price_followup_chat');
+eq('явное "хочу записаться" вместе с вопросом → дальше по воронке',
+  step({ wants_to_book: null }, { client_has_open_question: true, client_confirms_booking: 'yes' }), 'ask_phone');
 eq('первое тату неизвестно → ask_first_tattoo',
   step({ phone: '05011', first_tattoo: null }), 'ask_first_tattoo');
 

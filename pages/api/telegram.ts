@@ -12,7 +12,7 @@ import { getNextStep, getCardPatchForStep } from '../../lib/stateMachine';
 import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
 import { runAdmin } from '../../lib/admin';
-import { appendDialogTurn, inkaRepliesSinceStep, parseDialogHistory, recentDialogForModel } from '../../lib/dialogLog';
+import { appendDialogTurn, inkaRepliesSinceStep, lastInkaStep, parseDialogHistory, recentDialogForModel } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { BookingType, AvailableSlot } from '../../lib/calendar';
 import { sendTelegramMessage, forwardTelegramMessage, pickVisionTelegramPhoto } from '../../lib/telegramApi';
@@ -432,6 +432,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       photo_purpose: extracted.photo_purpose,
       campaign_field_answer: extracted.campaign_field_answer,
       booking_cta_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'ask_wants_to_book'),
+      client_has_open_question: extracted.client_has_open_question,
     };
 
     // СТРАХОВКА: Extractor получает recentHistory и обычно сам верно
@@ -446,15 +447,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // просто не выполняется. "ок"/"окей" намеренно НЕ считаются
     // согласием — это нейтральный отклик, не явное "да".
     // Короткое "да"/"нет" — ответ на вопрос про запись, только если этот
-    // вопрос был последним ответом Инки (0). После price_followup_chat
-    // последней была реплика про цену, и "не, ..." там — не отказ от записи.
-    // null — старая история без отметок шагов, ведём себя как раньше.
-    const ctaAgo = signals.booking_cta_replies_ago;
+    // вопрос был последним ответом Инки. После quote_price или
+    // price_followup_chat последней была реплика про цену, и "не, ..." там —
+    // не отказ от записи. undefined — старая история без отметок шагов,
+    // ведём себя как раньше.
+    const lastStep = lastInkaStep(parseDialogHistory(existing));
     const stuckOnWantsToBook =
       signals.client_confirms_booking === null &&
       currentCard.wants_to_book === null &&
       (!!currentCard.price_quoted || currentCard.price_explained === 'yes') &&
-      (ctaAgo == null || ctaAgo === 0);
+      (lastStep === undefined || lastStep === 'ask_wants_to_book');
 
     if (stuckOnWantsToBook && messageText) {
       const lower = messageText.toLowerCase().trim();

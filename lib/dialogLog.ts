@@ -97,6 +97,15 @@ export function inkaRepliesSinceStep(entries: DialogEntry[], step: string): numb
   return null;
 }
 
+// Шаг последнего ответа Инки. undefined — ответов нет или старая история
+// без отметок шагов.
+export function lastInkaStep(entries: DialogEntry[]): string | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].from === 'inka') return entries[i].step;
+  }
+  return undefined;
+}
+
 export function formatDialogHistory(entries: DialogEntry[]): string {
   return entries.map((e) => (e.from === 'client' ? `👤 ${e.text}` : `🤖 ${e.text}`)).join('\n\n');
 }

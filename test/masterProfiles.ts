@@ -5,10 +5,10 @@ import { getMasterProfile } from '../lib/masters';
 import { anya } from '../lib/masters/anya';
 import { platon } from '../lib/masters/platon';
 import { buildExtractorPrompt, normalizeExtractorOutput, type ExtractorOutput } from '../lib/extractor';
-import { buildResponderPrompt, clientPriceReasons } from '../lib/responder';
+import { buildResponderPrompt, clientPriceReasons, projectTotalEstimate } from '../lib/responder';
 import { buildAdminPrompt } from '../lib/admin';
 import { getCampaign } from '../lib/campaigns';
-import { inkaRepliesSinceStep, type DialogEntry } from '../lib/dialogLog';
+import { inkaRepliesSinceStep, lastInkaStep, type DialogEntry } from '../lib/dialogLog';
 
 let passed = 0;
 let failed = 0;
@@ -86,12 +86,30 @@ for (const [label, build] of [
   const r = buildResponderPrompt(platon);
   ok('responder Платона: депозит 400', r.includes('400₪') && !r.includes('200₪'));
   ok('responder Платона: без ссылок — сказано не придумывать', r.includes('не придумывай их'));
-  ok('responder Платона: правило итоговой суммы 6000₪ на месте', r.includes('6000₪'));
+  ok('responder Платона: порог раскрытия итога 6000₪', r.includes('порог — 6000₪') && !r.includes('2500₪'));
   ok('responder Платона: реализм не в списке отказов', /Реализм сам по себе/.test(r));
   const a = buildResponderPrompt(anya);
   ok('responder Ани: её портфолио на месте', a.includes('https://www.instagram.com/ink_anya'));
   ok('responder Ани: депозит 200', a.includes('200₪'));
-  ok('responder Ани: правила Платона про 6000₪ нет', !a.includes('6000₪'));
+  ok('responder Ани: порог раскрытия итога 2500₪, без 6000₪', a.includes('порог — 2500₪') && !a.includes('6000₪'));
+  ok('политика итога одна, в ядре: у обоих одинаковый текст правила',
+    a.replace(/2500/g, 'N') .includes('ИТОГОВАЯ СУММА ПРОЕКТА (общее правило') &&
+    r.includes('ИТОГОВАЯ СУММА ПРОЕКТА (общее правило') &&
+    (a.match(/ИТОГОВАЯ СУММА ПРОЕКТА/g) ?? []).length === 1 &&
+    (r.match(/ИТОГОВАЯ СУММА ПРОЕКТА/g) ?? []).length === 1);
+  ok('порог прямо назван не потолком цены', a.includes('НЕ потолок') && r.includes('НЕ потолок'));
+  const tail = (t: string) => t.slice(t.indexOf('ИТОГОВАЯ СУММА ПРОЕКТА'), t.indexOf('ИНИЦИАТИВА БЕЗ'));
+  ok('текст правила итога у мастеров отличается только числом',
+    tail(a).replace(/2500/g, 'N') === tail(r).replace(/6000/g, 'N'));
+  ok('фиксированной триады больше нет', !/ПРОДАВЕЦ|Продавец|БАЗОВАЯ ТРИАДА/.test(a));
+  const seven = ['ТРИКСТЕР', 'ЖЕНЩИНА / ТЕПЛО', 'ИССЛЕДОВАТЕЛЬ', 'МУДРЕЦ', 'ДУРАК', 'LOVER', 'ТВОРЕЦ'];
+  ok('все 7 архетипов на месте', seven.every((x) => a.includes(x)), seven.filter((x) => !a.includes(x)).join(','));
+  ok('старых ситуативных архетипов нет', !/ЗАБОТЛИВЫЙ|БУНТАРЬ|ПРАВИТЕЛЬ/.test(a));
+  ok('есть контроль теней и манера разговора', a.includes('КОНТРОЛЬ ТЕНЕЙ') && a.includes('МАНЕРА ЭТОГО РАЗГОВОРА'));
+  ok('ценность Платона — только у Платона', r.includes('Негативное пространство: незакрашенная') && !a.includes('Негативное пространство: незакрашенная'));
+  ok('ценность Ани — только у Ани', a.includes('Посадка по телу') && !r.includes('Посадка по телу'));
+  ok('у Ани нет особых правил — подставлена заглушка', a.includes('Особых правил нет'));
+  ok('правило референса Платона только у Платона', r.includes('делает свою версию, а не копию') && !a.includes('делает свою версию, а не копию'));
   ok('responder: блок КОММЕРСАНТ есть у обоих', a.includes('КОММЕРСАНТ') && r.includes('КОММЕРСАНТ'));
   ok('responder: есть шаг price_followup_chat', a.includes('price_followup_chat'));
   const e = buildExtractorPrompt(platon);
@@ -111,6 +129,13 @@ console.log('\n▶ price_factors: клиенту только левая час�
 ok('левая часть отдаётся', clientPriceReasons('плотная заливка; рёбра || project, 6-12 сеансов') === 'плотная заливка; рёбра');
 ok('старый формат без "||" — не показываем', clientPriceReasons('project ≈4800 суммарно') === null);
 ok('null → null', clientPriceReasons(null) === null);
+
+console.log('\n▶ project_total_estimate: только итог, без сеансов');
+ok('диапазон итога', projectTotalEstimate('плотная заливка || project, рукав, 4–10 сеансов, итог ≈ 12000–30000₪') === '12000–30000₪');
+ok('итог "от"', projectTotalEstimate('спина || project, от 10 сеансов, итог от 33000₪') === 'от 33000₪');
+ok('нет данных → null', projectTotalEstimate('роза || medium, итог: нет данных') === null);
+ok('старый формат → null', projectTotalEstimate('project ≈4800 суммарно') === null);
+ok('слово "итог" в левой части не считается', projectTotalEstimate('итог ≈ 5000₪ || medium') === null);
 
 console.log('\n▶ consultationOnly принуждает консультацию в коде');
 const raw = {
@@ -138,6 +163,9 @@ ok(
   inkaRepliesSinceStep(h(['ask_wants_to_book', 'price_followup_chat', 'price_followup_chat']), 'ask_wants_to_book') === 2
 );
 ok('старые реплики без шага → null', inkaRepliesSinceStep(h([undefined, undefined]), 'ask_wants_to_book') === null);
+
+ok('lastInkaStep: последний ответ Инки', lastInkaStep(h(['ask_wants_to_book', 'price_followup_chat'])) === 'price_followup_chat');
+ok('lastInkaStep: старая история → undefined', lastInkaStep(h([undefined])) === undefined);
 
 console.log(`\nMASTER PROFILES: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

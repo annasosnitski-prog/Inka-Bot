@@ -164,12 +164,15 @@ export interface MessageSignals {
   // Inka replies ago the booking question (ask_wants_to_book) was last
   // asked. null = never asked in this history.
   booking_cta_replies_ago?: number | null;
+  // Extractor: this message carries a question/objection/observation that
+  // needs a real answer (not a bare reaction or an answer to Inka's ask).
+  client_has_open_question?: boolean;
 }
 
-// After asking "хочешь записаться?" the bot answers the client's follow-up
-// questions this many times without the booking question before it may ask
-// again — asking on every message reads as a script, never re-asking drops
-// the lead.
+// Guard only, never a trigger: the booking question is asked when the
+// conversation gives a reason (price shown, client has no open question),
+// and even then not sooner than this many Inka replies after the last
+// time it was asked.
 export const BOOKING_CTA_MIN_GAP = 2;
 
 export type NextStep =
@@ -193,8 +196,10 @@ export type NextStep =
   | 'ask_reference_photo'
   | 'quote_price'
   | 'ask_wants_to_book'
-  // Price shown and the booking question asked recently, client replied with
-  // a question/objection instead of yes/no: answer it, no booking CTA.
+  // Price shown, no booking decision yet, and either the client has an open
+  // question/objection or the booking question was asked too recently:
+  // answer the content; Responder may offer a next step only if the client
+  // asks how to proceed.
   | 'price_followup_chat'
   | 'ask_first_tattoo'
   | 'ask_phone'
@@ -424,6 +429,8 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
       : signals.client_confirms_booking ?? card.wants_to_book;
 
   if (effectiveWantsToBook === null) {
+    // Content first: a question or objection gets an answer, not a CTA.
+    if (signals.client_has_open_question) return 'price_followup_chat';
     const ago = signals.booking_cta_replies_ago;
     if (ago != null && ago < BOOKING_CTA_MIN_GAP) return 'price_followup_chat';
     return 'ask_wants_to_book';

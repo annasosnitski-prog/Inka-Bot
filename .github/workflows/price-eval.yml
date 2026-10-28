@@ -28,3 +28,6 @@ jobs:
       - run: npm run eval:dialog:platon
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - run: npm run eval:voice
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

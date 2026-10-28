@@ -14,6 +14,7 @@ export const platon: MasterProfile = {
   website: null,
   depositAmount: '400',
   consultationOnly: true,
+  totalEstimateDisclosureLimit: 6000,
   campaigns: [],
   pricingRules: () =>
     (cache.pricing ??= fs.readFileSync(path.join(process.cwd(), 'lib', 'masters', 'platon', 'pricing.txt'), 'utf-8')),
@@ -21,4 +22,6 @@ export const platon: MasterProfile = {
     (cache.scope ??= fs.readFileSync(path.join(process.cwd(), 'lib', 'masters', 'platon', 'scope.txt'), 'utf-8')),
   responderRules: () =>
     (cache.responder ??= fs.readFileSync(path.join(process.cwd(), 'lib', 'masters', 'platon', 'responder.txt'), 'utf-8')),
+  valueContext: () =>
+    (cache.value ??= fs.readFileSync(path.join(process.cwd(), 'lib', 'masters', 'platon', 'value.txt'), 'utf-8')),
 };

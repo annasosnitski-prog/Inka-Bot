@@ -30,8 +30,8 @@ function getResponderPrompt(): string {
 
 // price_factors = "<почему так — для клиента> || <внутреннее для мастера>"
 // (см. ШАГ 2b в lib/prompts/extractor.txt). Responder получает только левую
-// часть — внутренние прикидки (число сеансов, итог) до него не доходят
-// вообще, а не "запрещены инструкцией".
+// часть и, отдельно, прикидку итога — категория, оси и число сеансов до
+// него не доходят вообще, а не "запрещены инструкцией".
 export function clientPriceReasons(priceFactors: string | null): string | null {
   if (!priceFactors) return null;
   const sep = priceFactors.indexOf('||');
@@ -41,9 +41,23 @@ export function clientPriceReasons(priceFactors: string | null): string | null {
   return reasons || null;
 }
 
+// "итог ≈ 12000–30000₪" / "итог от 33000₪" из внутренней части. Нет такой
+// записи (в том числе "итог: нет данных") — null: итог Responder не называет.
+export function projectTotalEstimate(priceFactors: string | null): string | null {
+  if (!priceFactors) return null;
+  const sep = priceFactors.indexOf('||');
+  if (sep < 0) return null;
+  const m = priceFactors.slice(sep + 2).match(/итог\s*[≈~]?\s*((?:от\s*)?\d[\d\s]*(?:[–-]\s*\d[\d\s]*)?₪)/i);
+  return m ? m[1].replace(/\s+/g, ' ').trim() : null;
+}
+
 function cardForResponder(card: ClientCard) {
   const { price_factors, ...rest } = card;
-  return { ...rest, price_reasons: clientPriceReasons(price_factors) };
+  return {
+    ...rest,
+    price_reasons: clientPriceReasons(price_factors),
+    project_total_estimate: projectTotalEstimate(price_factors),
+  };
 }
 
 export interface ResponderInput {
