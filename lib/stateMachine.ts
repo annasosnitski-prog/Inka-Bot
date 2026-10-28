@@ -322,8 +322,17 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     return 'waiting_slots_followup_chat';
   }
 
-  // A photo with no caption needs one small clarification before diagnosis.
-  if (card.has_photo_this_message && !card.photo_has_caption) return 'handle_photo_no_caption';
+  // A photo with no caption needs one small clarification before diagnosis —
+  // but only if the Extractor couldn't already read idea/placement off the
+  // photo itself (a reference mockup shown on a visible body part needs no
+  // "what matters in the photo" question; an isolated sketch still does).
+  if (
+    card.has_photo_this_message &&
+    !card.photo_has_caption &&
+    (!card.idea || !card.placement)
+  ) {
+    return 'handle_photo_no_caption';
+  }
 
   // Client just declined every offered slot and was asked what specifically
   // doesn't fit (day/time) and whether there's a preference — THIS message
