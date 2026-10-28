@@ -15,7 +15,14 @@ import { runAdmin } from '../../lib/admin';
 import { appendDialogTurn, inkaRepliesSinceStep, lastInkaStep, parseDialogHistory, recentDialogForModel } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { BookingType, AvailableSlot } from '../../lib/calendar';
-import { sendTelegramMessage, forwardTelegramMessage, pickVisionTelegramPhoto } from '../../lib/telegramApi';
+import {
+  sendTelegramMessage,
+  sendTelegramHtml,
+  escapeHtml,
+  clientContactLinks,
+  forwardTelegramMessage,
+  pickVisionTelegramPhoto,
+} from '../../lib/telegramApi';
 import { getDepositAmount } from '../../lib/masters';
 import { getCampaign } from '../../lib/campaigns';
 import {
@@ -849,7 +856,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           : null
         : buildMasterNotification(nextStep, notifyLabel, username, lastMessageForRecord, contactDetails);
       if (masterNote) {
-        await sendTelegramMessage(MASTER_TELEGRAM_ID, masterNote);
+        if (nextStep === 'master_contact_requested') {
+          // Мастер читает с телефона и не может искать клиента по id —
+          // даём ссылки, которые открывают чат одним тапом.
+          await sendTelegramHtml(
+            MASTER_TELEGRAM_ID,
+            `${escapeHtml(masterNote)}\n\nНаписать: ${clientContactLinks(telegramId, username, finalCard.phone ?? '')}`
+          );
+        } else {
+          await sendTelegramMessage(MASTER_TELEGRAM_ID, masterNote);
+        }
         if (
           nextStep === 'payment_screenshot_received' &&
           chatId &&

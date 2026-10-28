@@ -35,6 +35,36 @@ export async function sendTelegramMessage(chatId: number, text: string): Promise
   await callTelegramApi('sendMessage', { chat_id: chatId, text });
 }
 
+// Сообщение с HTML-разметкой (кликабельные ссылки). Текст должен быть
+// заранее экранирован через escapeHtml.
+export async function sendTelegramHtml(chatId: number, html: string): Promise<void> {
+  await callTelegramApi('sendMessage', {
+    chat_id: chatId,
+    text: html,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+  });
+}
+
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Ссылки «написать клиенту одним тапом»: поиск по Telegram-id с телефона
+// невозможен, поэтому мастеру даём готовые ссылки. tg://user?id работает
+// и без username (бот уже общался с клиентом); WhatsApp — по номеру.
+export function clientContactLinks(telegramId: number, username: string, phone: string): string {
+  const links: string[] = [];
+  if (username) links.push(`<a href="https://t.me/${escapeHtml(username)}">Telegram @${escapeHtml(username)}</a>`);
+  links.push(`<a href="tg://user?id=${telegramId}">Telegram (по id)</a>`);
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length >= 9) {
+    const intl = digits.startsWith('0') ? `972${digits.slice(1)}` : digits;
+    links.push(`<a href="https://wa.me/${intl}">WhatsApp ${escapeHtml(phone)}</a>`);
+  }
+  return links.join(' · ');
+}
+
 export async function forwardTelegramMessage(
   toChatId: number,
   fromChatId: number,
