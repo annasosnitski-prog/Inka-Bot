@@ -292,6 +292,16 @@ eq('повторный скрин (guard) → booked_followup_chat',
 eq('фото без подписи ДО брони → handle_photo_no_caption',
   step({ lead_status: 'diagnosing', idea: null, has_photo_this_message: true, photo_has_caption: false }),
   'handle_photo_no_caption');
+eq('фото без подписи, но Extractor уже считал idea+placement с картинки → не переспрашиваем, едем дальше по воронке',
+  step({
+    lead_status: 'diagnosing',
+    idea: 'full sleeve, абстракция, чёрный с акцентами',
+    placement: 'голень',
+    size: null,
+    has_photo_this_message: true,
+    photo_has_caption: false,
+  }),
+  'ask_size');
 eq('вопрос после брони → booked_followup_chat',
   step({ lead_status: 'consultation_booked' }), 'booked_followup_chat');
 eq('перенос после брони → reschedule_requested_ping_master',
