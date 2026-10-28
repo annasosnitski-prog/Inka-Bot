@@ -1,25 +1,7 @@
 name: Price eval
 
+# Живые eval ходят в платный OpenAI — только ручной запуск (Actions → Run workflow).
 on:
-  pull_request:
-    paths:
-      - "lib/prompts/**"
-      - "lib/masters/**"
-      - "lib/extractor.ts"
-      - "lib/responder.ts"
-      - "lib/campaignFlow.ts"
-      - "lib/campaigns.ts"
-      - "scripts/**"
-  push:
-    branches: [main]
-    paths:
-      - "lib/prompts/**"
-      - "lib/masters/**"
-      - "lib/extractor.ts"
-      - "lib/responder.ts"
-      - "lib/campaignFlow.ts"
-      - "lib/campaigns.ts"
-      - "scripts/**"
   workflow_dispatch: {}
 
 jobs:
