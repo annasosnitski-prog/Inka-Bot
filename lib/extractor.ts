@@ -70,6 +70,12 @@ export interface ExtractorOutput {
   // В этом сообщении есть вопрос/возражение/наблюдение, на которое нужно
   // ответить по существу (а не короткая реакция или ответ на вопрос Инки).
   client_has_open_question: boolean;
+  // Client is postponing / unsure after the price, not refusing ("не знаю
+  // пока", "подумаю"). Never counts as a final no.
+  client_undecided: boolean;
+  // Client wants to talk to the master directly (asked, or accepted Inka's
+  // offer to pass the request on).
+  client_wants_master_contact: boolean;
 
   // v2 transient contract signals. They describe THIS message only.
   service_fit: ServiceFit;
@@ -232,6 +238,8 @@ export function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput 
   normalized.service_fit_reason = normalized.service_fit_reason ?? null;
   normalized.is_new_project_request = normalized.is_new_project_request === true;
   normalized.client_has_open_question = normalized.client_has_open_question === true;
+  normalized.client_undecided = normalized.client_undecided === true && normalized.client_confirms_booking !== 'no';
+  normalized.client_wants_master_contact = normalized.client_wants_master_contact === true;
   normalized.photo_purpose = normalized.photo_purpose ?? null;
   normalized.service_fit = normalized.service_fit ?? null;
   normalized.campaign_field_answer =

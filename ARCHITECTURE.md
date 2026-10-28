@@ -187,6 +187,20 @@ CTA. `ask_wants_to_book` бывает, только когда открытог�
 предохранитель, а не триггер. Каждая реплика Инки в `dialog_history`
 помечается шагом (`step`), отсюда `booking_cta_replies_ago`.
 
+**Отказ, сомнение, неопределённость, мастер.** Extractor различает:
+`client_confirms_booking = "no"` — только окончательный отказ (`all_done`,
+дальше `declined_followup_chat`); `client_undecided` — "не знаю пока /
+подумаю" (шаг `undecided_followup_chat`, `wants_to_book` не трогается, к
+`ask_wants_to_book` код сам не возвращается, пока клиент не дал повод);
+конкретное сомнение — `client_has_open_question` (`price_followup_chat`);
+`client_wants_master_contact` — шаг `master_contact_requested`, в любой
+момент воронки: мастеру уходит обычный Telegram-пинг (один раз подряд),
+записи не создаётся. Что именно сказать (принять, один вопрос, объяснить,
+предложить мастера) выбирает Коммерсант внутри Responder. INKA ведёт
+одного мастера активного профиля: других мастеров не предлагает и не
+сравнивает (правило в ядре `responder.txt`, проверяется тестами и
+`eval:voice`).
+
 `lib/openai.ts` — общая механика HTTP-вызова к OpenAI.
 
 ## Что тестируется, а что — только руками/CI с секретом

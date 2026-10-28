@@ -163,6 +163,35 @@ eq('нет открытого вопроса, но CTA был только чт�
   step({ wants_to_book: null }, { booking_cta_replies_ago: 1, client_has_open_question: false }), 'price_followup_chat');
 eq('явное "хочу записаться" вместе с вопросом → дальше по воронке',
   step({ wants_to_book: null }, { client_has_open_question: true, client_confirms_booking: 'yes' }), 'ask_phone');
+console.log('\n▶ getNextStep — отказ, неопределённость, разговор с мастером');
+eq('неопределённость ("подумаю") → не отказ и не вопрос про запись',
+  step({ wants_to_book: null }, { client_undecided: true, booking_cta_replies_ago: 0 }), 'undecided_followup_chat');
+eq('неопределённость не пишет wants_to_book = no',
+  getCardPatchForStep('undecided_followup_chat', baseCard({ wants_to_book: null }), sig({ client_undecided: true, client_confirms_booking: null })).wants_to_book,
+  undefined);
+eq('после неопределённости к ask_wants_to_book не возвращаемся, даже через много ответов',
+  step({ wants_to_book: null }, { undecided_replies_ago: 3, booking_cta_replies_ago: 5 }), 'undecided_followup_chat');
+eq('после неопределённости открытый вопрос → ответ по существу',
+  step({ wants_to_book: null }, { undecided_replies_ago: 1, booking_cta_replies_ago: 4, client_has_open_question: true }), 'price_followup_chat');
+eq('если вопрос про запись задали ПОЗЖЕ неопределённости → интервал снова работает',
+  step({ wants_to_book: null }, { undecided_replies_ago: 6, booking_cta_replies_ago: 3 }), 'ask_wants_to_book');
+eq('явное "хочу записаться" после неопределённости → дальше по воронке',
+  step({ wants_to_book: null }, { undecided_replies_ago: 1, client_confirms_booking: 'yes' }), 'ask_phone');
+eq('окончательный отказ → all_done',
+  step({ wants_to_book: null }, { client_confirms_booking: 'no' }), 'all_done');
+eq('повторный отказ → declined_followup_chat, не all_done',
+  step({ wants_to_book: 'no', decline_followup_asked: 'yes' }, { client_confirms_booking: 'no' }), 'declined_followup_chat');
+eq('конкретное сомнение (вопрос) → price_followup_chat, не отказ',
+  step({ wants_to_book: null }, { client_has_open_question: true, client_undecided: true }), 'price_followup_chat');
+eq('хочет поговорить с мастером → master_contact_requested (после цены)',
+  step({ wants_to_book: null }, { client_wants_master_contact: true }), 'master_contact_requested');
+eq('хочет поговорить с мастером → тоже до цены',
+  step({ price_quoted: null, price_shown: null }, { client_wants_master_contact: true }), 'master_contact_requested');
+eq('хочет поговорить с мастером при активной брони',
+  step({ lead_status: 'consultation_booked' }, { client_wants_master_contact: true }), 'master_contact_requested');
+eq('master_contact_requested не создаёт запись и не меняет статус',
+  JSON.stringify(getCardPatchForStep('master_contact_requested', baseCard({ wants_to_book: null }), sig({ client_wants_master_contact: true }))),
+  JSON.stringify(getCardPatchForStep('price_followup_chat', baseCard({ wants_to_book: null }), sig({}))));
 eq('первое тату неизвестно → ask_first_tattoo',
   step({ phone: '05011', first_tattoo: null }), 'ask_first_tattoo');
 

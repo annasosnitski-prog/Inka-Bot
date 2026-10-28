@@ -98,7 +98,7 @@ for (const [label, build] of [
     (a.match(/ИТОГОВАЯ СУММА ПРОЕКТА/g) ?? []).length === 1 &&
     (r.match(/ИТОГОВАЯ СУММА ПРОЕКТА/g) ?? []).length === 1);
   ok('порог прямо назван не потолком цены', a.includes('НЕ потолок') && r.includes('НЕ потолок'));
-  const tail = (t: string) => t.slice(t.indexOf('ИТОГОВАЯ СУММА ПРОЕКТА'), t.indexOf('ИНИЦИАТИВА БЕЗ'));
+  const tail = (t: string) => t.slice(t.indexOf('ИТОГОВАЯ СУММА ПРОЕКТА'), t.indexOf('СОСТОЯНИЯ КЛИЕНТА ПОСЛЕ ЦЕНЫ'));
   ok('текст правила итога у мастеров отличается только числом',
     tail(a).replace(/2500/g, 'N') === tail(r).replace(/6000/g, 'N'));
   ok('фиксированной триады больше нет', !/ПРОДАВЕЦ|Продавец|БАЗОВАЯ ТРИАДА/.test(a));
@@ -115,6 +115,29 @@ for (const [label, build] of [
   const e = buildExtractorPrompt(platon);
   ok('extractor Платона: его шкала цен', e.includes('3700₪') && !e.includes('350–600₪'));
   ok('extractor Ани: её матрица', buildExtractorPrompt(anya).includes('350–600₪'));
+}
+
+console.log('\n▶ один мастер: бот не отправляет к другим');
+for (const [label, build] of [
+  ['extractor', buildExtractorPrompt],
+  ['responder', buildResponderPrompt],
+  ['admin', buildAdminPrompt],
+] as const) {
+  for (const [who, p, other] of [['Платон', platon, 'Аня'], ['Аня', anya, 'Платон']] as const) {
+    const text = build(p);
+    ok(`${label} ${who}: нет совета искать другого мастера`, !/(искать|найти|обратись|обратитесь)[^.\n]{0,30}друг(ого|ому|им)\s+мастер/i.test(text));
+    ok(`${label} ${who}: нет имени «${other}»`, !text.includes(other));
+  }
+}
+{
+  const a = buildResponderPrompt(anya);
+  const r = buildResponderPrompt(platon);
+  ok('responder: правило «только этот мастер» у обоих', a.includes('ТОЛЬКО с этим одним мастером') && r.includes('ТОЛЬКО с этим одним мастером'));
+  ok('responder: master_contact_requested у Платона говорит «он напишет», у Ани «она»',
+    r.includes('Платон, он напишет') && a.includes('Аня, она напишет'));
+  ok('responder: all_done без запрета на выяснение, есть undecided_followup_chat',
+    a.includes('undecided_followup_chat') && !a.includes('барьер не выясняем') && !a.includes('Барьер не выясняем'));
+  ok('responder: нет выдумывания скидок и способов связи', a.includes('скидок и особых') && a.includes('Способов связи'));
 }
 
 console.log('\n▶ кампании принадлежат профилю');

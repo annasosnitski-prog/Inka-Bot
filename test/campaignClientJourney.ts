@@ -61,7 +61,7 @@ function freshCard(): ClientCard {
 
 function emptyExtracted(over: Partial<ExtractorOutput> = {}): ExtractorOutput {
   return {
-    client_has_open_question: false,
+    client_has_open_question: false, client_undecided: false, client_wants_master_contact: false,
     intent: 'unclear', idea: null, placement: null, size: null, existing_tattoo: null,
     skin_notes: null, first_tattoo: null, category: null, active_work_time_estimate: null,
     direct_tattoo_allowed: null, consultation_needed: null, price_quoted: null,

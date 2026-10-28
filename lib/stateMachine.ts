@@ -167,6 +167,15 @@ export interface MessageSignals {
   // Extractor: this message carries a question/objection/observation that
   // needs a real answer (not a bare reaction or an answer to Inka's ask).
   client_has_open_question?: boolean;
+  // Extractor: client is postponing/unsure after the price (not a refusal).
+  client_undecided?: boolean;
+  // Extractor: client wants to talk to the master directly.
+  client_wants_master_contact?: boolean;
+  // Computed by code from dialog_history, like booking_cta_replies_ago: how
+  // many Inka replies ago the undecided step was last used. While that is
+  // more recent than the last booking question, the bot does not return to
+  // asking it — the client is thinking, not waiting to be asked again.
+  undecided_replies_ago?: number | null;
 }
 
 // Guard only, never a trigger: the booking question is asked when the
@@ -201,6 +210,13 @@ export type NextStep =
   // answer the content; Responder may offer a next step only if the client
   // asks how to proceed.
   | 'price_followup_chat'
+  // Client is postponing / unsure after the price (not a refusal): the
+  // Commercant picks the action (explain, one gentle question, offer the
+  // master, or let it rest). Never routes back to ask_wants_to_book by itself.
+  | 'undecided_followup_chat'
+  // Client wants to talk to the master directly: the request is passed to
+  // the master (existing Telegram ping), no booking is created.
+  | 'master_contact_requested'
   | 'ask_first_tattoo'
   | 'ask_phone'
   | 'ask_name'
@@ -287,6 +303,10 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   const effectiveServiceFit = signals.service_fit ?? card.service_fit;
   if (effectiveServiceFit === 'not_offered') return 'handle_service_not_offered';
   if (effectiveServiceFit === 'needs_clarification') return 'clarify_service_fit';
+
+  // Direct contact with the master works in any funnel state, booked or not,
+  // and never creates a booking by itself.
+  if (signals.client_wants_master_contact) return 'master_contact_requested';
 
   // Already-booked conversations are isolated from the acquisition funnel.
   const isAlreadyBooked =
@@ -431,7 +451,11 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   if (effectiveWantsToBook === null) {
     // Content first: a question or objection gets an answer, not a CTA.
     if (signals.client_has_open_question) return 'price_followup_chat';
+    // Thinking is not a refusal and not a reason to ask again.
+    if (signals.client_undecided) return 'undecided_followup_chat';
     const ago = signals.booking_cta_replies_ago;
+    const undecidedAgo = signals.undecided_replies_ago;
+    if (undecidedAgo != null && (ago == null || undecidedAgo < ago)) return 'undecided_followup_chat';
     if (ago != null && ago < BOOKING_CTA_MIN_GAP) return 'price_followup_chat';
     return 'ask_wants_to_book';
   }

@@ -433,6 +433,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       campaign_field_answer: extracted.campaign_field_answer,
       booking_cta_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'ask_wants_to_book'),
       client_has_open_question: extracted.client_has_open_question,
+      client_undecided: extracted.client_undecided,
+      client_wants_master_contact: extracted.client_wants_master_contact,
+      undecided_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'undecided_followup_chat'),
     };
 
     // СТРАХОВКА: Extractor получает recentHistory и обычно сам верно
@@ -466,10 +469,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         'можно записаться', 'хочу забронировать', 'бронируй', 'го',
         'yes', 'yep', 'sure', 'lets go',
       ];
-      const noPatterns = [
-        'нет', 'не', 'пока нет', 'не сейчас', 'подумаю', 'позже',
-        'ещё подумаю', 'еще подумаю', 'потом', 'не надо', 'не хочу',
-        'пока думаю', 'не уверен', 'пока не знаю',
+      // Окончательный отказ. Всё, что похоже на "подумаю/позже/не знаю" —
+      // не отказ, а неопределённость (client_undecided), wants_to_book
+      // остаётся пустым.
+      const noPatterns = ['нет', 'не', 'не надо', 'не хочу', 'нет, спасибо', 'не буду'];
+      const undecidedPatterns = [
+        'пока нет', 'не сейчас', 'подумаю', 'позже', 'ещё подумаю', 'еще подумаю',
+        'потом', 'пока думаю', 'не уверен', 'не уверена', 'пока не знаю', 'не знаю',
+        'посмотрим',
       ];
 
       const matchesYes = yesPatterns.some(
@@ -479,7 +486,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         (p) => lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ',')
       );
 
-      if (matchesYes && !matchesNo) {
+      const matchesUndecided = undecidedPatterns.some(
+        (p) => lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ',') || lower.startsWith(p + '.')
+      );
+
+      if (matchesUndecided && !matchesYes) {
+        signals.client_undecided = true;
+        console.log('CODE OVERRIDE: client_undecided = true (pattern match, ask_wants_to_book context)');
+      } else if (matchesYes && !matchesNo) {
         signals.client_confirms_booking = 'yes';
         console.log('CODE OVERRIDE: client_confirms_booking = yes (pattern match, ask_wants_to_book context)');
       } else if (matchesNo && !matchesYes) {
@@ -809,12 +823,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // требуют действия Ани, должны иметь реальный пинг, а не только текст.
     try {
       const notifyLabel = finalCard.client_name || clientLabel;
-      const masterNote = buildMasterNotification(
-        nextStep,
-        notifyLabel,
-        username,
-        lastMessageForRecord
-      );
+      // Просьба о разговоре с мастером пингует его один раз подряд: пока
+      // Инка уже ответила "передала", повторные сообщения не спамят мастера.
+      const repeatMasterContact =
+        nextStep === 'master_contact_requested' &&
+        lastInkaStep(parseDialogHistory(existing)) === 'master_contact_requested';
+      const masterNote = repeatMasterContact
+        ? null
+        : buildMasterNotification(nextStep, notifyLabel, username, lastMessageForRecord);
       if (masterNote) {
         await sendTelegramMessage(MASTER_TELEGRAM_ID, masterNote);
         if (
@@ -1035,6 +1051,8 @@ function buildMasterNotification(
       return `🔄 ${who} просит перенести запись — напиши насчёт нового времени.`;
     case 'all_done':
       return `⏸ ${who} после озвученной цены не готов(а) записываться сейчас. Его слова: "${lastMessage}"`;
+    case 'master_contact_requested':
+      return `💬 ${who} хочет поговорить с тобой напрямую — напиши ему сам. Последнее сообщение: "${lastMessage}"`;
     case 'slot_change_requested_waiting':
       // Reached only right after Inka asked what doesn't fit (day/time) and
       // whether there's a preference (see NextStep slot_preference_clarify)
