@@ -160,7 +160,17 @@ export interface MessageSignals {
   // runs. Present here only so getCampaignCardPatch has the same shape as
   // every other transient signal — the merge itself already happened.
   campaign_field_answer?: string | null;
+  // Computed by code from dialog_history, not by the Extractor: how many
+  // Inka replies ago the booking question (ask_wants_to_book) was last
+  // asked. null = never asked in this history.
+  booking_cta_replies_ago?: number | null;
 }
+
+// After asking "хочешь записаться?" the bot answers the client's follow-up
+// questions this many times without the booking question before it may ask
+// again — asking on every message reads as a script, never re-asking drops
+// the lead.
+export const BOOKING_CTA_MIN_GAP = 2;
 
 export type NextStep =
   | 'admin_mode'
@@ -183,6 +193,9 @@ export type NextStep =
   | 'ask_reference_photo'
   | 'quote_price'
   | 'ask_wants_to_book'
+  // Price shown and the booking question asked recently, client replied with
+  // a question/objection instead of yes/no: answer it, no booking CTA.
+  | 'price_followup_chat'
   | 'ask_first_tattoo'
   | 'ask_phone'
   | 'ask_name'
@@ -410,7 +423,11 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
       ? 'yes'
       : signals.client_confirms_booking ?? card.wants_to_book;
 
-  if (effectiveWantsToBook === null) return 'ask_wants_to_book';
+  if (effectiveWantsToBook === null) {
+    const ago = signals.booking_cta_replies_ago;
+    if (ago != null && ago < BOOKING_CTA_MIN_GAP) return 'price_followup_chat';
+    return 'ask_wants_to_book';
+  }
   if (effectiveWantsToBook === 'no') {
     return card.decline_followup_asked === 'yes' ? 'declined_followup_chat' : 'all_done';
   }

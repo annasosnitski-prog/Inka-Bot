@@ -42,7 +42,7 @@ import { formatDialogHistory, type DialogEntry } from '../lib/dialogLog';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from '../lib/addSlotParser';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
 import { isProjectRecordClosed, resolveActiveProjects } from '../lib/airtable';
-import { getDepositAmount } from '../lib/paymentConfig';
+import { getDepositAmount } from '../lib/masters';
 import { pickVisionTelegramPhoto } from '../lib/telegramApi';
 import {
   shouldSendLatePaymentReminder,
@@ -138,6 +138,20 @@ eq('нет цены → quote_price', step({ price_quoted: null, price_explained
 eq('цена есть, wants_to_book null → ask_wants_to_book',
   step({ wants_to_book: null }), 'ask_wants_to_book');
 eq('явный отказ → all_done', step({ wants_to_book: 'no' }), 'all_done');
+
+console.log('\n▶ getNextStep — частота вопроса "хочешь записаться?"');
+eq('вопрос про запись ещё не задавался → ask_wants_to_book',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: null }), 'ask_wants_to_book');
+eq('только что спросили, клиент ответил вопросом → price_followup_chat',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 0 }), 'price_followup_chat');
+eq('один ответ на вопросы после CTA → всё ещё без CTA',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 1 }), 'price_followup_chat');
+eq('два ответа на вопросы после CTA → можно спросить снова',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 2 }), 'ask_wants_to_book');
+eq('явное "хочу записаться" в price_followup_chat → дальше по воронке',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 1, client_confirms_booking: 'yes' }), 'ask_phone');
+eq('явный отказ после ответа на вопросы → all_done',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 1, client_confirms_booking: 'no' }), 'all_done');
 eq('первое тату неизвестно → ask_first_tattoo',
   step({ phone: '05011', first_tattoo: null }), 'ask_first_tattoo');
 
@@ -504,12 +518,12 @@ console.log('\n▶ parseDeleteCommand (/удалить)');
 ok('нет тега вообще: fail', parseDeleteCommand('20.07', NOW).ok === false);
 ok('нет даты: fail', parseDeleteCommand('тату', NOW).ok === false);
 
-console.log('\n▶ getDepositAmount');
-delete process.env.PAYMENT_DEPOSIT_AMOUNT;
-ok('нет env → дефолт 200', getDepositAmount() === '200');
-process.env.PAYMENT_DEPOSIT_AMOUNT = '350';
-ok('env задан → берёт из env', getDepositAmount() === '350');
-delete process.env.PAYMENT_DEPOSIT_AMOUNT;
+console.log('\n▶ getDepositAmount — из профиля мастера');
+delete process.env.MASTER_PROFILE; delete process.env.PRICING_PROFILE;
+ok('профиль по умолчанию (Аня) → 200', getDepositAmount() === '200');
+process.env.MASTER_PROFILE = 'platon';
+ok('профиль platon → 400', getDepositAmount() === '400');
+delete process.env.MASTER_PROFILE;
 
 console.log('\n▶ buildPaymentDetailsBlock');
 delete process.env.PAYMENT_BIT; delete process.env.PAYMENT_BANK;

@@ -1,10 +1,11 @@
 // ============================================================
 // INKA-BOT — Campaign configs
-// Каждая запись — самостоятельная карточка данных для одной
-// рекламной/рекрутинговой кампании. Новая кампания добавляется сюда
-// изменением конфига — lib/campaignFlow.ts и промпты её не знают
-// по имени, только по этим полям.
+// Тип карточки одной рекламной/рекрутинговой кампании. Сами кампании
+// живут в профиле мастера (lib/masters/<id>.ts, поле campaigns) —
+// lib/campaignFlow.ts и промпты не знают их по имени, только по полям.
 // ============================================================
+
+import { getMasterProfile } from './masters';
 
 export type CampaignPaymentType = 'consumables_only' | 'fixed' | 'range' | 'negotiable';
 
@@ -41,46 +42,10 @@ export interface CampaignConfig {
   active: boolean;
 }
 
-const CAMPAIGNS: CampaignConfig[] = [
-  {
-    id: 'color_texture',
-    type: 'model_recruitment',
-    title: 'Модель — цветные текстуры',
-    goal: 'Найти моделей для отработки цветных текстур',
-    // Размер фиксирован самим офером (небольшая работа, до 3 см) — точный
-    // размер под конкретное место и фото определяет мастер сама, поэтому
-    // это НЕ отдельный вопрос клиенту (ни в required_info, ни в optional_info).
-    offer: 'Татуировка с цветными текстурами в направлении примеров из объявления — небольшая работа, не больше 3 см',
-    master_experience: 'около 4 лет',
-    payment: {
-      type: 'consumables_only',
-      // Известная фиксированная сумма за расходники — Responder называет
-      // её ТОЛЬКО когда человек сам явно спрашивает точную цифру (см.
-      // campaignResponderOverlay.txt), а не проговаривает сама заранее.
-      amount: '400₪',
-      public_text: 'Оплата только за расходники / открытие иглы',
-    },
-    model_conditions: [
-      'Мастер получает больше творческой свободы, чем при обычном клиентском заказе',
-      'Итоговая работа строится в направлении примеров кампании, а не является копированием конкретного референса',
-    ],
-    // photo_of_placement здесь ОБЯЗАТЕЛЬНОЕ, не optional: Ане нужно реально
-    // увидеть кожу крупно, с близкого расстояния, прежде чем подтверждать
-    // бронь (см. buildCampaignSlotBookedNotification / forwardTelegramMessage
-    // в pages/api/telegram.ts — сама фотография пересылается мастеру
-    // отдельно, текстовая карточка несёт только "yes/нет" как факт).
-    // preferred_contact — какой канал клиенту удобнее для связи с Аней
-    // (телега/вотсап), не номер телефона — см. campaignExtractorOverlay.txt
-    // за нормализацией ответа в "telegram"/"whatsapp".
-    required_info: ['placement', 'photo_of_placement', 'preferred_contact'],
-    optional_info: [],
-    booking_mode: 'self_book_slot',
-    active: true,
-  },
-];
-
 export function getCampaign(id: string | null | undefined): CampaignConfig | null {
   if (!id) return null;
-  const found = CAMPAIGNS.find((c) => c.id === id);
+  // Кампании — часть профиля мастера: deep-link одного мастера не
+  // активируется в боте другого.
+  const found = getMasterProfile().campaigns.find((c) => c.id === id);
   return found && found.active ? found : null;
 }

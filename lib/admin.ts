@@ -43,10 +43,8 @@ import {
 } from './calendar';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from './addSlotParser';
 import { callOpenAIChat, type ChatContentPart } from './openai';
-import { getDepositAmount } from './paymentConfig';
+import { getDepositAmount, applyProfilePlaceholders, getMasterProfile, type MasterProfile } from './masters';
 import { getTelegramFileDataUrl } from './telegramApi';
-import { getPricingRules } from './pricingRules';
-import { applyMasterGenderPlaceholders } from './masterGender';
 
 export interface AdminMessage {
   text: string | null;
@@ -618,13 +616,13 @@ async function handleDeleteSlot(arg: string): Promise<string> {
 
 let cachedPrompt: string | null = null;
 
+export function buildAdminPrompt(profile: MasterProfile = getMasterProfile()): string {
+  const template = fs.readFileSync(path.join(process.cwd(), 'lib', 'prompts', 'admin.txt'), 'utf-8');
+  return applyProfilePlaceholders(template, profile);
+}
+
 function getAdminPrompt(): string {
-  if (cachedPrompt) return cachedPrompt;
-  const promptPath = path.join(process.cwd(), 'lib', 'adminPrompt.txt');
-  const template = fs.readFileSync(promptPath, 'utf-8');
-  const withPricing = template.replace('{{PRICING_RULES}}', getPricingRules());
-  cachedPrompt = applyMasterGenderPlaceholders(withPricing);
-  return cachedPrompt;
+  return (cachedPrompt ??= buildAdminPrompt());
 }
 
 async function callAdminLLM(

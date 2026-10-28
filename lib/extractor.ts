@@ -19,51 +19,23 @@ import type {
 import { callOpenAIChat, type ChatContentPart } from './openai';
 import { getTelegramFileDataUrl } from './telegramApi';
 import type { RecentDialogTurn } from './dialogLog';
-import { getPricingRules, getPricingProfile } from './pricingRules';
-import { applyMasterGenderPlaceholders } from './masterGender';
+import { getMasterProfile, applyProfilePlaceholders, type MasterProfile } from './masters';
 
 let cachedPrompt: string | null = null;
 
-function isConsultationOnly(): boolean {
-  return (process.env.CONSULTATION_ONLY ?? '').trim().toLowerCase() === 'true';
+// Ядро (lib/prompts/extractor.txt) + блок кампаний. Всё, что зависит от
+// мастера (прайс, направление), подставляется из профиля плейсхолдерами —
+// отдельных overlay-файлов "поверх" ядра больше нет.
+export function buildExtractorPrompt(profile: MasterProfile = getMasterProfile()): string {
+  const core = fs.readFileSync(path.join(process.cwd(), 'lib', 'prompts', 'extractor.txt'), 'utf-8');
+  // Блок кампаний действует только при active_campaign/last_campaign != null
+  // во входных данных — иначе модель его игнорирует (сказано в самом блоке).
+  const campaign = fs.readFileSync(path.join(process.cwd(), 'lib', 'prompts', 'campaignExtractor.txt'), 'utf-8');
+  return applyProfilePlaceholders(`${core}\n\n${campaign}`, profile);
 }
 
 function getExtractorPrompt(): string {
-  if (cachedPrompt) return cachedPrompt;
-  const promptPath = path.join(process.cwd(), 'lib', 'extractorPrompt.txt');
-  const overlayPath = path.join(process.cwd(), 'lib', 'extractorContractV2.txt');
-  const campaignOverlayPath = path.join(process.cwd(), 'lib', 'campaignExtractorOverlay.txt');
-  const template = fs.readFileSync(promptPath, 'utf-8');
-  const base = template.replace('{{PRICING_RULES}}', getPricingRules());
-  // Contract overlay is intentionally appended last: it only overrides the
-  // output contract / new routing signals while preserving the battle-tested
-  // pricing and extraction rules in the production prompt.
-  const overlay = fs.readFileSync(overlayPath, 'utf-8');
-  // Campaign overlay is appended unconditionally too, but it only takes
-  // effect when active_campaign is non-null in the per-call input (see
-  // ExtractorInput.activeCampaign below) — otherwise the model is told to
-  // ignore it entirely, same pattern as the v2 overlay above.
-  const campaignOverlay = fs.readFileSync(campaignOverlayPath, 'utf-8');
-  let full = `${base}\n\n${overlay}\n\n${campaignOverlay}`;
-  // CONSULTATION_ONLY=true (другой деплой того же кода — мастер без
-  // прямой записи, все проекты крупные) — та же схема приоритета:
-  // overlay добавляется последним и перебивает ШАГ 4 основного prompt.
-  if (isConsultationOnly()) {
-    const consultationOverlayPath = path.join(
-      process.cwd(),
-      'lib',
-      'consultationOnlyOverlay.txt'
-    );
-    full = `${full}\n\n${fs.readFileSync(consultationOverlayPath, 'utf-8')}`;
-  }
-  // PRICING_PROFILE=platon — переопределяет один пункт service_fit
-  // (реализм сам по себе не "not_offered" для этого мастера, см. файл).
-  if (getPricingProfile() === 'platon') {
-    const platonOverlayPath = path.join(process.cwd(), 'lib', 'platonExtractorOverlay.txt');
-    full = `${full}\n\n${fs.readFileSync(platonOverlayPath, 'utf-8')}`;
-  }
-  cachedPrompt = applyMasterGenderPlaceholders(full);
-  return cachedPrompt;
+  return (cachedPrompt ??= buildExtractorPrompt());
 }
 
 export interface ExtractorOutput {
@@ -221,15 +193,17 @@ export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutp
   return normalizeExtractorOutput(parsed);
 }
 
-function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput {
+export function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput {
   const normalized = { ...raw } as ExtractorOutput;
 
   // These route constraints are deterministic, so enforce them in code even
   // if the model misses one in a complex message.
+  const isTattooRequest = !!normalized.idea || !!normalized.size || !!normalized.category;
   if (
     normalized.category === 'large' ||
     normalized.category === 'body_fit' ||
-    normalized.category === 'project'
+    normalized.category === 'project' ||
+    (getMasterProfile().consultationOnly && isTattooRequest)
   ) {
     normalized.direct_tattoo_allowed = 'no';
     normalized.consultation_needed = 'yes';

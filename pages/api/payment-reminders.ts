@@ -31,7 +31,7 @@ import {
   updateClient,
 } from '../../lib/airtable';
 import { sendTelegramMessage } from '../../lib/telegramApi';
-import { getDepositAmount } from '../../lib/paymentConfig';
+import { getDepositAmount } from '../../lib/masters';
 import { shouldSendLatePaymentReminder, shouldSendEarlyPaymentReminder } from '../../lib/reminderWindows';
 
 // telegram_id мастера — свой для каждого деплоя (см. MASTER_NAME в lib/admin.ts

@@ -1,16 +1,14 @@
 // ============================================================
-// INKA-BOT — Dialog eval, деплой Платона (PRICING_PROFILE=platon)
-// НЕ часть `npm test` — та же логика, что в scripts/dialogEval.ts:
-// правило раскрытия общей суммы и голос про референс живут в
-// lib/platonResponderOverlay.txt как инструкция для модели, проверяется
-// только живым вызовом Responder.
+// INKA-BOT — Dialog eval, профиль Платона (MASTER_PROFILE=platon)
+// НЕ часть `npm test`: правило раскрытия общей суммы, голос про референс
+// (lib/masters/platon/responder.txt) и разговор о цене (КОММЕРСАНТ в
+// lib/prompts/responder.txt) — инструкции для модели, проверяются только
+// живым вызовом Responder.
 //
-// Запуск: PRICING_PROFILE=platon OPENAI_API_KEY=... npm run eval:dialog:platon
+// Запуск: OPENAI_API_KEY=... npm run eval:dialog:platon
 // ============================================================
 
-process.env.PRICING_PROFILE = 'platon';
-process.env.CONSULTATION_ONLY = 'true';
-process.env.PAYMENT_DEPOSIT_AMOUNT = '400';
+process.env.MASTER_PROFILE = 'platon';
 
 import { runResponder } from '../lib/responder';
 import type { ClientCard, NextStep } from '../lib/stateMachine';
@@ -112,14 +110,106 @@ const expectNoExactSessionPromise = (reply: string) => {
   };
 };
 
+const BOOKING_CTA = /записат|запис[ыь]|бронир|пока думаешь|присматриваешься/i;
+
+const expectNoBookingCta = (reply: string) => {
+  const hit = reply.match(BOOKING_CTA);
+  return {
+    ok: !hit,
+    label: hit ? `FAIL — снова вопрос про запись ("${hit[0]}")` : 'ответ без вопроса про запись',
+  };
+};
+
+const all =
+  (...checks: ((r: string) => { ok: boolean; label: string })[]) =>
+  (reply: string) => {
+    const results = checks.map((c) => c(reply));
+    return { ok: results.every((r) => r.ok), label: results.map((r) => r.label).join('; ') };
+  };
+
+const mentions = (re: RegExp, what: string) => (reply: string) => {
+  const ok = re.test(reply);
+  return { ok, label: ok ? `есть: ${what}` : `FAIL — нет: ${what}` };
+};
+
+// Реальный диалог из прода (28.10.2026): после цены клиент три раза
+// возражает, бот трижды повторяет "хочешь записаться?".
+const objectionCard = baseCard({
+  category: 'project',
+  idea: 'рукав, воздушная абстракция с просветами',
+  size: 'full_sleeve',
+  price_quoted: '2800',
+  price_shown: 'yes',
+  price_factors:
+    'много негативного пространства и тонкой авторской проработки; большая зона — вся рука || project, 4-6 сеансов',
+});
+const objectionHistory: RecentDialogTurn[] = [
+  { from: 'client', text: 'сколько будет стоить?' },
+  { from: 'inka', text: 'по такому объёму ориентир 2800₪ за сеанс. точнее мастер скажет после консультации.' },
+  { from: 'client', text: 'ок' },
+  { from: 'inka', text: 'хочешь записаться на консультацию, или пока думаешь?' },
+];
+
 const cases: Case[] = [
+  {
+    name: '5 — "почему так дорого" сразу после вопроса про запись: ответ без CTA',
+    card: objectionCard,
+    nextStep: 'price_followup_chat',
+    lastClientMessage: 'почему так дорого?',
+    recentHistory: objectionHistory,
+    check: all(expectNoBookingCta, expectPerSession),
+  },
+  {
+    name: '6 — "но работа же не плотная": признать наблюдение и назвать, что держит цену',
+    card: objectionCard,
+    nextStep: 'price_followup_chat',
+    lastClientMessage: 'но работа же не плотная, там много пустого места',
+    recentHistory: [
+      ...objectionHistory,
+      { from: 'client', text: 'почему так дорого?' },
+      { from: 'inka', text: 'это цена за один сеанс, не за весь рукав — встреч будет несколько.' },
+    ],
+    check: all(expectNoBookingCta, mentions(/негатив|воздух|просвет|проработ|переход/i, 'реальная причина из price_reasons')),
+  },
+  {
+    name: '7 — повторный вопрос про запись после двух ответов: другими словами, не шаблоном',
+    card: objectionCard,
+    nextStep: 'ask_wants_to_book',
+    lastClientMessage: 'понятно, спасибо, теперь яснее',
+    recentHistory: [
+      ...objectionHistory,
+      { from: 'client', text: 'почему так дорого?' },
+      { from: 'inka', text: 'это цена за один сеанс, не за весь рукав — встреч будет несколько.' },
+      { from: 'client', text: 'но работа же не плотная' },
+      { from: 'inka', text: 'да, заливки немного — цену держит тонкая проработка просветов, это дольше.' },
+    ],
+    check: (reply) => {
+      const asks = /запис|консультац|бронир/i.test(reply);
+      const sameAsBefore = reply.toLowerCase().includes('хочешь записаться на консультацию, или пока думаешь');
+      return {
+        ok: asks && !sameAsBefore,
+        label: !asks ? 'FAIL — не вернулась к записи' : sameAsBefore ? 'FAIL — дословный повтор CTA' : 'вернулась к записи другими словами',
+      };
+    },
+  },
+  {
+    name: '8 — "можно посмотреть работы мастера?": не выдумывает ссылки и не говорит про Аню',
+    card: objectionCard,
+    nextStep: 'price_followup_chat',
+    lastClientMessage: 'а можно где-то посмотреть работы мастера? он вообще кто?',
+    recentHistory: objectionHistory,
+    check: (reply) => {
+      const leak = /ink_anya|inkanya|инстаграм\.com|instagram\.com|http|Аня|\bона\b/i.exec(reply);
+      return { ok: !leak, label: leak ? `FAIL — утечка/выдуманная ссылка ("${leak[0]}")` : 'без чужих и выдуманных ссылок' };
+    },
+  },
   {
     name: '1 — небольшой для Платона проект (large), прогноз ≤6000₪: можно дать диапазон',
     card: baseCard({
       category: 'large',
       idea: 'полурукав, чёрный блэкворк без декора',
       price_quoted: '2500',
-      price_factors: 'плотная заливка, 2-4 сеанса по внутренней оценке',
+      price_factors: 'плотная заливка чёрным без декора || large, 2-4 сеанса по внутренней оценке',
     }),
     nextStep: 'quote_price',
     lastClientMessage: 'а сколько это всё вместе будет стоить примерно?',
@@ -132,7 +222,7 @@ const cases: Case[] = [
       idea: 'полный рукав, воздушная абстракция',
       size: 'full_sleeve',
       price_quoted: '3300',
-      price_factors: 'ориентир 4-6 сеансов по внутренней оценке',
+      price_factors: 'воздушная абстракция с негативным пространством; вся рука целиком || project, ориентир 4-6 сеансов',
     }),
     nextStep: 'quote_price',
     lastClientMessage: 'а сколько это будет стоить?',
@@ -145,7 +235,7 @@ const cases: Case[] = [
       idea: 'полный рукав, воздушная абстракция',
       size: 'full_sleeve',
       price_quoted: '3300',
-      price_factors: 'ориентир 4-6 сеансов по внутренней оценке',
+      price_factors: 'воздушная абстракция с негативным пространством; вся рука целиком || project, ориентир 4-6 сеансов',
     }),
     nextStep: 'quote_price',
     lastClientMessage: 'а сколько это будет стоить?',
@@ -158,7 +248,7 @@ const cases: Case[] = [
       idea: 'полный рукав, воздушная абстракция',
       size: 'full_sleeve',
       price_quoted: '3300',
-      price_factors: 'ориентир 4-6 сеансов по внутренней оценке',
+      price_factors: 'воздушная абстракция с негативным пространством; вся рука целиком || project, ориентир 4-6 сеансов',
     }),
     nextStep: 'quote_price',
     lastClientMessage:

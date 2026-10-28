@@ -1,15 +1,14 @@
 // ============================================================
-// INKA-BOT — Price regression eval, деплой Платона (PRICING_PROFILE=platon)
+// INKA-BOT — Price regression eval, профиль Платона (MASTER_PROFILE=platon)
 // НЕ часть `npm test`, см. комментарий в scripts/priceEval.ts — тот же
-// принцип: ценовая логика живёт в промпте (lib/pricingRulesPlaton.txt),
+// принцип: ценовая логика живёт в промпте (lib/masters/platon/pricing.txt),
 // единственный способ её реально проверить — прогнать через настоящий
 // Extractor с живым OpenAI-ключом.
 //
-// Запуск: PRICING_PROFILE=platon OPENAI_API_KEY=... npm run eval:price:platon
+// Запуск: OPENAI_API_KEY=... npm run eval:price:platon
 // ============================================================
 
-process.env.PRICING_PROFILE = 'platon';
-process.env.CONSULTATION_ONLY = 'true';
+process.env.MASTER_PROFILE = 'platon';
 
 import { runExtractor, type ExtractorInput } from '../lib/extractor';
 import type { ClientCard } from '../lib/stateMachine';
@@ -107,7 +106,7 @@ async function main() {
   }
 
   console.log('========================================');
-  console.log('PRICE EVAL — ПЛАТОН (PRICING_PROFILE=platon)');
+  console.log('PRICE EVAL — ПЛАТОН (MASTER_PROFILE=platon)');
   console.log('========================================\n');
 
   for (const c of cases) {

@@ -12,11 +12,11 @@ import { getNextStep, getCardPatchForStep } from '../../lib/stateMachine';
 import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
 import { runAdmin } from '../../lib/admin';
-import { appendDialogTurn, parseDialogHistory, recentDialogForModel } from '../../lib/dialogLog';
+import { appendDialogTurn, inkaRepliesSinceStep, parseDialogHistory, recentDialogForModel } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { BookingType, AvailableSlot } from '../../lib/calendar';
 import { sendTelegramMessage, forwardTelegramMessage, pickVisionTelegramPhoto } from '../../lib/telegramApi';
-import { getDepositAmount } from '../../lib/paymentConfig';
+import { getDepositAmount } from '../../lib/masters';
 import { getCampaign } from '../../lib/campaigns';
 import {
   routeCampaign,
@@ -431,6 +431,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       is_new_project_request: extracted.is_new_project_request,
       photo_purpose: extracted.photo_purpose,
       campaign_field_answer: extracted.campaign_field_answer,
+      booking_cta_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'ask_wants_to_book'),
     };
 
     // СТРАХОВКА: Extractor получает recentHistory и обычно сам верно
@@ -444,10 +445,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // вопрос (имя/соцсеть/что угодно) здесь исключён: тогда это условие
     // просто не выполняется. "ок"/"окей" намеренно НЕ считаются
     // согласием — это нейтральный отклик, не явное "да".
+    // Короткое "да"/"нет" — ответ на вопрос про запись, только если этот
+    // вопрос был последним ответом Инки (0). После price_followup_chat
+    // последней была реплика про цену, и "не, ..." там — не отказ от записи.
+    // null — старая история без отметок шагов, ведём себя как раньше.
+    const ctaAgo = signals.booking_cta_replies_ago;
     const stuckOnWantsToBook =
       signals.client_confirms_booking === null &&
       currentCard.wants_to_book === null &&
-      (!!currentCard.price_quoted || currentCard.price_explained === 'yes');
+      (!!currentCard.price_quoted || currentCard.price_explained === 'yes') &&
+      (ctaAgo == null || ctaAgo === 0);
 
     if (stuckOnWantsToBook && messageText) {
       const lower = messageText.toLowerCase().trim();
@@ -729,7 +736,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // 10b. ЛОГ ДИАЛОГА.
-    await appendDialogTurn(existing, lastMessageForRecord, finalReply);
+    await appendDialogTurn(existing, lastMessageForRecord, finalReply, nextStep);
 
     // 10c. НОВЫЙ ВТОРОЙ ПРОЕКТ — одноразовое уведомление в момент создания
     // отдельной записи (не завязано на nextStep: клиент по этой новой
