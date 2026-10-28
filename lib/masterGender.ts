@@ -23,6 +23,17 @@ export function getMasterNameGenitive(): string {
   return (process.env.MASTER_NAME_GENITIVE ?? '').trim() || getMasterName();
 }
 
+// Портфолио/сайт мастера — по умолчанию Анины (совместимость с
+// деплоем, где эти env var ещё не заданы), для другого деплоя
+// задаются явно через MASTER_PORTFOLIO_URL/MASTER_WEBSITE.
+export function getMasterPortfolioUrl(): string {
+  return (process.env.MASTER_PORTFOLIO_URL ?? '').trim() || 'https://www.instagram.com/ink_anya';
+}
+
+export function getMasterWebsite(): string {
+  return (process.env.MASTER_WEBSITE ?? '').trim() || 'inkanya.co.il';
+}
+
 // Заменяет {{MASTER_NAME}} и все согласованные с полом мастера
 // плейсхолдеры в тексте промпта.
 export function applyMasterGenderPlaceholders(text: string): string {
@@ -33,5 +44,7 @@ export function applyMasterGenderPlaceholders(text: string): string {
     .replace(/\{\{MASTER_BUSY\}\}/g, isMale ? 'занят' : 'занята')
     .replace(/\{\{MASTER_SENT\}\}/g, isMale ? 'прислал' : 'прислала')
     .replace(/\{\{MASTER_PRONOUN\}\}/g, isMale ? 'он' : 'она')
-    .replace(/\{\{MASTER_SELF\}\}/g, isMale ? 'сам' : 'сама');
+    .replace(/\{\{MASTER_SELF\}\}/g, isMale ? 'сам' : 'сама')
+    .replace(/\{\{MASTER_PORTFOLIO\}\}/g, getMasterPortfolioUrl())
+    .replace(/\{\{MASTER_WEBSITE\}\}/g, getMasterWebsite());
 }
