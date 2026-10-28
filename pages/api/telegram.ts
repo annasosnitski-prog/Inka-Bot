@@ -767,6 +767,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       clientReplySent = true;
     }
 
+    // Все уведомления мастеру о клиенте идут со ссылками «написать»:
+    // с телефона мастер не может искать клиента по Telegram-id.
+    const sendMasterNote = (text: string) =>
+      sendTelegramHtml(
+        MASTER_TELEGRAM_ID,
+        `${escapeHtml(text)}\n\nНаписать: ${clientContactLinks(telegramId, username, finalCard.phone ?? '')}`
+      );
+
     // 10b. ЛОГ ДИАЛОГА.
     await appendDialogTurn(existing, lastMessageForRecord, finalReply, nextStep);
 
@@ -778,8 +786,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       try {
         const notifyLabel = finalCard.client_name || clientLabel;
         const who = username ? `${notifyLabel} (@${username})` : notifyLabel;
-        await sendTelegramMessage(
-          MASTER_TELEGRAM_ID,
+        await sendMasterNote(
           `🆕 ${who} начал(а) второй, независимый проект при активной записи. Текущая бронь не изменена — веду второй проект отдельно, как обычного нового клиента.`
         );
       } catch (notifySecondErr) {
@@ -801,7 +808,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             notifyLabel,
             username
           );
-          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
+          await sendMasterNote(note);
         } else if (nextStep === 'campaign_confirm_slot') {
           const whenDisplay = finalCard.booked_slot_display ?? 'см. календарь [КАМПЕЙН]';
           const note = buildCampaignSlotBookedNotification(
@@ -811,13 +818,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             username,
             whenDisplay
           );
-          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
+          await sendMasterNote(note);
         } else if (
           nextStep === 'campaign_no_slots' &&
           liveCard.campaign_collected?.__no_slots_pinged !== '1'
         ) {
           const note = buildCampaignNoSlotsNotification(campaignRouting.campaign, notifyLabel, username);
-          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
+          await sendMasterNote(note);
         } else if (nextStep === 'campaign_slots_declined_waiting') {
           // Reached right after Inka asked what doesn't fit (day/time) and
           // whether there's a preference (campaign_slots_decline_clarify) —
@@ -828,7 +835,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             username,
             lastMessageForRecord
           );
-          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
+          await sendMasterNote(note);
         }
       } catch (campaignNotifyErr) {
         console.error('Campaign notification failed:', campaignNotifyErr);
@@ -856,16 +863,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           : null
         : buildMasterNotification(nextStep, notifyLabel, username, lastMessageForRecord, contactDetails);
       if (masterNote) {
-        if (nextStep === 'master_contact_requested') {
-          // Мастер читает с телефона и не может искать клиента по id —
-          // даём ссылки, которые открывают чат одним тапом.
-          await sendTelegramHtml(
-            MASTER_TELEGRAM_ID,
-            `${escapeHtml(masterNote)}\n\nНаписать: ${clientContactLinks(telegramId, username, finalCard.phone ?? '')}`
-          );
-        } else {
-          await sendTelegramMessage(MASTER_TELEGRAM_ID, masterNote);
-        }
+        await sendMasterNote(masterNote);
         if (
           nextStep === 'payment_screenshot_received' &&
           chatId &&
