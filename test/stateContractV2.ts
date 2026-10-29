@@ -93,6 +93,7 @@ function signals(over: Partial<MessageSignals> = {}): MessageSignals {
 
 function extracted(over: Partial<ExtractorOutput> = {}): ExtractorOutput {
   return {
+    client_has_open_question: false, client_undecided: false, client_wants_master_contact: false,
     intent: 'idea',
     idea: 'роза',
     placement: 'предплечье',

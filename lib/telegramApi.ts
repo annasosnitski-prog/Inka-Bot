@@ -18,29 +18,74 @@ async function callTelegramApi(method: string, body: Record<string, unknown>): P
     return false;
   }
   const url = `https://api.telegram.org/bot${token}/${method}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    console.error(`Telegram ${method} failed: ${res.status} ${errText}`);
-    return false;
+  // Временные сбои (сеть, 5xx, 429 с retry_after) переживаем повторами с
+  // короткой паузой — мастеру важно получить пинг. Постоянные ошибки
+  // (400/403: чужой chat_id, бот заблокирован) повторять бессмысленно.
+  const delaysMs = [500, 1500, 3000];
+  for (let attempt = 0; ; attempt++) {
+    let retryAfterMs = 0;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) return true;
+      const errText = await res.text().catch(() => '');
+      console.error(`Telegram ${method} failed: ${res.status} ${errText}`);
+      const transient = res.status === 429 || res.status >= 500;
+      if (!transient) return false;
+      const m = /"retry_after"\s*:\s*(\d+)/.exec(errText);
+      if (m) retryAfterMs = Number(m[1]) * 1000;
+    } catch (err) {
+      console.error(`Telegram ${method} network error:`, err);
+    }
+    if (attempt >= delaysMs.length) return false;
+    await new Promise((r) => setTimeout(r, Math.min(Math.max(delaysMs[attempt], retryAfterMs), 4000)));
   }
-  return true;
 }
 
-export async function sendTelegramMessage(chatId: number, text: string): Promise<void> {
-  await callTelegramApi('sendMessage', { chat_id: chatId, text });
+// Возвращает true, только если Telegram принял сообщение.
+export async function sendTelegramMessage(chatId: number, text: string): Promise<boolean> {
+  return callTelegramApi('sendMessage', { chat_id: chatId, text });
+}
+
+// Сообщение с HTML-разметкой (кликабельные ссылки). Текст должен быть
+// заранее экранирован через escapeHtml.
+export async function sendTelegramHtml(chatId: number, html: string): Promise<boolean> {
+  return callTelegramApi('sendMessage', {
+    chat_id: chatId,
+    text: html,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+  });
+}
+
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Ссылки «написать клиенту одним тапом»: поиск по Telegram-id с телефона
+// невозможен, поэтому мастеру даём готовые ссылки. tg://user?id работает
+// и без username (бот уже общался с клиентом); WhatsApp — по номеру.
+export function clientContactLinks(telegramId: number, username: string, phone: string): string {
+  const links: string[] = [];
+  if (username) links.push(`<a href="https://t.me/${escapeHtml(username)}">Telegram @${escapeHtml(username)}</a>`);
+  links.push(`<a href="tg://user?id=${telegramId}">Telegram (по id)</a>`);
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length >= 9) {
+    const intl = digits.startsWith('0') ? `972${digits.slice(1)}` : digits;
+    links.push(`<a href="https://wa.me/${intl}">WhatsApp ${escapeHtml(phone)}</a>`);
+  }
+  return links.join(' · ');
 }
 
 export async function forwardTelegramMessage(
   toChatId: number,
   fromChatId: number,
   messageId: number
-): Promise<void> {
-  await callTelegramApi('forwardMessage', {
+): Promise<boolean> {
+  return callTelegramApi('forwardMessage', {
     chat_id: toChatId,
     from_chat_id: fromChatId,
     message_id: messageId,

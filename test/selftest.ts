@@ -42,7 +42,7 @@ import { formatDialogHistory, type DialogEntry } from '../lib/dialogLog';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from '../lib/addSlotParser';
 import { buildPaymentDetailsBlock } from '../pages/api/telegram';
 import { isProjectRecordClosed, resolveActiveProjects } from '../lib/airtable';
-import { getDepositAmount } from '../lib/paymentConfig';
+import { getDepositAmount } from '../lib/masters';
 import { pickVisionTelegramPhoto } from '../lib/telegramApi';
 import {
   shouldSendLatePaymentReminder,
@@ -138,6 +138,60 @@ eq('нет цены → quote_price', step({ price_quoted: null, price_explained
 eq('цена есть, wants_to_book null → ask_wants_to_book',
   step({ wants_to_book: null }), 'ask_wants_to_book');
 eq('явный отказ → all_done', step({ wants_to_book: 'no' }), 'all_done');
+
+console.log('\n▶ getNextStep — частота вопроса "хочешь записаться?"');
+eq('вопрос про запись ещё не задавался → ask_wants_to_book',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: null }), 'ask_wants_to_book');
+eq('только что спросили, клиент ответил вопросом → price_followup_chat',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 0 }), 'price_followup_chat');
+eq('один ответ на вопросы после CTA → всё ещё без CTA',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 1 }), 'price_followup_chat');
+eq('два ответа на вопросы после CTA → можно спросить снова',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 2 }), 'ask_wants_to_book');
+eq('явное "хочу записаться" в price_followup_chat → дальше по воронке',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 1, client_confirms_booking: 'yes' }), 'ask_phone');
+eq('явный отказ после ответа на вопросы → all_done',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 1, client_confirms_booking: 'no' }), 'all_done');
+eq('открытый вопрос клиента, CTA ещё не было → ответ без CTA',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: null, client_has_open_question: true }), 'price_followup_chat');
+eq('открытый вопрос клиента, интервал давно прошёл → всё равно ответ без CTA',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 5, client_has_open_question: true }), 'price_followup_chat');
+eq('интервал не запускает CTA сам: цепочка вопросов → только ответы',
+  [null, 0, 1, 2, 3].every((ago) =>
+    step({ wants_to_book: null }, { booking_cta_replies_ago: ago, client_has_open_question: true }) === 'price_followup_chat'), true);
+eq('нет открытого вопроса, но CTA был только что → без повтора',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 1, client_has_open_question: false }), 'price_followup_chat');
+eq('явное "хочу записаться" вместе с вопросом → дальше по воронке',
+  step({ wants_to_book: null }, { client_has_open_question: true, client_confirms_booking: 'yes' }), 'ask_phone');
+console.log('\n▶ getNextStep — отказ, неопределённость, разговор с мастером');
+eq('неопределённость ("подумаю") → не отказ и не вопрос про запись',
+  step({ wants_to_book: null }, { client_undecided: true, booking_cta_replies_ago: 0 }), 'undecided_followup_chat');
+eq('неопределённость не пишет wants_to_book = no',
+  getCardPatchForStep('undecided_followup_chat', baseCard({ wants_to_book: null }), sig({ client_undecided: true, client_confirms_booking: null })).wants_to_book,
+  undefined);
+eq('после неопределённости к ask_wants_to_book не возвращаемся, даже через много ответов',
+  step({ wants_to_book: null }, { undecided_replies_ago: 3, booking_cta_replies_ago: 5 }), 'undecided_followup_chat');
+eq('после неопределённости открытый вопрос → ответ по существу',
+  step({ wants_to_book: null }, { undecided_replies_ago: 1, booking_cta_replies_ago: 4, client_has_open_question: true }), 'price_followup_chat');
+eq('если вопрос про запись задали ПОЗЖЕ неопределённости → интервал снова работает',
+  step({ wants_to_book: null }, { undecided_replies_ago: 6, booking_cta_replies_ago: 3 }), 'ask_wants_to_book');
+eq('явное "хочу записаться" после неопределённости → дальше по воронке',
+  step({ wants_to_book: null }, { undecided_replies_ago: 1, client_confirms_booking: 'yes' }), 'ask_phone');
+eq('окончательный отказ → all_done',
+  step({ wants_to_book: null }, { client_confirms_booking: 'no' }), 'all_done');
+eq('повторный отказ → declined_followup_chat, не all_done',
+  step({ wants_to_book: 'no', decline_followup_asked: 'yes' }, { client_confirms_booking: 'no' }), 'declined_followup_chat');
+eq('конкретное сомнение (вопрос) → price_followup_chat, не отказ',
+  step({ wants_to_book: null }, { client_has_open_question: true, client_undecided: true }), 'price_followup_chat');
+eq('хочет поговорить с мастером → master_contact_requested (после цены)',
+  step({ wants_to_book: null }, { client_wants_master_contact: true }), 'master_contact_requested');
+eq('хочет поговорить с мастером → тоже до цены',
+  step({ price_quoted: null, price_shown: null }, { client_wants_master_contact: true }), 'master_contact_requested');
+eq('хочет поговорить с мастером при активной брони',
+  step({ lead_status: 'consultation_booked' }, { client_wants_master_contact: true }), 'master_contact_requested');
+eq('master_contact_requested не создаёт запись и не меняет статус',
+  JSON.stringify(getCardPatchForStep('master_contact_requested', baseCard({ wants_to_book: null }), sig({ client_wants_master_contact: true }))),
+  JSON.stringify(getCardPatchForStep('price_followup_chat', baseCard({ wants_to_book: null }), sig({}))));
 eq('первое тату неизвестно → ask_first_tattoo',
   step({ phone: '05011', first_tattoo: null }), 'ask_first_tattoo');
 
@@ -504,12 +558,12 @@ console.log('\n▶ parseDeleteCommand (/удалить)');
 ok('нет тега вообще: fail', parseDeleteCommand('20.07', NOW).ok === false);
 ok('нет даты: fail', parseDeleteCommand('тату', NOW).ok === false);
 
-console.log('\n▶ getDepositAmount');
-delete process.env.PAYMENT_DEPOSIT_AMOUNT;
-ok('нет env → дефолт 200', getDepositAmount() === '200');
-process.env.PAYMENT_DEPOSIT_AMOUNT = '350';
-ok('env задан → берёт из env', getDepositAmount() === '350');
-delete process.env.PAYMENT_DEPOSIT_AMOUNT;
+console.log('\n▶ getDepositAmount — из профиля мастера');
+delete process.env.MASTER_PROFILE; delete process.env.PRICING_PROFILE;
+ok('профиль по умолчанию (Аня) → 200', getDepositAmount() === '200');
+process.env.MASTER_PROFILE = 'platon';
+ok('профиль platon → 400', getDepositAmount() === '400');
+delete process.env.MASTER_PROFILE;
 
 console.log('\n▶ buildPaymentDetailsBlock');
 delete process.env.PAYMENT_BIT; delete process.env.PAYMENT_BANK;

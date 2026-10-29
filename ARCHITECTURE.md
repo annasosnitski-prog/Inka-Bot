@@ -79,10 +79,11 @@ Admin-сообщения (от `MASTER_TELEGRAM_ID`) перехватывают�
 `t.me/inka_assistant_bot?start=<campaign_id>`. Это полностью отдельный,
 config-driven флоу, не переиспользующий обычную тату-воронку:
 
-- **`lib/campaigns.ts`** — конфиг кампаний. Новая кампания = новая запись
-  в массиве (`id`, `title`, `offer`, `payment`, `required_info`,
+- **Кампании живут в профиле мастера** (`lib/masters/<id>.ts`, поле
+  `campaigns`; тип — `lib/campaigns.ts`). Новая кампания = новая запись в
+  массиве (`id`, `title`, `offer`, `payment`, `required_info`,
   `optional_info`, `booking_mode`...), без правок `stateMachine.ts` или
-  промптов.
+  промптов. Deep link одного мастера в боте другого не активируется.
 - **`lib/campaignFlow.ts`** — generic state machine над конфигом:
   `routeCampaign` решает шаг (`campaign_intro` → `campaign_ask_field` ×N →
   `campaign_handoff` → `campaign_followup_chat`) чисто по тому, какие
@@ -94,11 +95,10 @@ config-driven флоу, не переиспользующий обычную т�
   (`lib/stateMachine.ts`) делегируют весь роутинг в `campaignFlow.ts` —
   обычная диагностика (idea→price→booking) и `pricingRules` для такой
   карточки вообще не выполняются.
-- Extractor/Responder получают `active_campaign`/`campaign` в input и
-  используют свои overlay-файлы (`campaignExtractorOverlay.txt`,
-  `campaignResponderOverlay.txt`) — тот же паттерн, что v2-оверлеи ниже:
-  overlay безусловно приклеен к промпту, но эффективен только когда
-  campaign не null во входных данных конкретного вызова.
+- Extractor/Responder получают `active_campaign`/`campaign` в input; блоки
+  `lib/prompts/campaignExtractor.txt` / `campaignResponder.txt` безусловно
+  приклеены к ядру промпта, но действуют только когда campaign не null во
+  входных данных конкретного вызова.
 - Хранение: `campaign_id` (Single line text) + `campaign_data` (Long
   text, JSON — собранные поля и `handoff_sent`) в Airtable, тот же паттерн,
   что `dialog_history`. Переживает перезапуск serverless-функции.
@@ -118,12 +118,12 @@ config-driven флоу, не переиспользующий обычную т�
     в кампании нет предоплаты (нет "мягкого замка", как в обычной
     тату-воронке), поэтому её роль играет личное подтверждение мастера —
     бот прямо говорит клиенту, что время придержано, но подтвердит/свяжется
-    сама Аня, не бот.
+    сам мастер, не бот.
   `color_texture` сейчас использует `self_book_slot`; конфиг с
   `master_approval` остаётся доступен для будущих кампаний, где решение
   всегда должно оставаться за мастером.
 - `photo_of_placement` у `color_texture` — ОБЯЗАТЕЛЬНОЕ поле (не optional):
-  Ане нужно реально увидеть кожу крупно, с близкого расстояния, прежде чем
+  мастеру нужно реально увидеть кожу крупно, с близкого расстояния, прежде чем
   решать. Extractor смотрит на само фото (вижн) и засчитывает ответ
   (`campaign_field_answer='yes'`) только если кадр реально крупный и
   близкий — издалека/не в фокусе фото не принимается, бот просит переснять.
@@ -132,56 +132,99 @@ config-driven флоу, не переиспользующий обычную т�
   на это поле — текстовая сводка в карточке несёт только `yes`, не
   заменяет реальный просмотр фото мастером.
 
-## LLM-слой: три промпта + два "v2-оверлея"
+## LLM-слой: ядро промптов + профиль мастера
 
-Три роли, три файла-промпта:
+Три роли, по одному файлу-ядру на роль, общих для всех мастеров:
 
-| Роль | Промпт | Что делает |
+| Роль | Ядро | Что делает |
 |---|---|---|
-| Extractor | `lib/extractorPrompt.txt` | сообщение → факты + сигналы |
-| Responder | `lib/responderPrompt.txt` | шаг → живой текст клиенту |
-| Admin | `lib/adminPrompt.txt` | свободный диалог с мастерой, /портрет |
+| Extractor | `lib/prompts/extractor.txt` | сообщение → факты + сигналы |
+| Responder | `lib/prompts/responder.txt` | шаг → живой текст клиенту: базовый голос, манера разговора, КОММЕРСАНТ (что делает ответ, цена, итог, инициатива), 7 архетипов как инструменты |
+| Admin | `lib/prompts/admin.txt` | свободный диалог с мастером, /портрет |
 
-**Непривычный момент**, о который легко споткнуться: у Extractor и Responder
-есть вторые файлы — `lib/extractorContractV2.txt` и `lib/responderVoiceV2.txt`.
-Это не альтернативные промпты, а **оверлеи**: код (`extractor.ts`,
-`responder.ts`) склеивает основной промпт и v2-файл в один system-prompt,
-причём v2-текст идёт вторым и явно объявляет себя приоритетнее более ранних
-формулировок по тем же темам (например quote_price). Название "v2" не
-означает "второй промпт" — это исторический след того, что бывший
-контрибьютор (Codex) добавил партию новых правил (service_fit-гейт,
-классификация фото, второй проект) поверх уже существующих файлов, не
-переписывая их с нуля. Смотреть только `extractorPrompt.txt` без
-`extractorContractV2.txt` — значит видеть неполную картину поведения.
+Плюс блоки кампаний `lib/prompts/campaign*.txt` (см. выше). Других слоёв
+"поверх" нет: прежние `*V2`-оверлеи, `platon*Overlay.txt` и
+`consultationOnlyOverlay.txt` влиты в ядро или в профиль.
 
-`lib/pricingRules.txt` — прайс-логика (категории, матрица цен, факторы
-трудоёмкости) — общий кусок текста, который **и** extractor-промпт, **и**
-admin-промпт подставляют себе через `{{PRICING_RULES}}`
-(`lib/pricingRules.ts`), чтобы не дублировать и не рассинхронизировать два
-места, считающие одну и ту же цену.
+Всё, чем мастера отличаются, — в **профиле** `lib/masters/<id>.ts` + папка
+`lib/masters/<id>/`:
 
-`lib/openai.ts` — общая механика HTTP-вызова к OpenAI (все три роли зовут
-её, промпты остаются каждый в своём месте).
+| Что | Где |
+|---|---|
+| имя, род, родительный падеж, ссылки, депозит, "только консультации", порог раскрытия итога, кампании | `lib/masters/<id>.ts` |
+| прайс-логика (категории, шкала, факторы, примеры) | `<id>/pricing.txt` → `{{PRICING_RULES}}` |
+| что мастер делает и не делает (service_fit) | `<id>/scope.txt` → `{{SERVICE_SCOPE}}` |
+| подтверждённая ценность работы (что входит, даже если не меняет цену) | `<id>/value.txt` → `{{MASTER_VALUE}}` |
+| особые правила речи сверх ядра (у Платона — референс; у Ани нет) | `<id>/responder.txt` → `{{MASTER_RULES}}`, необязателен |
+
+Подстановку делает `applyProfilePlaceholders` (`lib/masters/index.ts`).
+Мастер деплоя выбирается env `MASTER_PROFILE` (старое имя
+`PRICING_PROFILE` тоже читается); без него — Аня, с неизвестным id — ошибка,
+а не тихий откат на Аню. `test/masterProfiles.ts` проверяет, что в промптах
+одного мастера нет имени, ссылок, цен и рода другого.
+
+**Новый мастер:** скопировать `lib/masters/platon.ts` и папку
+`lib/masters/platon/`, поправить значения и тексты, добавить строку в
+`PROFILES` в `lib/masters/index.ts`, на деплое выставить `MASTER_PROFILE`.
+Пути в `readFileSync` профиля — литералы: Vercel трассирует только такие
+(иначе ENOENT в проде, как было с прайсом Платона).
+
+**Цена и её объяснение.** Extractor пишет `price_factors` в виде
+`<почему так — для клиента> || <внутреннее — для мастера>`. Responder
+получает левую часть как `client_card.price_reasons`
+(`clientPriceReasons`) и из правой — только прикидку итога
+`project_total_estimate` (`projectTotalEstimate`, запись `итог ≈ A–B₪`);
+категории, оси и число сеансов до него не доходят. Политика раскрытия
+итога одна, в ядре Responder; порог — `totalEstimateDisclosureLimit`
+профиля (Аня 2500₪, Платон 6000₪). Порог — правило раскрытия, не потолок
+цены.
+
+**Вопрос "хочешь записаться?"** Повод — содержание разговора: пока у
+клиента открытый вопрос/возражение (`client_has_open_question` от
+Extractor), код отдаёт `price_followup_chat` — ответ по существу без
+CTA. `ask_wants_to_book` бывает, только когда открытого вопроса нет, и не
+раньше чем через `BOOKING_CTA_MIN_GAP` ответов после прошлого раза — это
+предохранитель, а не триггер. Каждая реплика Инки в `dialog_history`
+помечается шагом (`step`), отсюда `booking_cta_replies_ago`.
+
+**Отказ, сомнение, неопределённость, мастер.** Extractor различает:
+`client_confirms_booking = "no"` — только окончательный отказ (`all_done`,
+дальше `declined_followup_chat`); `client_undecided` — "не знаю пока /
+подумаю" (шаг `undecided_followup_chat`, `wants_to_book` не трогается, к
+`ask_wants_to_book` код сам не возвращается, пока клиент не дал повод);
+конкретное сомнение — `client_has_open_question` (`price_followup_chat`);
+`client_wants_master_contact` — шаг `master_contact_requested`, в любой
+момент воронки: мастеру уходит обычный Telegram-пинг (один раз подряд),
+записи не создаётся. Что именно сказать (принять, один вопрос, объяснить,
+предложить мастера) выбирает Коммерсант внутри Responder. INKA ведёт
+одного мастера активного профиля: других мастеров не предлагает и не
+сравнивает (правило в ядре `responder.txt`, проверяется тестами и
+`eval:voice`).
+
+`lib/openai.ts` — общая механика HTTP-вызова к OpenAI.
 
 ## Что тестируется, а что — только руками/CI с секретом
 
 Два разных вида проверки, не путать:
 
 - **`npm test`** (`test/selftest.ts` + `test/stateContractV2.ts` +
-  `test/campaignFlow.ts` + `test/campaignClientJourney.ts`, ~355 проверок) —
+  `test/campaignFlow.ts` + `test/campaignClientJourney.ts` +
+  `test/masterProfiles.ts`, ~470 проверок) —
   чистая логика без сети: `getNextStep`, `getCardPatchForStep`,
   `mergeClientCard`, парсеры команд, календарные хелперы, `resolveActiveProjects`
   и т.п. Никаких LLM-вызовов, работает без ключей. Гоняется в CI на каждый
   PR и пуш в `main` (`.github/workflows/tests.yml`).
-- **`npm run eval:price` / `npm run eval:dialog`** (`scripts/priceEval.ts`,
-  `scripts/dialogEval.ts`) — **живые** вызовы модели по реальным промптам,
+- **`npm run eval:price` / `eval:dialog` / `eval:price:platon` /
+  `eval:dialog:platon`** (`scripts/*.ts`) — **живые** вызовы модели по реальным промптам,
   проверяют не логику, а качество и надёжность формулировок (например: цена
   крупного проекта обязана явно звучать "за сеанс"). Требует
   `OPENAI_API_KEY`, гоняется в CI только при изменении промпт-файлов
-  (`.github/workflows/price-eval.yml`, включая v2-оверлеи) или руками.
+  (`.github/workflows/price-eval.yml`: `lib/prompts/**`, `lib/masters/**`)
+  или руками. В облачной сессии Claude Node-fetch нужен
+  `NODE_USE_ENV_PROXY=1 NODE_EXTRA_CA_CERTS=/root/.ccr/ca-bundle.crt`.
   Не проходит offline — это осознанное ограничение, не баг настройки.
 
-`lib/*.txt`-промпты никак не проверяются `npm test` — их корректность
+Тексты промптов (`lib/prompts`, `lib/masters/*/`) по смыслу не проверяются `npm test` (только сборка и изоляция мастеров) — их корректность
 живёт только в `eval:*` и в реальном использовании. Если меняешь промпт,
 но не гоняешь `eval:dialog` — правка не проверена никем и ничем, пока не
 попадёт на прод.
@@ -248,7 +291,9 @@ Airtable **по записям** (через `record.id`), а не по одно
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY` или `GOOGLE_SERVICE_ACCOUNT_JSON` | доступ к календарю |
 | `DIARY_SYNC_SECRET` | авторизация запросов от Дневника мастера |
 | `CRON_SECRET` | авторизация вызовов cron-эндпоинтов |
-| `PAYMENT_DEPOSIT_AMOUNT`, `PAYMENT_BIT`, `PAYMENT_BANK` | сумма и реквизиты предоплаты, единая точка правды (`lib/paymentConfig.ts`) |
+| `MASTER_PROFILE` | какой мастер у деплоя (`anya` по умолчанию, `platon`); старое имя `PRICING_PROFILE` тоже читается |
+| `MASTER_TELEGRAM_ID`, `GOOGLE_CALENDAR_ID` | id мастера и календаря этого деплоя |
+| `PAYMENT_BIT`, `PAYMENT_BANK` | реквизиты предоплаты (сумма — в профиле мастера) |
 | `PING_MASTER_ON_ALL_MESSAGES` | опционально: пинговать мастеру вообще каждое сообщение клиента (отладка) |
 
 ## Известные ограничения (не баги — сознательные компромиссы или открытый долг)

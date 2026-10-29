@@ -17,6 +17,10 @@ export interface DialogEntry {
   from: 'client' | 'inka';
   text: string;
   ts: string; // ISO
+  // NEXT_STEP, на который Инка ответила этой репликой (только для "inka").
+  // Хранится в том же JSON dialog_history — отдельная колонка Airtable не
+  // нужна. Старые реплики шага не имеют.
+  step?: string;
 }
 
 export const MAX_CLIENT_HISTORY_TURNS = 100; // реплик всего (клиент+инка вместе), ~50 обменов
@@ -61,7 +65,8 @@ export function hasUnparsableDialogHistory(record: ClientRecord | null): boolean
 export async function appendDialogTurn(
   record: ClientRecord | null,
   clientMessage: string | null,
-  inkaReply: string | null
+  inkaReply: string | null,
+  inkaStep?: string
 ): Promise<void> {
   if (!record) return;
   if (!clientMessage && !inkaReply) return;
@@ -70,7 +75,7 @@ export async function appendDialogTurn(
     const now = new Date().toISOString();
     const history = parseDialogHistory(record);
     if (clientMessage) history.push({ from: 'client', text: clientMessage, ts: now });
-    if (inkaReply) history.push({ from: 'inka', text: inkaReply, ts: now });
+    if (inkaReply) history.push({ from: 'inka', text: inkaReply, ts: now, ...(inkaStep ? { step: inkaStep } : {}) });
     const trimmed = history.slice(-MAX_CLIENT_HISTORY_TURNS);
     await updateClient(record.id, { dialog_history: JSON.stringify(trimmed) });
   } catch (err) {
@@ -79,6 +84,28 @@ export async function appendDialogTurn(
 }
 
 // Форматирует историю для показа мастеру текстом (команда /история).
+// Сколько ответов Инки прошло после последнего ответа на шаге step
+// (0 — этот шаг был самым последним ответом). null — шага в истории нет.
+export function inkaRepliesSinceStep(entries: DialogEntry[], step: string): number | null {
+  let count = 0;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (e.from !== 'inka') continue;
+    if (e.step === step) return count;
+    count++;
+  }
+  return null;
+}
+
+// Шаг последнего ответа Инки. undefined — ответов нет или старая история
+// без отметок шагов.
+export function lastInkaStep(entries: DialogEntry[]): string | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].from === 'inka') return entries[i].step;
+  }
+  return undefined;
+}
+
 export function formatDialogHistory(entries: DialogEntry[]): string {
   return entries.map((e) => (e.from === 'client' ? `👤 ${e.text}` : `🤖 ${e.text}`)).join('\n\n');
 }

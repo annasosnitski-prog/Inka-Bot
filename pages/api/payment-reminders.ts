@@ -23,6 +23,7 @@
 // сбрасываются автоматически при следующей брони (см. telegram.ts).
 // ============================================================
 
+import { getMasterTelegramId } from '../../lib/masterTelegramId';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { timingSafeEqual } from 'crypto';
 import {
@@ -31,12 +32,12 @@ import {
   updateClient,
 } from '../../lib/airtable';
 import { sendTelegramMessage } from '../../lib/telegramApi';
-import { getDepositAmount } from '../../lib/paymentConfig';
+import { getDepositAmount } from '../../lib/masters';
 import { shouldSendLatePaymentReminder, shouldSendEarlyPaymentReminder } from '../../lib/reminderWindows';
 
 // telegram_id мастера — свой для каждого деплоя (см. MASTER_NAME в lib/admin.ts
 // про аналогичный параметр имени). По умолчанию — текущий деплой (Аня).
-const MASTER_TELEGRAM_ID = Number(process.env.MASTER_TELEGRAM_ID) || 457343487;
+const MASTER_TELEGRAM_ID = getMasterTelegramId();
 const REMINDER_WINDOW_HOURS = 36;
 const EARLY_WINDOW_HOURS = 24;
 
@@ -90,7 +91,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const text = `⏰ ${who} — тату ${when}, а предоплата ${getDepositAmount()}₪ ещё не пришла (осталось ~${Math.round(hoursRemaining)}ч).`;
 
       try {
-        await sendTelegramMessage(MASTER_TELEGRAM_ID, text);
+        if (!(await sendTelegramMessage(MASTER_TELEGRAM_ID, text))) throw new Error('Telegram send failed');
         await updateClient(record.id, { payment_reminder_sent: 'yes' });
         reminded++;
       } catch (sendErr) {
@@ -137,7 +138,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const text = `💤 ${who} — тату ${when}, бронь стоит уже больше суток, а предоплата ${getDepositAmount()}₪ ещё не пришла.`;
 
       try {
-        await sendTelegramMessage(MASTER_TELEGRAM_ID, text);
+        if (!(await sendTelegramMessage(MASTER_TELEGRAM_ID, text))) throw new Error('Telegram send failed');
         await updateClient(record.id, { payment_reminder_early_sent: 'yes' });
         remindedEarly++;
       } catch (sendErr) {

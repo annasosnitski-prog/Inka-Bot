@@ -1,15 +1,14 @@
 // ============================================================
-// INKA-BOT — Price regression eval, деплой Платона (PRICING_PROFILE=platon)
+// INKA-BOT — Price regression eval, профиль Платона (MASTER_PROFILE=platon)
 // НЕ часть `npm test`, см. комментарий в scripts/priceEval.ts — тот же
-// принцип: ценовая логика живёт в промпте (lib/pricingRulesPlaton.txt),
+// принцип: ценовая логика живёт в промпте (lib/masters/platon/pricing.txt),
 // единственный способ её реально проверить — прогнать через настоящий
 // Extractor с живым OpenAI-ключом.
 //
-// Запуск: PRICING_PROFILE=platon OPENAI_API_KEY=... npm run eval:price:platon
+// Запуск: OPENAI_API_KEY=... npm run eval:price:platon
 // ============================================================
 
-process.env.PRICING_PROFILE = 'platon';
-process.env.CONSULTATION_ONLY = 'true';
+process.env.MASTER_PROFILE = 'platon';
 
 import { runExtractor, type ExtractorInput } from '../lib/extractor';
 import type { ClientCard } from '../lib/stateMachine';
@@ -85,11 +84,11 @@ const cases: Case[] = [
       'category=project, ≈3500-3700₪/сеанс — реализм САМ ПО СЕБЕ не "вне направления" для Платона, service_fit=allowed (не not_offered)',
   },
   {
-    name: 'РЁБРА/ЖИВОТ — без автоматической наценки',
+    name: 'РЁБРА/ЖИВОТ — надбавка +500₪ (плотный блэкворк 2500 → 3000)',
     message:
       'Хочу тату на рёбрах и животе, плотный чёрный блэкворк без декора. Место чистое, первая тату.',
     expected:
-      'category=project/large, ≈2500-2800₪/сеанс база по плотности — НЕ должно быть автоматической наценки только за зону рёбра/живот, price_factors может пометить зону как требующую оценки мастера',
+      'category=project/large, ≈3000₪/сеанс (база 2500 по плотности + 500 за рёбра/живот); потолок 4000₪ за сеанс',
   },
   {
     name: 'НЕДОСТАТОК ДАННЫХ — мало деталей',
@@ -107,7 +106,7 @@ async function main() {
   }
 
   console.log('========================================');
-  console.log('PRICE EVAL — ПЛАТОН (PRICING_PROFILE=platon)');
+  console.log('PRICE EVAL — ПЛАТОН (MASTER_PROFILE=platon)');
   console.log('========================================\n');
 
   for (const c of cases) {

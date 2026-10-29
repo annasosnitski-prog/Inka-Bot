@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { getMasterTelegramId } from '../../lib/masterTelegramId';
 import {
   upsertClient,
   createClient,
@@ -12,11 +13,18 @@ import { getNextStep, getCardPatchForStep } from '../../lib/stateMachine';
 import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
 import { runAdmin } from '../../lib/admin';
-import { appendDialogTurn, parseDialogHistory, recentDialogForModel } from '../../lib/dialogLog';
+import { appendDialogTurn, inkaRepliesSinceStep, lastInkaStep, parseDialogHistory, recentDialogForModel } from '../../lib/dialogLog';
 import { getAvailableSlots, bookSlot, formatSlotForDisplay } from '../../lib/calendar';
 import type { BookingType, AvailableSlot } from '../../lib/calendar';
-import { sendTelegramMessage, forwardTelegramMessage, pickVisionTelegramPhoto } from '../../lib/telegramApi';
-import { getDepositAmount } from '../../lib/paymentConfig';
+import {
+  sendTelegramMessage,
+  sendTelegramHtml,
+  escapeHtml,
+  clientContactLinks,
+  forwardTelegramMessage,
+  pickVisionTelegramPhoto,
+} from '../../lib/telegramApi';
+import { getDepositAmount } from '../../lib/masters';
 import { getCampaign } from '../../lib/campaigns';
 import {
   routeCampaign,
@@ -41,7 +49,49 @@ import {
 // enter the client state machine unless /client mode was explicitly enabled.
 // telegram_id мастера — свой для каждого деплоя (см. MASTER_NAME в lib/admin.ts
 // про аналогичный параметр имени). По умолчанию — текущий деплой (Аня).
-const MASTER_TELEGRAM_ID = Number(process.env.MASTER_TELEGRAM_ID) || 457343487;
+const MASTER_TELEGRAM_ID = getMasterTelegramId();
+
+// Шаги, ответ клиенту на которых обещает передачу мастеру: пинг мастеру
+// отправляется ДО ответа и проверяется (см. deliverToMaster).
+const GATED_HANDOFF_STEPS = new Set<string>([
+  'master_contact_requested',
+  'reschedule_requested_ping_master',
+  'campaign_handoff',
+  'campaign_slots_declined_waiting',
+  'payment_screenshot_received',
+  'new_project_after_booking',
+  'slot_change_requested_waiting',
+  'no_more_slots_waiting',
+]);
+const BOOKING_STEPS = new Set<string>(['confirm_slot_awaiting_payment', 'confirm_consultation_booked', 'campaign_confirm_slot']);
+
+// Сообщения клиенту при недоставке пинга мастеру: язык по последнему
+// сообщению клиента (иврит / кириллица / иначе английский).
+type NoticeKind = 'handoff' | 'screenshot' | 'booking' | 'photo';
+const NOTICES: Record<'ru' | 'he' | 'en', Record<NoticeKind, string>> = {
+  ru: {
+    handoff: 'Не получилось передать это мастеру прямо сейчас. Напиши мне ещё раз чуть позже, и я попробую снова.',
+    screenshot: 'Не получилось передать скрин мастеру прямо сейчас. Пришли его, пожалуйста, ещё раз чуть позже.',
+    booking: 'Запись закреплена, но я не уверена, что мастер уже получил уведомление. Он увидит её в календаре.',
+    photo: 'Не получилось передать это фото мастеру прямо сейчас. Пришли его, пожалуйста, ещё раз чуть позже.',
+  },
+  he: {
+    handoff: 'לא הצלחתי להעביר את זה למאסטר ברגע זה. כתבו לי שוב קצת מאוחר יותר ואנסה שוב.',
+    screenshot: 'לא הצלחתי להעביר את הצילום למאסטר ברגע זה. שלחו אותו שוב קצת מאוחר יותר, בבקשה.',
+    booking: 'ההזמנה נשמרה, אבל אני לא בטוחה שהמאסטר כבר קיבל הודעה. הוא יראה אותה ביומן.',
+    photo: 'לא הצלחתי להעביר את התמונה למאסטר ברגע זה. שלחו אותה שוב קצת מאוחר יותר, בבקשה.',
+  },
+  en: {
+    handoff: "I couldn't pass this to the master right now. Please write me again a bit later and I'll try again.",
+    screenshot: "I couldn't pass the screenshot to the master right now. Please send it again a bit later.",
+    booking: "Your booking is saved, but I'm not sure the master has been notified yet. They will see it in the calendar.",
+    photo: "I couldn't pass this photo to the master right now. Please send it again a bit later.",
+  },
+};
+function failureNotice(kind: NoticeKind, clientText: string): string {
+  const lang = /[\u0590-\u05FF]/.test(clientText) ? 'he' : /[а-яё]/i.test(clientText) ? 'ru' : 'en';
+  return NOTICES[lang][kind];
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -172,6 +222,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // вообще никакого ответа при сбое (OpenAI/Airtable/Calendar), и чтобы не
   // слать ему дублирующий "что-то пошло не так" после уже отправленного ответа.
   let clientReplySent = false;
+  let campaignPhotoForwardFailed = false;
 
   try {
     // 1. Найти ВСЕ проекты этого telegram_id. Клиент может вести до двух
@@ -278,8 +329,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // или не принято Extractor-ом как достаточно крупное/близкое).
     if (campaignRoutingBefore?.pendingField && hasPhoto && chatId && message.message_id) {
       try {
-        await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
+        campaignPhotoForwardFailed = !(await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id));
       } catch (campaignPhotoForwardErr) {
+        campaignPhotoForwardFailed = true;
         console.error('Campaign field photo forward failed:', campaignPhotoForwardErr);
       }
     }
@@ -431,7 +483,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       is_new_project_request: extracted.is_new_project_request,
       photo_purpose: extracted.photo_purpose,
       campaign_field_answer: extracted.campaign_field_answer,
+      booking_cta_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'ask_wants_to_book'),
+      // Страховка на случай промаха Extractor: вопросительный знак в
+      // сообщении значит, что сначала нужен ответ, а не вопрос про запись.
+      client_has_open_question: extracted.client_has_open_question || lastMessageForRecord.includes('?'),
+      client_undecided: extracted.client_undecided,
+      client_wants_master_contact: extracted.client_wants_master_contact,
+      undecided_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'undecided_followup_chat'),
     };
+
+    // Клиент ответил на вопрос Инки о связи с мастером (номер/канал) — это
+    // продолжение того же обращения, а не новая тема: остаёмся на шаге и
+    // передаём мастеру контакт.
+    const contactAnswerToMaster =
+      !signals.client_wants_master_contact &&
+      lastInkaStep(parseDialogHistory(existing)) === 'master_contact_requested' &&
+      !!(extracted.phone || extracted.contact_channel);
+    if (contactAnswerToMaster) signals.client_wants_master_contact = true;
 
     // СТРАХОВКА: Extractor получает recentHistory и обычно сам верно
     // связывает короткий ответ с последним вопросом Инки, но не всегда —
@@ -444,10 +512,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // вопрос (имя/соцсеть/что угодно) здесь исключён: тогда это условие
     // просто не выполняется. "ок"/"окей" намеренно НЕ считаются
     // согласием — это нейтральный отклик, не явное "да".
+    // Короткое "да"/"нет" — ответ на вопрос про запись, только если этот
+    // вопрос был последним ответом Инки. После quote_price или
+    // price_followup_chat последней была реплика про цену, и "не, ..." там —
+    // не отказ от записи. undefined — старая история без отметок шагов,
+    // ведём себя как раньше.
+    const lastStep = lastInkaStep(parseDialogHistory(existing));
     const stuckOnWantsToBook =
       signals.client_confirms_booking === null &&
       currentCard.wants_to_book === null &&
-      (!!currentCard.price_quoted || currentCard.price_explained === 'yes');
+      (!!currentCard.price_quoted || currentCard.price_explained === 'yes') &&
+      (lastStep === undefined || lastStep === 'ask_wants_to_book');
 
     if (stuckOnWantsToBook && messageText) {
       const lower = messageText.toLowerCase().trim();
@@ -457,10 +532,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         'можно записаться', 'хочу забронировать', 'бронируй', 'го',
         'yes', 'yep', 'sure', 'lets go',
       ];
-      const noPatterns = [
-        'нет', 'не', 'пока нет', 'не сейчас', 'подумаю', 'позже',
-        'ещё подумаю', 'еще подумаю', 'потом', 'не надо', 'не хочу',
-        'пока думаю', 'не уверен', 'пока не знаю',
+      // Окончательный отказ. Всё, что похоже на "подумаю/позже/не знаю" —
+      // не отказ, а неопределённость (client_undecided), wants_to_book
+      // остаётся пустым.
+      const noPatterns = ['нет', 'не', 'не надо', 'не хочу', 'нет, спасибо', 'не буду'];
+      const undecidedPatterns = [
+        'пока нет', 'не сейчас', 'подумаю', 'позже', 'ещё подумаю', 'еще подумаю',
+        'потом', 'пока думаю', 'не уверен', 'не уверена', 'пока не знаю', 'не знаю',
+        'посмотрим',
       ];
 
       const matchesYes = yesPatterns.some(
@@ -470,7 +549,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         (p) => lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ',')
       );
 
-      if (matchesYes && !matchesNo) {
+      const matchesUndecided = undecidedPatterns.some(
+        (p) => lower === p || lower.startsWith(p + ' ') || lower.startsWith(p + ',') || lower.startsWith(p + '.')
+      );
+
+      if (matchesUndecided && !matchesYes) {
+        signals.client_undecided = true;
+        console.log('CODE OVERRIDE: client_undecided = true (pattern match, ask_wants_to_book context)');
+      } else if (matchesYes && !matchesNo) {
         signals.client_confirms_booking = 'yes';
         console.log('CODE OVERRIDE: client_confirms_booking = yes (pattern match, ask_wants_to_book context)');
       } else if (matchesNo && !matchesYes) {
@@ -722,108 +808,125 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // 10. Отправить ответ, если он не пустой.
-    if (chatId && finalReply) {
-      await sendTelegramMessage(chatId, finalReply);
-      clientReplySent = true;
-    }
-
-    // 10b. ЛОГ ДИАЛОГА.
-    await appendDialogTurn(existing, lastMessageForRecord, finalReply);
-
-    // 10c. НОВЫЙ ВТОРОЙ ПРОЕКТ — одноразовое уведомление в момент создания
-    // отдельной записи (не завязано на nextStep: клиент по этой новой
-    // записи уже идёт по обычной воронке — ask_idea и т.д., а не по
-    // старому статичному hand-off тексту).
-    if (isCreatingSecondProject) {
-      try {
-        const notifyLabel = finalCard.client_name || clientLabel;
-        const who = username ? `${notifyLabel} (@${username})` : notifyLabel;
-        await sendTelegramMessage(
-          MASTER_TELEGRAM_ID,
-          `🆕 ${who} начал(а) второй, независимый проект при активной записи. Текущая бронь не изменена — веду второй проект отдельно, как обычного нового клиента.`
-        );
-      } catch (notifySecondErr) {
-        console.error('Second-project master notification failed:', notifySecondErr);
-      }
-    }
-
-    // 10d. CAMPAIGN NOTIFICATIONS — хэндофф (master_approval), подтверждённая
-    // бронь [КАМПЕЙН]-слота, и одноразовый пинг "пул пуст" (self_book_slot).
-    // Отдельно от buildMasterNotification ниже — тому шагу неоткуда взять
-    // campaign/collected без лишних параметров.
-    if (campaignRouting) {
-      try {
-        const notifyLabel = finalCard.client_name || clientLabel;
-        if (nextStep === 'campaign_handoff') {
-          const note = buildCampaignHandoffNotification(
-            campaignRouting.campaign,
-            finalCard.campaign_collected ?? {},
-            notifyLabel,
-            username
-          );
-          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
-        } else if (nextStep === 'campaign_confirm_slot') {
-          const whenDisplay = finalCard.booked_slot_display ?? 'см. календарь [КАМПЕЙН]';
-          const note = buildCampaignSlotBookedNotification(
-            campaignRouting.campaign,
-            finalCard.campaign_collected ?? {},
-            notifyLabel,
-            username,
-            whenDisplay
-          );
-          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
-        } else if (
-          nextStep === 'campaign_no_slots' &&
-          liveCard.campaign_collected?.__no_slots_pinged !== '1'
-        ) {
-          const note = buildCampaignNoSlotsNotification(campaignRouting.campaign, notifyLabel, username);
-          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
-        } else if (nextStep === 'campaign_slots_declined_waiting') {
-          // Reached right after Inka asked what doesn't fit (day/time) and
-          // whether there's a preference (campaign_slots_decline_clarify) —
-          // lastMessageForRecord here IS that answer, client's own words.
-          const note = buildCampaignSlotsDeclinedNotification(
-            campaignRouting.campaign,
-            notifyLabel,
-            username,
-            lastMessageForRecord
-          );
-          await sendTelegramMessage(MASTER_TELEGRAM_ID, note);
-        }
-      } catch (campaignNotifyErr) {
-        console.error('Campaign notification failed:', campaignNotifyErr);
-      }
-    }
-
-    // 11. ПИНГ МАСТЕРУ. Шаги, которые обещают "передала мастеру" или
-    // требуют действия Ани, должны иметь реальный пинг, а не только текст.
-    try {
-      const notifyLabel = finalCard.client_name || clientLabel;
-      const masterNote = buildMasterNotification(
-        nextStep,
-        notifyLabel,
-        username,
-        lastMessageForRecord
+    // Все уведомления мастеру о клиенте идут со ссылками «написать»:
+    // с телефона мастер не может искать клиента по Telegram-id.
+    const sendMasterNote = (text: string): Promise<boolean> =>
+      sendTelegramHtml(
+        MASTER_TELEGRAM_ID,
+        `${escapeHtml(text)}\n\nНаписать: ${clientContactLinks(telegramId, username, finalCard.phone ?? '')}`
       );
-      if (masterNote) {
-        await sendTelegramMessage(MASTER_TELEGRAM_ID, masterNote);
-        if (
-          nextStep === 'payment_screenshot_received' &&
-          chatId &&
-          message.message_id
-        ) {
-          await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
-        }
-      } else if (pingOnEveryMessage()) {
-        await sendTelegramMessage(
-          MASTER_TELEGRAM_ID,
-          buildGenericMessagePing(notifyLabel, username, lastMessageForRecord)
-        );
-      }
-    } catch (notifyErr) {
-      console.error('Master notification failed:', notifyErr);
+
+    // Уведомления мастеру собираются ДО ответа клиенту и уходят с одной
+    // повторной попыткой. "gated" — ответ клиенту обещает передачу ("передала
+    // скрин/просьбу мастеру"): если пинг не доставлен, клиенту честно
+    // говорим, что не вышло, а в лог пишем не шаг передачи, чтобы следующая
+    // просьба отправилась заново. Остальные пинги (бронь уже закреплена,
+    // второй проект, кампания) не меняют ответ, но тоже идут с проверкой
+    // результата и пишут ошибку в лог при недоставке.
+    const notifyLabel = finalCard.client_name || clientLabel;
+    const who = username ? `${notifyLabel} (@${username})` : notifyLabel;
+    // Просьба о разговоре с мастером пингует его один раз подряд: пока
+    // Инка уже ответила "передала", повторные сообщения не спамят мастера.
+    const repeatMasterContact =
+      nextStep === 'master_contact_requested' &&
+      lastInkaStep(parseDialogHistory(existing)) === 'master_contact_requested';
+    const contactDetails = [
+      finalCard.phone ? `телефон ${finalCard.phone}` : null,
+      finalCard.contact_channel === 'whatsapp' ? 'удобнее вотсап' : finalCard.contact_channel === 'telegram' ? 'удобнее телеграм' : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    const mainNote: string | null =
+      nextStep === 'campaign_handoff' && campaignRouting
+        ? buildCampaignHandoffNotification(campaignRouting.campaign, finalCard.campaign_collected ?? {}, notifyLabel, username)
+        : nextStep === 'campaign_slots_declined_waiting' && campaignRouting
+          // Inka только что спросила, что не подошло (день/время) —
+          // lastMessageForRecord и есть этот ответ клиента.
+          ? buildCampaignSlotsDeclinedNotification(campaignRouting.campaign, notifyLabel, username, lastMessageForRecord)
+          : repeatMasterContact
+            ? contactAnswerToMaster && contactDetails
+              ? `📞 ${who} оставил(а) контакт для связи: ${contactDetails}.`
+              : null
+            : buildMasterNotification(nextStep, notifyLabel, username, lastMessageForRecord, contactDetails);
+
+    const extraNotes: string[] = [];
+    if (isCreatingSecondProject) {
+      extraNotes.push(
+        `🆕 ${who} начал(а) второй, независимый проект при активной записи. Текущая бронь не изменена — веду второй проект отдельно, как обычного нового клиента.`
+      );
     }
+    if (campaignRouting && nextStep === 'campaign_confirm_slot') {
+      extraNotes.push(
+        buildCampaignSlotBookedNotification(
+          campaignRouting.campaign,
+          finalCard.campaign_collected ?? {},
+          notifyLabel,
+          username,
+          finalCard.booked_slot_display ?? 'см. календарь [КАМПЕЙН]'
+        )
+      );
+    }
+    if (campaignRouting && nextStep === 'campaign_no_slots' && liveCard.campaign_collected?.__no_slots_pinged !== '1') {
+      extraNotes.push(buildCampaignNoSlotsNotification(campaignRouting.campaign, notifyLabel, username));
+    }
+    if (!mainNote && extraNotes.length === 0 && pingOnEveryMessage()) {
+      extraNotes.push(buildGenericMessagePing(notifyLabel, username, lastMessageForRecord));
+    }
+
+    const deliverToMaster = async (text: string, forwardClientMessage = false): Promise<boolean> => {
+      for (let attempt = 0; attempt < 1; attempt++) {
+        try {
+          if (await sendMasterNote(text)) {
+            if (forwardClientMessage && chatId && message.message_id) {
+              // Без самого скрина "передала" было бы неправдой.
+              if (!(await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id))) return false;
+            }
+            return true;
+          }
+        } catch (deliverErr) {
+          console.error('Master notification attempt failed:', deliverErr);
+        }
+      }
+      console.error(`Master notification NOT delivered (step ${nextStep})`);
+      return false;
+    };
+
+    let loggedStep: string = nextStep;
+    if (mainNote) {
+      const delivered = await deliverToMaster(mainNote, nextStep === 'payment_screenshot_received');
+      if (!delivered && GATED_HANDOFF_STEPS.has(nextStep)) {
+        finalReply = failureNotice(nextStep === 'payment_screenshot_received' ? 'screenshot' : 'handoff', lastMessageForRecord);
+        loggedStep = 'master_handoff_failed';
+      } else if (!delivered && BOOKING_STEPS.has(nextStep)) {
+        finalReply = `${finalReply}\n\n${failureNotice('booking', lastMessageForRecord)}`.trim();
+      }
+    }
+    for (const note of extraNotes) {
+      const delivered = await deliverToMaster(note);
+      if (!delivered && BOOKING_STEPS.has(nextStep) && !mainNote) {
+        finalReply = `${finalReply}\n\n${failureNotice('booking', lastMessageForRecord)}`.trim();
+      }
+    }
+
+    // 10. Отправить ответ, если он не пустой.
+    if (campaignPhotoForwardFailed) {
+      finalReply = `${finalReply}\n\n${failureNotice('photo', lastMessageForRecord)}`.trim();
+    }
+    let replyDelivered = false;
+    if (chatId && finalReply) {
+      replyDelivered = await sendTelegramMessage(chatId, finalReply);
+      clientReplySent = true;
+      if (!replyDelivered) console.error('Client reply NOT delivered by Telegram; not recording it in dialog history');
+    }
+
+    // 10b. ЛОГ ДИАЛОГА. Недоставленный ответ в историю не пишем (иначе
+    // история покажет его как отправленный), шаг тоже не записываем.
+    await appendDialogTurn(
+      existing,
+      lastMessageForRecord,
+      replyDelivered || !finalReply ? finalReply : null,
+      replyDelivered || !finalReply ? loggedStep : undefined
+    );
   } catch (err) {
     console.error('INKA-BOT pipeline error:', err);
 
@@ -1010,7 +1113,8 @@ function buildMasterNotification(
   step: NextStep,
   clientLabel: string,
   username: string,
-  lastMessage: string
+  lastMessage: string,
+  contactDetails = ''
 ): string | null {
   const who = username ? `${clientLabel} (@${username})` : clientLabel;
   switch (step) {
@@ -1026,6 +1130,8 @@ function buildMasterNotification(
       return `🔄 ${who} просит перенести запись — напиши насчёт нового времени.`;
     case 'all_done':
       return `⏸ ${who} после озвученной цены не готов(а) записываться сейчас. Его слова: "${lastMessage}"`;
+    case 'master_contact_requested':
+      return `💬 ${who} хочет поговорить с тобой напрямую — напиши сам.${contactDetails ? ` Контакт: ${contactDetails}.` : ' Номера и канала пока нет — Инка спросила, ответ придёт отдельным сообщением.'} Последнее сообщение: "${lastMessage}"`;
     case 'slot_change_requested_waiting':
       // Reached only right after Inka asked what doesn't fit (day/time) and
       // whether there's a preference (see NextStep slot_preference_clarify)

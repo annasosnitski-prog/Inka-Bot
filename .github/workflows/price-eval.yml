@@ -1,41 +1,7 @@
 name: Price eval
 
+# Живые eval ходят в платный OpenAI — только ручной запуск (Actions → Run workflow).
 on:
-  pull_request:
-    paths:
-      - "lib/extractorPrompt.txt"
-      - "lib/extractorContractV2.txt"
-      - "lib/extractor.ts"
-      - "lib/pricingRules.txt"
-      - "lib/responderPrompt.txt"
-      - "lib/responderVoiceV2.txt"
-      - "lib/responder.ts"
-      - "lib/adminPrompt.txt"
-      - "lib/campaignExtractorOverlay.txt"
-      - "lib/campaignResponderOverlay.txt"
-      - "lib/campaignFlow.ts"
-      - "lib/campaigns.ts"
-      - "scripts/priceEval.ts"
-      - "scripts/dialogEval.ts"
-      - "scripts/campaignDialogEval.ts"
-  push:
-    branches: [main]
-    paths:
-      - "lib/extractorPrompt.txt"
-      - "lib/extractorContractV2.txt"
-      - "lib/extractor.ts"
-      - "lib/pricingRules.txt"
-      - "lib/responderPrompt.txt"
-      - "lib/responderVoiceV2.txt"
-      - "lib/responder.ts"
-      - "lib/adminPrompt.txt"
-      - "lib/campaignExtractorOverlay.txt"
-      - "lib/campaignResponderOverlay.txt"
-      - "lib/campaignFlow.ts"
-      - "lib/campaigns.ts"
-      - "scripts/priceEval.ts"
-      - "scripts/dialogEval.ts"
-      - "scripts/campaignDialogEval.ts"
   workflow_dispatch: {}
 
 jobs:
@@ -54,5 +20,14 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       - run: npm run eval:campaign-dialog
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - run: npm run eval:price:platon
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - run: npm run eval:dialog:platon
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - run: npm run eval:voice
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
