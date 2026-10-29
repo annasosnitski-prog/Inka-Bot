@@ -207,7 +207,7 @@ ok('аргумент цены только из price_reasons', /ТОЛЬКО т
 // Консультация: предоплата по профилю
 withEnv({ MASTER_PROFILE: 'platon' }, () => {
   const t = buildResponderPrompt();
-  ok('Платон: только предупреждение о предоплате', t.includes('Только предупреди: мастер работает по предоплате'));
+  ok('Платон: предупреждение о предоплате 400₪ после консультации', /понадобится предоплата 400₪/.test(t));
   ok('{{CONSULTATION_DEPOSIT_NOTE}} подставлен', !t.includes('{{'));
 });
 withEnv({ MASTER_PROFILE: 'anya' }, () => {
