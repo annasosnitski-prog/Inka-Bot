@@ -9,6 +9,7 @@ import { buildResponderPrompt, clientPriceReasons, projectTotalEstimate } from '
 import { buildAdminPrompt } from '../lib/admin';
 import { getCampaign } from '../lib/campaigns';
 import { resolveMasterTelegramId } from '../lib/masterTelegramId';
+import { tagDisplayLabel } from '../lib/calendar';
 import { inkaRepliesSinceStep, lastInkaStep, type DialogEntry } from '../lib/dialogLog';
 
 let passed = 0;
@@ -87,6 +88,7 @@ for (const [label, build] of [
   const r = buildResponderPrompt(platon);
   ok('responder Платона: депозит 400', r.includes('400₪') && !r.includes('200₪'));
   ok('responder Платона: его Instagram, без ссылок Ани', r.includes('instagram.com/platon_tattoo__') && !r.includes('ink_anya') && !r.includes('inkanya'));
+  ok('responder: вопрос «что ещё обдумать» обязателен при «подумаю»', r.includes('ОБЯЗАТЕЛЬНО') && r.includes('что ещё нужно обдумать'));
   ok('responder Платона: порог раскрытия итога 6000₪', r.includes('порог — 6000₪') && !r.includes('2500₪'));
   ok('responder Платона: реализм не в списке отказов', /Реализм сам по себе/.test(r));
   const a = buildResponderPrompt(anya);
@@ -215,5 +217,13 @@ withEnv({ MASTER_PROFILE: 'anya' }, () => {
   ok('Аня: называет предоплату 200₪ при консультации', /нужна предоплата 200₪/.test(t));
 });
 
+withEnv({ MASTER_PROFILE: 'platon' }, () => {
+  ok('слот консультации у Платона: «(в студии)»', tagDisplayLabel('[ЧАТ]') === ' (в студии)');
+});
+withEnv({ MASTER_PROFILE: 'anya' }, () => {
+  ok('слот консультации у Ани: «(по переписке)»', tagDisplayLabel('[ЧАТ]') === ' (по переписке)');
+});
+
 console.log(`\nMASTER PROFILES: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
+

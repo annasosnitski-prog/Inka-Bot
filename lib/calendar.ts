@@ -34,6 +34,7 @@
 // ============================================================
 
 import { createHash } from 'crypto';
+import { getMasterProfile } from './masters';
 
 // Свой календарь для каждого деплоя — см. MASTER_TELEGRAM_ID в pages/api/*.ts
 // и MASTER_NAME в lib/admin.ts про аналогичные параметры. По умолчанию —
@@ -98,7 +99,8 @@ export function tagOf(summary: string): SlotTag | null {
 export function tagDisplayLabel(tag: SlotTag | null): string {
   switch (tag) {
     case '[ЧАТ]':
-      return ' (по переписке)';
+      // Пул один и тот же; у мастера с очными консультациями это приём.
+      return getMasterProfile().consultationInPerson ? ' (в студии)' : ' (по переписке)';
     case '[ПРИЁМ]':
       return ' (в студии)';
     case '[ОКНО]':

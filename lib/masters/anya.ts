@@ -15,6 +15,7 @@ export const anya: MasterProfile = {
   consultationDepositNote:
     'Сразу назови предоплату: если по итогам консультации решишь записываться — нужна предоплата {{DEPOSIT}}₪ (входит в общую стоимость).',
   consultationOnly: false,
+  consultationInPerson: false,
   totalEstimateDisclosureLimit: 2500,
   campaigns: [
     {

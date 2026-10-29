@@ -1138,7 +1138,7 @@ function buildMasterNotification(
       // — lastMessage here IS that answer, in the client's own words.
       return `⏳ ${who} посмотрел(а) предложенные времена, но ни одно не подошло. Предпочтение по дню/времени: "${lastMessage}" — подходящих вариантов пока нет, спишись, когда появятся.`;
     case 'no_more_slots_waiting':
-      return `⏳ ${who} в листе ожидания — подходящих слотов сейчас нет.`;
+      return `⏳ ${who} в листе ожидания — подходящих слотов сейчас нет.${contactDetails ? ` Контакт: ${contactDetails}.` : ''}`;
     default:
       return null;
   }
