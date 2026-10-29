@@ -10,7 +10,7 @@ export const platon: MasterProfile = {
   nameGenitive: 'Платона',
   gender: 'male',
   // Ссылки Платона пока не даны — без них бот не называет никаких ссылок.
-  portfolioUrl: null,
+  portfolioUrl: 'https://www.instagram.com/platon_tattoo__/',
   website: null,
   depositAmount: '400',
   consultationDepositNote:

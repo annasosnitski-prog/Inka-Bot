@@ -86,7 +86,7 @@ for (const [label, build] of [
 {
   const r = buildResponderPrompt(platon);
   ok('responder Платона: депозит 400', r.includes('400₪') && !r.includes('200₪'));
-  ok('responder Платона: без ссылок — сказано не придумывать', r.includes('не придумывай их'));
+  ok('responder Платона: его Instagram, без ссылок Ани', r.includes('instagram.com/platon_tattoo__') && !r.includes('ink_anya') && !r.includes('inkanya'));
   ok('responder Платона: порог раскрытия итога 6000₪', r.includes('порог — 6000₪') && !r.includes('2500₪'));
   ok('responder Платона: реализм не в списке отказов', /Реализм сам по себе/.test(r));
   const a = buildResponderPrompt(anya);
