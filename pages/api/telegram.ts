@@ -565,6 +565,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // Согласие записаться без слова "да": клиент после цены прислал телефон
+    // (бот предлагал оставить номер) или прямо спросил, когда можно прийти /
+    // когда консультация. Раньше такие реплики оставались в чат-шагах цены:
+    // Инка писала "записала, передала мастеру", но запись и пинг не создавались.
+    if (
+      signals.client_confirms_booking === null &&
+      currentCard.wants_to_book === null &&
+      (!!currentCard.price_quoted || currentCard.price_explained === 'yes') &&
+      currentCard.price_shown === 'yes' &&
+      !signals.client_undecided &&
+      (extracted.phone ||
+        /когда\s+(можно\s+)?(прийти|придти|записаться)|когда\s+(будет\s+)?консультаци|(хочу|можно)\s+(записаться|на консультаци)/i.test(messageText ?? ''))
+    ) {
+      signals.client_confirms_booking = 'yes';
+      console.log('CODE OVERRIDE: client_confirms_booking = yes (телефон или вопрос "когда прийти" после цены)');
+    }
+
     // 4. STATE MACHINE — первый проход с тем, что уже знаем
     // (slot_options из Airtable могут быть устаревшими — сейчас
     // только определяем, в какую сторону движется диалог).
