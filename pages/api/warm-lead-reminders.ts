@@ -77,7 +77,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const text = `🌙 ${who} узнал цену${priceLine} и молчит уже ~${Math.round(hoursSilent)}ч, не ответив на "хочешь записаться?" — может, стоит написать лично.`;
 
       try {
-        await sendTelegramMessage(MASTER_TELEGRAM_ID, text);
+        if (!(await sendTelegramMessage(MASTER_TELEGRAM_ID, text))) throw new Error('Telegram send failed');
         await updateClient(record.id, { warm_lead_reminder_sent: 'yes' });
         reminded++;
       } catch (sendErr) {

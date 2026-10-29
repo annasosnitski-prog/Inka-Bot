@@ -91,7 +91,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const text = `⏰ ${who} — тату ${when}, а предоплата ${getDepositAmount()}₪ ещё не пришла (осталось ~${Math.round(hoursRemaining)}ч).`;
 
       try {
-        await sendTelegramMessage(MASTER_TELEGRAM_ID, text);
+        if (!(await sendTelegramMessage(MASTER_TELEGRAM_ID, text))) throw new Error('Telegram send failed');
         await updateClient(record.id, { payment_reminder_sent: 'yes' });
         reminded++;
       } catch (sendErr) {
@@ -138,7 +138,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const text = `💤 ${who} — тату ${when}, бронь стоит уже больше суток, а предоплата ${getDepositAmount()}₪ ещё не пришла.`;
 
       try {
-        await sendTelegramMessage(MASTER_TELEGRAM_ID, text);
+        if (!(await sendTelegramMessage(MASTER_TELEGRAM_ID, text))) throw new Error('Telegram send failed');
         await updateClient(record.id, { payment_reminder_early_sent: 'yes' });
         remindedEarly++;
       } catch (sendErr) {
