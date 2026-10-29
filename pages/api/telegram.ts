@@ -869,7 +869,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const deliverToMaster = async (text: string, forwardClientMessage = false): Promise<boolean> => {
-      for (let attempt = 0; attempt < 2; attempt++) {
+      for (let attempt = 0; attempt < 1; attempt++) {
         try {
           if (await sendMasterNote(text)) {
             if (forwardClientMessage && chatId && message.message_id) {

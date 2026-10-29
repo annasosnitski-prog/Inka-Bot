@@ -18,23 +18,31 @@ async function callTelegramApi(method: string, body: Record<string, unknown>): P
     return false;
   }
   const url = `https://api.telegram.org/bot${token}/${method}`;
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  } catch (err) {
-    console.error(`Telegram ${method} network error:`, err);
-    return false;
+  // Временные сбои (сеть, 5xx, 429 с retry_after) переживаем повторами с
+  // короткой паузой — мастеру важно получить пинг. Постоянные ошибки
+  // (400/403: чужой chat_id, бот заблокирован) повторять бессмысленно.
+  const delaysMs = [500, 1500, 3000];
+  for (let attempt = 0; ; attempt++) {
+    let retryAfterMs = 0;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) return true;
+      const errText = await res.text().catch(() => '');
+      console.error(`Telegram ${method} failed: ${res.status} ${errText}`);
+      const transient = res.status === 429 || res.status >= 500;
+      if (!transient) return false;
+      const m = /"retry_after"\s*:\s*(\d+)/.exec(errText);
+      if (m) retryAfterMs = Number(m[1]) * 1000;
+    } catch (err) {
+      console.error(`Telegram ${method} network error:`, err);
+    }
+    if (attempt >= delaysMs.length) return false;
+    await new Promise((r) => setTimeout(r, Math.min(Math.max(delaysMs[attempt], retryAfterMs), 4000)));
   }
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    console.error(`Telegram ${method} failed: ${res.status} ${errText}`);
-    return false;
-  }
-  return true;
 }
 
 // Возвращает true, только если Telegram принял сообщение.
