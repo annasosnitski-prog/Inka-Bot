@@ -212,7 +212,7 @@ export function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput 
     normalized.category === 'large' ||
     normalized.category === 'body_fit' ||
     normalized.category === 'project' ||
-    (getMasterProfile().consultationOnly && isTattooRequest)
+    (getMasterProfile().tattooBooking === 'master' && isTattooRequest)
   ) {
     normalized.direct_tattoo_allowed = 'no';
     normalized.consultation_needed = 'yes';

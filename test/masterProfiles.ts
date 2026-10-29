@@ -165,7 +165,7 @@ ok('нет данных → null', projectTotalEstimate('роза || medium, и�
 ok('старый формат → null', projectTotalEstimate('project ≈4800 суммарно') === null);
 ok('слово "итог" в левой части не считается', projectTotalEstimate('итог ≈ 5000₪ || medium') === null);
 
-console.log('\n▶ consultationOnly принуждает консультацию в коде');
+console.log('\n▶ tattooBooking master принуждает консультацию в коде');
 const raw = {
   idea: 'роза', size: '10 см', category: 'medium', direct_tattoo_allowed: 'yes', consultation_needed: 'no',
 } as unknown as ExtractorOutput;

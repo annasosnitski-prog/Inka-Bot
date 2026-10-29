@@ -100,7 +100,7 @@ export function tagDisplayLabel(tag: SlotTag | null): string {
   switch (tag) {
     case '[ЧАТ]':
       // Пул один и тот же; у мастера с очными консультациями это приём.
-      return getMasterProfile().consultationInPerson ? ' (в студии)' : ' (по переписке)';
+      return getMasterProfile().consultationMode === 'in_person' ? ' (в студии)' : ' (по переписке)';
     case '[ПРИЁМ]':
       return ' (в студии)';
     case '[ОКНО]':
