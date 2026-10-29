@@ -63,10 +63,32 @@ const GATED_HANDOFF_STEPS = new Set<string>([
   'slot_change_requested_waiting',
   'no_more_slots_waiting',
 ]);
-const SCREENSHOT_HANDOFF_FAILED_REPLY =
-  'Не получилось передать скрин мастеру прямо сейчас. Пришли его, пожалуйста, ещё раз чуть позже.';
-const HANDOFF_FAILED_REPLY =
-  'Не получилось передать это мастеру прямо сейчас. Напиши мне ещё раз чуть позже, и я попробую снова.';
+const BOOKING_STEPS = new Set<string>(['confirm_slot_awaiting_payment', 'confirm_consultation_booked', 'campaign_confirm_slot']);
+
+// Сообщения клиенту при недоставке пинга мастеру: язык по последнему
+// сообщению клиента (иврит / кириллица / иначе английский).
+type NoticeKind = 'handoff' | 'screenshot' | 'booking';
+const NOTICES: Record<'ru' | 'he' | 'en', Record<NoticeKind, string>> = {
+  ru: {
+    handoff: 'Не получилось передать это мастеру прямо сейчас. Напиши мне ещё раз чуть позже, и я попробую снова.',
+    screenshot: 'Не получилось передать скрин мастеру прямо сейчас. Пришли его, пожалуйста, ещё раз чуть позже.',
+    booking: 'Запись закреплена, но я не уверена, что мастер уже получил уведомление. Он увидит её в календаре.',
+  },
+  he: {
+    handoff: 'לא הצלחתי להעביר את זה למאסטר ברגע זה. כתבו לי שוב קצת מאוחר יותר ואנסה שוב.',
+    screenshot: 'לא הצלחתי להעביר את הצילום למאסטר ברגע זה. שלחו אותו שוב קצת מאוחר יותר, בבקשה.',
+    booking: 'ההזמנה נשמרה, אבל אני לא בטוחה שהמאסטר כבר קיבל הודעה. הוא יראה אותה ביומן.',
+  },
+  en: {
+    handoff: "I couldn't pass this to the master right now. Please write me again a bit later and I'll try again.",
+    screenshot: "I couldn't pass the screenshot to the master right now. Please send it again a bit later.",
+    booking: "Your booking is saved, but I'm not sure the master has been notified yet. They will see it in the calendar.",
+  },
+};
+function failureNotice(kind: NoticeKind, clientText: string): string {
+  const lang = /[\u0590-\u05FF]/.test(clientText) ? 'he' : /[а-яё]/i.test(clientText) ? 'ru' : 'en';
+  return NOTICES[lang][kind];
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -867,11 +889,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (mainNote) {
       const delivered = await deliverToMaster(mainNote, nextStep === 'payment_screenshot_received');
       if (!delivered && GATED_HANDOFF_STEPS.has(nextStep)) {
-        finalReply = nextStep === 'payment_screenshot_received' ? SCREENSHOT_HANDOFF_FAILED_REPLY : HANDOFF_FAILED_REPLY;
+        finalReply = failureNotice(nextStep === 'payment_screenshot_received' ? 'screenshot' : 'handoff', lastMessageForRecord);
         loggedStep = 'master_handoff_failed';
+      } else if (!delivered && BOOKING_STEPS.has(nextStep)) {
+        finalReply = `${finalReply}\n\n${failureNotice('booking', lastMessageForRecord)}`.trim();
       }
     }
-    for (const note of extraNotes) await deliverToMaster(note);
+    for (const note of extraNotes) {
+      const delivered = await deliverToMaster(note);
+      if (!delivered && BOOKING_STEPS.has(nextStep) && !mainNote) {
+        finalReply = `${finalReply}\n\n${failureNotice('booking', lastMessageForRecord)}`.trim();
+      }
+    }
 
     // 10. Отправить ответ, если он не пустой.
     if (chatId && finalReply) {
