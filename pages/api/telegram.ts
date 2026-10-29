@@ -52,8 +52,19 @@ import {
 const MASTER_TELEGRAM_ID = getMasterTelegramId();
 
 // Шаги, ответ клиенту на которых обещает передачу мастеру: пинг мастеру
-// отправляется ДО ответа и проверяется (см. шаг 9c).
-const HANDOFF_STEPS = new Set<string>(['master_contact_requested', 'reschedule_requested_ping_master', 'campaign_handoff']);
+// отправляется ДО ответа и проверяется (см. deliverToMaster).
+const GATED_HANDOFF_STEPS = new Set<string>([
+  'master_contact_requested',
+  'reschedule_requested_ping_master',
+  'campaign_handoff',
+  'campaign_slots_declined_waiting',
+  'payment_screenshot_received',
+  'new_project_after_booking',
+  'slot_change_requested_waiting',
+  'no_more_slots_waiting',
+]);
+const SCREENSHOT_HANDOFF_FAILED_REPLY =
+  'Не получилось передать скрин мастеру прямо сейчас. Пришли его, пожалуйста, ещё раз чуть позже.';
 const HANDOFF_FAILED_REPLY =
   'Не получилось передать это мастеру прямо сейчас. Напиши мне ещё раз чуть позже, и я попробую снова.';
 
@@ -778,10 +789,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         `${escapeHtml(text)}\n\nНаписать: ${clientContactLinks(telegramId, username, finalCard.phone ?? '')}`
       );
 
-    // Текст пинга мастеру для этого шага (null — пинг не нужен).
+    // Уведомления мастеру собираются ДО ответа клиенту и уходят с одной
+    // повторной попыткой. "gated" — ответ клиенту обещает передачу ("передала
+    // скрин/просьбу мастеру"): если пинг не доставлен, клиенту честно
+    // говорим, что не вышло, а в лог пишем не шаг передачи, чтобы следующая
+    // просьба отправилась заново. Остальные пинги (бронь уже закреплена,
+    // второй проект, кампания) не меняют ответ, но тоже идут с проверкой
+    // результата и пишут ошибку в лог при недоставке.
+    const notifyLabel = finalCard.client_name || clientLabel;
+    const who = username ? `${notifyLabel} (@${username})` : notifyLabel;
     // Просьба о разговоре с мастером пингует его один раз подряд: пока
     // Инка уже ответила "передала", повторные сообщения не спамят мастера.
-    const notifyLabel = finalCard.client_name || clientLabel;
     const repeatMasterContact =
       nextStep === 'master_contact_requested' &&
       lastInkaStep(parseDialogHistory(existing)) === 'master_contact_requested';
@@ -791,40 +809,69 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ]
       .filter(Boolean)
       .join(', ');
-    const masterNote: string | null =
+    const mainNote: string | null =
       nextStep === 'campaign_handoff' && campaignRouting
-        ? buildCampaignHandoffNotification(
-            campaignRouting.campaign,
-            finalCard.campaign_collected ?? {},
-            notifyLabel,
-            username
-          )
-        : repeatMasterContact
-          ? contactAnswerToMaster && contactDetails
-            ? `📞 ${username ? `${notifyLabel} (@${username})` : notifyLabel} оставил(а) контакт для связи: ${contactDetails}.`
-            : null
-          : buildMasterNotification(nextStep, notifyLabel, username, lastMessageForRecord, contactDetails);
+        ? buildCampaignHandoffNotification(campaignRouting.campaign, finalCard.campaign_collected ?? {}, notifyLabel, username)
+        : nextStep === 'campaign_slots_declined_waiting' && campaignRouting
+          // Inka только что спросила, что не подошло (день/время) —
+          // lastMessageForRecord и есть этот ответ клиента.
+          ? buildCampaignSlotsDeclinedNotification(campaignRouting.campaign, notifyLabel, username, lastMessageForRecord)
+          : repeatMasterContact
+            ? contactAnswerToMaster && contactDetails
+              ? `📞 ${who} оставил(а) контакт для связи: ${contactDetails}.`
+              : null
+            : buildMasterNotification(nextStep, notifyLabel, username, lastMessageForRecord, contactDetails);
 
-    // 9c. ПЕРЕДАЧА МАСТЕРУ ДО ОТВЕТА КЛИЕНТУ. Если ответ обещает "передала
-    // мастеру", сначала убеждаемся, что Telegram принял пинг (одна повторная
-    // попытка). Иначе клиенту честно говорим, что не вышло, и не пишем в
-    // лог шаг передачи, чтобы следующая просьба отправилась заново.
-    let masterNoteHandled = false;
-    let loggedStep: string = nextStep;
-    if (masterNote && HANDOFF_STEPS.has(nextStep)) {
-      masterNoteHandled = true;
-      let delivered = false;
-      try {
-        delivered = (await sendMasterNote(masterNote)) || (await sendMasterNote(masterNote));
-      } catch (handoffErr) {
-        console.error('Master handoff notification failed:', handoffErr);
+    const extraNotes: string[] = [];
+    if (isCreatingSecondProject) {
+      extraNotes.push(
+        `🆕 ${who} начал(а) второй, независимый проект при активной записи. Текущая бронь не изменена — веду второй проект отдельно, как обычного нового клиента.`
+      );
+    }
+    if (campaignRouting && nextStep === 'campaign_confirm_slot') {
+      extraNotes.push(
+        buildCampaignSlotBookedNotification(
+          campaignRouting.campaign,
+          finalCard.campaign_collected ?? {},
+          notifyLabel,
+          username,
+          finalCard.booked_slot_display ?? 'см. календарь [КАМПЕЙН]'
+        )
+      );
+    }
+    if (campaignRouting && nextStep === 'campaign_no_slots' && liveCard.campaign_collected?.__no_slots_pinged !== '1') {
+      extraNotes.push(buildCampaignNoSlotsNotification(campaignRouting.campaign, notifyLabel, username));
+    }
+    if (!mainNote && extraNotes.length === 0 && pingOnEveryMessage()) {
+      extraNotes.push(buildGenericMessagePing(notifyLabel, username, lastMessageForRecord));
+    }
+
+    const deliverToMaster = async (text: string, forwardClientMessage = false): Promise<boolean> => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          if (await sendMasterNote(text)) {
+            if (forwardClientMessage && chatId && message.message_id) {
+              await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
+            }
+            return true;
+          }
+        } catch (deliverErr) {
+          console.error('Master notification attempt failed:', deliverErr);
+        }
       }
-      if (!delivered) {
-        console.error(`Master handoff NOT delivered for step ${nextStep}; client told honestly`);
-        finalReply = HANDOFF_FAILED_REPLY;
+      console.error(`Master notification NOT delivered (step ${nextStep})`);
+      return false;
+    };
+
+    let loggedStep: string = nextStep;
+    if (mainNote) {
+      const delivered = await deliverToMaster(mainNote, nextStep === 'payment_screenshot_received');
+      if (!delivered && GATED_HANDOFF_STEPS.has(nextStep)) {
+        finalReply = nextStep === 'payment_screenshot_received' ? SCREENSHOT_HANDOFF_FAILED_REPLY : HANDOFF_FAILED_REPLY;
         loggedStep = 'master_handoff_failed';
       }
     }
+    for (const note of extraNotes) await deliverToMaster(note);
 
     // 10. Отправить ответ, если он не пустой.
     if (chatId && finalReply) {
@@ -834,86 +881,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // 10b. ЛОГ ДИАЛОГА.
     await appendDialogTurn(existing, lastMessageForRecord, finalReply, loggedStep);
-
-    // 10c. НОВЫЙ ВТОРОЙ ПРОЕКТ — одноразовое уведомление в момент создания
-    // отдельной записи (не завязано на nextStep: клиент по этой новой
-    // записи уже идёт по обычной воронке — ask_idea и т.д., а не по
-    // старому статичному hand-off тексту).
-    if (isCreatingSecondProject) {
-      try {
-        const who = username ? `${notifyLabel} (@${username})` : notifyLabel;
-        await sendMasterNote(
-          `🆕 ${who} начал(а) второй, независимый проект при активной записи. Текущая бронь не изменена — веду второй проект отдельно, как обычного нового клиента.`
-        );
-      } catch (notifySecondErr) {
-        console.error('Second-project master notification failed:', notifySecondErr);
-      }
-    }
-
-    // 10d. CAMPAIGN NOTIFICATIONS — хэндофф (master_approval), подтверждённая
-    // бронь [КАМПЕЙН]-слота, и одноразовый пинг "пул пуст" (self_book_slot).
-    // Отдельно от buildMasterNotification ниже — тому шагу неоткуда взять
-    // campaign/collected без лишних параметров.
-    if (campaignRouting) {
-      try {
-        if (nextStep === 'campaign_handoff') {
-          // уже отправлено в шаге 9c, до ответа клиенту
-        } else if (nextStep === 'campaign_confirm_slot') {
-          const whenDisplay = finalCard.booked_slot_display ?? 'см. календарь [КАМПЕЙН]';
-          const note = buildCampaignSlotBookedNotification(
-            campaignRouting.campaign,
-            finalCard.campaign_collected ?? {},
-            notifyLabel,
-            username,
-            whenDisplay
-          );
-          await sendMasterNote(note);
-        } else if (
-          nextStep === 'campaign_no_slots' &&
-          liveCard.campaign_collected?.__no_slots_pinged !== '1'
-        ) {
-          const note = buildCampaignNoSlotsNotification(campaignRouting.campaign, notifyLabel, username);
-          await sendMasterNote(note);
-        } else if (nextStep === 'campaign_slots_declined_waiting') {
-          // Reached right after Inka asked what doesn't fit (day/time) and
-          // whether there's a preference (campaign_slots_decline_clarify) —
-          // lastMessageForRecord here IS that answer, client's own words.
-          const note = buildCampaignSlotsDeclinedNotification(
-            campaignRouting.campaign,
-            notifyLabel,
-            username,
-            lastMessageForRecord
-          );
-          await sendMasterNote(note);
-        }
-      } catch (campaignNotifyErr) {
-        console.error('Campaign notification failed:', campaignNotifyErr);
-      }
-    }
-
-    // 11. ПИНГ МАСТЕРУ. Шаги, которые обещают "передала мастеру" или
-    // требуют действия Ани, должны иметь реальный пинг, а не только текст.
-    try {
-      if (masterNote && masterNoteHandled) {
-        // отправлено в шаге 9c
-      } else if (masterNote) {
-        await sendMasterNote(masterNote);
-        if (
-          nextStep === 'payment_screenshot_received' &&
-          chatId &&
-          message.message_id
-        ) {
-          await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
-        }
-      } else if (pingOnEveryMessage()) {
-        await sendTelegramMessage(
-          MASTER_TELEGRAM_ID,
-          buildGenericMessagePing(notifyLabel, username, lastMessageForRecord)
-        );
-      }
-    } catch (notifyErr) {
-      console.error('Master notification failed:', notifyErr);
-    }
   } catch (err) {
     console.error('INKA-BOT pipeline error:', err);
 
