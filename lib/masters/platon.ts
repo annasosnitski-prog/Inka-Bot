@@ -13,6 +13,8 @@ export const platon: MasterProfile = {
   portfolioUrl: null,
   website: null,
   depositAmount: '400',
+  consultationDepositNote:
+    'Только предупреди: мастер работает по предоплате. Сумму, реквизиты и способ оплаты не называй и не обещай — бот предоплату не берёт, условия и оплату обсудит мастер на консультации.',
   consultationOnly: true,
   totalEstimateDisclosureLimit: 6000,
   campaigns: [],

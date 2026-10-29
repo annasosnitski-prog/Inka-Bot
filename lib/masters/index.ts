@@ -40,6 +40,7 @@ export function applyProfilePlaceholders(text: string, p: MasterProfile = getMas
   // Блоки профиля подставляются первыми: внутри них тоже бывают
   // {{MASTER_NAME}}/{{DEPOSIT}}, их заменят строки ниже.
   return text
+    .replace(/\{\{CONSULTATION_DEPOSIT_NOTE\}\}/g, () => p.consultationDepositNote)
     .replace(/\{\{PRICING_RULES\}\}/g, () => p.pricingRules())
     .replace(/\{\{SERVICE_SCOPE\}\}/g, () => p.serviceScope())
     .replace(/\{\{MASTER_RULES\}\}/g, () => p.responderRules().trim() || 'Особых правил нет — действуют общие.')

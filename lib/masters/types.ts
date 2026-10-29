@@ -14,6 +14,10 @@ export interface MasterProfile {
   portfolioUrl: string | null;
   website: string | null;
   depositAmount: string;
+  // Что Инка говорит про предоплату при записи на консультацию. Пустая
+  // строка не допускается: если предоплаты через бота нет, это прямо
+  // написано (бот про оплату молчит).
+  consultationDepositNote: string;
   // Нет прямой записи на тату: любой запрос про тату идёт на консультацию.
   consultationOnly: boolean;
   campaigns: CampaignConfig[];

@@ -12,6 +12,8 @@ export const anya: MasterProfile = {
   portfolioUrl: 'https://www.instagram.com/ink_anya',
   website: 'inkanya.co.il',
   depositAmount: '200',
+  consultationDepositNote:
+    'Сразу назови предоплату: если по итогам консультации решишь записываться — нужна предоплата {{DEPOSIT}}₪ (входит в общую стоимость).',
   consultationOnly: false,
   totalEstimateDisclosureLimit: 2500,
   campaigns: [

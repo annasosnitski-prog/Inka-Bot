@@ -204,5 +204,16 @@ const core = buildResponderPrompt();
 ok('нет общего вывода про заливку и проработку', !/меньше заливки\s*—\s*больше проработки/.test(core) && !/заливки мало, а значит больше/.test(core.replace(/Плохо:[^\n]*\n[^\n]*\n/g, '')));
 ok('аргумент цены только из price_reasons', /ТОЛЬКО тем, что названо в\s+price_reasons/.test(core));
 
+// Консультация: предоплата по профилю
+withEnv({ MASTER_PROFILE: 'platon' }, () => {
+  const t = buildResponderPrompt();
+  ok('Платон: только предупреждение о предоплате', t.includes('Только предупреди: мастер работает по предоплате'));
+  ok('{{CONSULTATION_DEPOSIT_NOTE}} подставлен', !t.includes('{{'));
+});
+withEnv({ MASTER_PROFILE: 'anya' }, () => {
+  const t = buildResponderPrompt();
+  ok('Аня: называет предоплату 200₪ при консультации', /нужна предоплата 200₪/.test(t));
+});
+
 console.log(`\nMASTER PROFILES: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
