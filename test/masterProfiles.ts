@@ -9,6 +9,8 @@ import { buildResponderPrompt, clientPriceReasons, projectTotalEstimate } from '
 import { buildAdminPrompt } from '../lib/admin';
 import { getCampaign } from '../lib/campaigns';
 import { resolveMasterTelegramId } from '../lib/masterTelegramId';
+import { tagDisplayLabel, tagsForRequest, busyMarkerForTag } from '../lib/calendar';
+import { parseAddSlotCommand } from '../lib/addSlotParser';
 import { inkaRepliesSinceStep, lastInkaStep, type DialogEntry } from '../lib/dialogLog';
 
 let passed = 0;
@@ -87,6 +89,7 @@ for (const [label, build] of [
   const r = buildResponderPrompt(platon);
   ok('responder Платона: депозит 400', r.includes('400₪') && !r.includes('200₪'));
   ok('responder Платона: его Instagram, без ссылок Ани', r.includes('instagram.com/platon_tattoo__') && !r.includes('ink_anya') && !r.includes('inkanya'));
+  ok('responder: вопрос «что ещё обдумать» обязателен при «подумаю»', r.includes('ОБЯЗАТЕЛЬНО') && r.includes('что ещё нужно обдумать'));
   ok('responder Платона: порог раскрытия итога 6000₪', r.includes('порог — 6000₪') && !r.includes('2500₪'));
   ok('responder Платона: реализм не в списке отказов', /Реализм сам по себе/.test(r));
   const a = buildResponderPrompt(anya);
@@ -163,7 +166,7 @@ ok('нет данных → null', projectTotalEstimate('роза || medium, и�
 ok('старый формат → null', projectTotalEstimate('project ≈4800 суммарно') === null);
 ok('слово "итог" в левой части не считается', projectTotalEstimate('итог ≈ 5000₪ || medium') === null);
 
-console.log('\n▶ consultationOnly принуждает консультацию в коде');
+console.log('\n▶ tattooBooking master принуждает консультацию в коде');
 const raw = {
   idea: 'роза', size: '10 см', category: 'medium', direct_tattoo_allowed: 'yes', consultation_needed: 'no',
 } as unknown as ExtractorOutput;
@@ -215,5 +218,18 @@ withEnv({ MASTER_PROFILE: 'anya' }, () => {
   ok('Аня: называет предоплату 200₪ при консультации', /нужна предоплата 200₪/.test(t));
 });
 
+withEnv({ MASTER_PROFILE: 'platon' }, () => {
+  ok('Платон: слот консультации [КОНС] → «(в студии)»', tagDisplayLabel('[КОНС]') === ' (в студии)');
+  ok('Платон: бот предлагает только [КОНС]', JSON.stringify(tagsForRequest('consultation')) === JSON.stringify(['[КОНС]']));
+  ok('Платон: «/добавить чат» и «конса» → [КОНС]', ['чат', 'конса'].every((w) => { const r = parseAddSlotCommand(`${w} завтра 10:00-10:30`, new Date('2026-07-13T09:00:00Z')); return r.ok && r.tag === '[КОНС]'; }));
+});
+withEnv({ MASTER_PROFILE: 'anya' }, () => {
+  ok('Аня: слот консультации [ЧАТ] → «(по переписке)»', tagDisplayLabel('[ЧАТ]') === ' (по переписке)');
+  ok('Аня: бот предлагает только [ЧАТ]', JSON.stringify(tagsForRequest('consultation')) === JSON.stringify(['[ЧАТ]']));
+  ok('Аня: «чат» и «конса» → [ЧАТ]', ['чат', 'конса'].every((w) => { const r = parseAddSlotCommand(`${w} завтра 10:00-10:30`, new Date('2026-07-13T09:00:00Z')); return r.ok && r.tag === '[ЧАТ]'; }));
+});
+ok('бронь [КОНС] → КОНС ЗАПИСЬ', busyMarkerForTag('[КОНС]', 'consultation') === 'КОНС ЗАПИСЬ');
+
 console.log(`\nMASTER PROFILES: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
+

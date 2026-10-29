@@ -15,7 +15,8 @@ export const platon: MasterProfile = {
   depositAmount: '400',
   consultationDepositNote:
     'Предупреди: если на консультации договоритесь о встрече (сеансе), понадобится предоплата {{DEPOSIT}}₪. Реквизиты и оплату не обещай: бот предоплату не берёт, мастер {{MASTER_SELF}} свяжется с клиентом, подтвердит запись и объяснит оплату.',
-  consultationOnly: true,
+  consultationMode: 'in_person',
+  tattooBooking: 'master',
   totalEstimateDisclosureLimit: 6000,
   campaigns: [],
   pricingRules: () =>

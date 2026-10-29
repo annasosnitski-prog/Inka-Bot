@@ -8,7 +8,7 @@
 // ============================================================
 
 import type { SlotTag, SlotFamily } from './calendar';
-import { familyOfTag, MAX_CONSULTATION_HOURS } from './calendar';
+import { familyOfTag, consultationSlotTag, MAX_CONSULTATION_HOURS } from './calendar';
 
 export interface ParsedAddSlot {
   ok: true;
@@ -69,6 +69,9 @@ const TAG_PATTERNS: { re: RegExp; tag: SlotTag }[] = [
   // пересекается ни с одним из клиентских тегов выше/ниже.
   { re: /кампейн|кампани|модел/i, tag: '[КАМПЕЙН]' },
   { re: /тату|tattoo/i, tag: '[ТАТУ]' },
+  // «конса» — слово для открытого слота консультации (в /закрой и /удали
+  // «конс» по-прежнему значит приём-семью).
+  { re: /(?<![а-яё])конса(?![а-яё])/i, tag: '[КОНС]' },
   { re: /приём|прием|конс|студи|очн/i, tag: '[ПРИЁМ]' },
 ];
 
@@ -204,9 +207,13 @@ export function findTimeRange(text: string): { startTime: string; endTime: strin
 
 // ---- Главная функция ----
 export function parseAddSlotCommand(text: string, now: Date): ParsedAddSlot | ParseFailure {
-  const tag = findTag(text);
+  const found = findTag(text);
+  // «чат» и «конса» создают слот консультации ЭТОГО мастера: у Ани [ЧАТ],
+  // у Платона [КОНС] — иначе слот получил бы тег, который бот клиенту не
+  // предлагает.
+  const tag = found === '[ЧАТ]' || found === '[КОНС]' ? consultationSlotTag() : found;
   if (!tag) {
-    return { ok: false, error: 'не поняла тип слота. напиши: чат / окно / кампейн.' };
+    return { ok: false, error: 'не поняла тип слота. напиши: чат (или конса) / окно / кампейн.' };
   }
   // [ТАТУ]/[ПРИЁМ] — это Дневник-сессии мастера с реальным клиентом, бот их
   // никогда не предлагает в чате (см. tagsForRequest в lib/calendar.ts).

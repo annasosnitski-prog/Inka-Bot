@@ -34,6 +34,7 @@
 // ============================================================
 
 import { createHash } from 'crypto';
+import { getMasterProfile } from './masters';
 
 // Свой календарь для каждого деплоя — см. MASTER_TELEGRAM_ID в pages/api/*.ts
 // и MASTER_NAME в lib/admin.ts про аналогичные параметры. По умолчанию —
@@ -63,8 +64,14 @@ export type SlotType = keyof typeof SLOT_TAG; // 'consultation' | 'tattoo'
 // В отличие от ОКНО/ЧАТ у него нет "сестринского" Дневник-тега — кампания
 // не синхронизируется с Дневником, это полностью отдельный пул, который
 // не пересекается с обычными клиентскими слотами ни по тегу, ни по смыслу.
-export type SlotTag = '[ТАТУ]' | '[ПРИЁМ]' | '[ЧАТ]' | '[ОКНО]' | '[КАМПЕЙН]';
-const ALL_TAGS: SlotTag[] = ['[ТАТУ]', '[ПРИЁМ]', '[ЧАТ]', '[ОКНО]', '[КАМПЕЙН]'];
+export type SlotTag = '[ТАТУ]' | '[ПРИЁМ]' | '[ЧАТ]' | '[КОНС]' | '[ОКНО]' | '[КАМПЕЙН]';
+const ALL_TAGS: SlotTag[] = ['[ТАТУ]', '[ПРИЁМ]', '[ЧАТ]', '[КОНС]', '[ОКНО]', '[КАМПЕЙН]'];
+
+// Тег открытого слота консультации у текущего мастера: [ЧАТ] — по переписке,
+// [КОНС] — очная консультация (profile.consultationMode).
+export function consultationSlotTag(): '[ЧАТ]' | '[КОНС]' {
+  return getMasterProfile().consultationMode === 'in_person' ? '[КОНС]' : '[ЧАТ]';
+}
 
 // Тип запроса на бронирование клиентом — шире SlotType (который привязан
 // к Дневник-тегам ТАТУ/ПРИЁМ): кампания не ведёт Дневник-сессии, поэтому
@@ -84,7 +91,7 @@ export type BookingType = SlotType | 'campaign';
 export function tagsForRequest(type: BookingType): SlotTag[] {
   if (type === 'tattoo') return ['[ОКНО]'];
   if (type === 'campaign') return ['[КАМПЕЙН]'];
-  return ['[ЧАТ]'];
+  return [consultationSlotTag()];
 }
 
 // Тег события по началу названия (или null — личное событие без тега).
@@ -99,6 +106,8 @@ export function tagDisplayLabel(tag: SlotTag | null): string {
   switch (tag) {
     case '[ЧАТ]':
       return ' (по переписке)';
+    case '[КОНС]':
+      return ' (в студии)';
     case '[ПРИЁМ]':
       return ' (в студии)';
     case '[ОКНО]':
@@ -117,7 +126,7 @@ export function tagDisplayLabel(tag: SlotTag | null): string {
 export function busyMarkerForTag(tag: SlotTag | null, type: BookingType): string {
   if (type === 'tattoo') return 'ОЖИДАЕТ ПРЕДОПЛАТЫ';
   if (type === 'campaign') return 'КАМПЕЙН ЗАПИСЬ';
-  return tag === '[ПРИЁМ]' ? 'КОНС ЗАПИСЬ' : 'КОНС ЧАТ';
+  return tag === '[ПРИЁМ]' || tag === '[КОНС]' ? 'КОНС ЗАПИСЬ' : 'КОНС ЧАТ';
 }
 
 // Маркер для блокировок, которые мастер ставит САМА через бот-команду
@@ -161,7 +170,7 @@ export function familyOfTag(tag: SlotTag): SlotFamily {
 export function tagsInFamily(family: SlotFamily): SlotTag[] {
   if (family === 'tattoo') return ['[ТАТУ]', '[ОКНО]'];
   if (family === 'campaign') return ['[КАМПЕЙН]'];
-  return ['[ПРИЁМ]', '[ЧАТ]'];
+  return ['[ПРИЁМ]', '[ЧАТ]', '[КОНС]'];
 }
 
 export interface AvailableSlot {
@@ -529,7 +538,7 @@ export async function getAvailableSlots(
 
         // Лаг 24ч — для всех клиент-бронируемых тегов (см. LEAD_TIME_HOURS).
         if (
-          (eventTag === '[ОКНО]' || eventTag === '[ЧАТ]' || eventTag === '[КАМПЕЙН]') &&
+          (eventTag === '[ОКНО]' || eventTag === '[ЧАТ]' || eventTag === '[КОНС]' || eventTag === '[КАМПЕЙН]') &&
           startMs < leadTimeMs
         ) {
           return false;
@@ -684,7 +693,7 @@ export async function getSchedule(days = 7): Promise<ScheduleEvent[]> {
     const type: BookingType | null =
       eventTag === '[ТАТУ]' || eventTag === '[ОКНО]'
         ? 'tattoo'
-        : eventTag === '[ПРИЁМ]' || eventTag === '[ЧАТ]'
+        : eventTag === '[ПРИЁМ]' || eventTag === '[ЧАТ]' || eventTag === '[КОНС]'
         ? 'consultation'
         : eventTag === '[КАМПЕЙН]'
         ? 'campaign'
