@@ -84,8 +84,8 @@ export async function forwardTelegramMessage(
   toChatId: number,
   fromChatId: number,
   messageId: number
-): Promise<void> {
-  await callTelegramApi('forwardMessage', {
+): Promise<boolean> {
+  return callTelegramApi('forwardMessage', {
     chat_id: toChatId,
     from_chat_id: fromChatId,
     message_id: messageId,

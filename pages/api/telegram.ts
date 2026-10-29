@@ -67,22 +67,25 @@ const BOOKING_STEPS = new Set<string>(['confirm_slot_awaiting_payment', 'confirm
 
 // Сообщения клиенту при недоставке пинга мастеру: язык по последнему
 // сообщению клиента (иврит / кириллица / иначе английский).
-type NoticeKind = 'handoff' | 'screenshot' | 'booking';
+type NoticeKind = 'handoff' | 'screenshot' | 'booking' | 'photo';
 const NOTICES: Record<'ru' | 'he' | 'en', Record<NoticeKind, string>> = {
   ru: {
     handoff: 'Не получилось передать это мастеру прямо сейчас. Напиши мне ещё раз чуть позже, и я попробую снова.',
     screenshot: 'Не получилось передать скрин мастеру прямо сейчас. Пришли его, пожалуйста, ещё раз чуть позже.',
     booking: 'Запись закреплена, но я не уверена, что мастер уже получил уведомление. Он увидит её в календаре.',
+    photo: 'Не получилось передать это фото мастеру прямо сейчас. Пришли его, пожалуйста, ещё раз чуть позже.',
   },
   he: {
     handoff: 'לא הצלחתי להעביר את זה למאסטר ברגע זה. כתבו לי שוב קצת מאוחר יותר ואנסה שוב.',
     screenshot: 'לא הצלחתי להעביר את הצילום למאסטר ברגע זה. שלחו אותו שוב קצת מאוחר יותר, בבקשה.',
     booking: 'ההזמנה נשמרה, אבל אני לא בטוחה שהמאסטר כבר קיבל הודעה. הוא יראה אותה ביומן.',
+    photo: 'לא הצלחתי להעביר את התמונה למאסטר ברגע זה. שלחו אותה שוב קצת מאוחר יותר, בבקשה.',
   },
   en: {
     handoff: "I couldn't pass this to the master right now. Please write me again a bit later and I'll try again.",
     screenshot: "I couldn't pass the screenshot to the master right now. Please send it again a bit later.",
     booking: "Your booking is saved, but I'm not sure the master has been notified yet. They will see it in the calendar.",
+    photo: "I couldn't pass this photo to the master right now. Please send it again a bit later.",
   },
 };
 function failureNotice(kind: NoticeKind, clientText: string): string {
@@ -219,6 +222,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // вообще никакого ответа при сбое (OpenAI/Airtable/Calendar), и чтобы не
   // слать ему дублирующий "что-то пошло не так" после уже отправленного ответа.
   let clientReplySent = false;
+  let campaignPhotoForwardFailed = false;
 
   try {
     // 1. Найти ВСЕ проекты этого telegram_id. Клиент может вести до двух
@@ -325,8 +329,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // или не принято Extractor-ом как достаточно крупное/близкое).
     if (campaignRoutingBefore?.pendingField && hasPhoto && chatId && message.message_id) {
       try {
-        await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
+        campaignPhotoForwardFailed = !(await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id));
       } catch (campaignPhotoForwardErr) {
+        campaignPhotoForwardFailed = true;
         console.error('Campaign field photo forward failed:', campaignPhotoForwardErr);
       }
     }
@@ -873,7 +878,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         try {
           if (await sendMasterNote(text)) {
             if (forwardClientMessage && chatId && message.message_id) {
-              await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id);
+              // Без самого скрина "передала" было бы неправдой.
+              if (!(await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id))) return false;
             }
             return true;
           }
@@ -903,13 +909,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // 10. Отправить ответ, если он не пустой.
+    if (campaignPhotoForwardFailed) {
+      finalReply = `${finalReply}\n\n${failureNotice('photo', lastMessageForRecord)}`.trim();
+    }
+    let replyDelivered = false;
     if (chatId && finalReply) {
-      await sendTelegramMessage(chatId, finalReply);
+      replyDelivered = await sendTelegramMessage(chatId, finalReply);
       clientReplySent = true;
+      if (!replyDelivered) console.error('Client reply NOT delivered by Telegram; not recording it in dialog history');
     }
 
-    // 10b. ЛОГ ДИАЛОГА.
-    await appendDialogTurn(existing, lastMessageForRecord, finalReply, loggedStep);
+    // 10b. ЛОГ ДИАЛОГА. Недоставленный ответ в историю не пишем (иначе
+    // история покажет его как отправленный), шаг тоже не записываем.
+    await appendDialogTurn(
+      existing,
+      lastMessageForRecord,
+      replyDelivered || !finalReply ? finalReply : null,
+      replyDelivered || !finalReply ? loggedStep : undefined
+    );
   } catch (err) {
     console.error('INKA-BOT pipeline error:', err);
 
