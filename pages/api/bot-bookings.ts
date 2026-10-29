@@ -76,7 +76,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .filter((e) => {
         if (e.isBusy) return false;
         const tag = tagOf(e.summary);
-        return tag === '[ОКНО]' || tag === '[ЧАТ]';
+        return tag === '[ОКНО]' || tag === '[ЧАТ]' || tag === '[КОНС]';
       })
       .map((e) => ({
         id: e.id,

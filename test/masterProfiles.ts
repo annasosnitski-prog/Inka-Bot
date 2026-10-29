@@ -9,7 +9,8 @@ import { buildResponderPrompt, clientPriceReasons, projectTotalEstimate } from '
 import { buildAdminPrompt } from '../lib/admin';
 import { getCampaign } from '../lib/campaigns';
 import { resolveMasterTelegramId } from '../lib/masterTelegramId';
-import { tagDisplayLabel } from '../lib/calendar';
+import { tagDisplayLabel, tagsForRequest, busyMarkerForTag } from '../lib/calendar';
+import { parseAddSlotCommand } from '../lib/addSlotParser';
 import { inkaRepliesSinceStep, lastInkaStep, type DialogEntry } from '../lib/dialogLog';
 
 let passed = 0;
@@ -218,11 +219,16 @@ withEnv({ MASTER_PROFILE: 'anya' }, () => {
 });
 
 withEnv({ MASTER_PROFILE: 'platon' }, () => {
-  ok('слот консультации у Платона: «(в студии)»', tagDisplayLabel('[ЧАТ]') === ' (в студии)');
+  ok('Платон: слот консультации [КОНС] → «(в студии)»', tagDisplayLabel('[КОНС]') === ' (в студии)');
+  ok('Платон: бот предлагает только [КОНС]', JSON.stringify(tagsForRequest('consultation')) === JSON.stringify(['[КОНС]']));
+  ok('Платон: «/добавить чат» и «конса» → [КОНС]', ['чат', 'конса'].every((w) => { const r = parseAddSlotCommand(`${w} завтра 10:00-10:30`, new Date('2026-07-13T09:00:00Z')); return r.ok && r.tag === '[КОНС]'; }));
 });
 withEnv({ MASTER_PROFILE: 'anya' }, () => {
-  ok('слот консультации у Ани: «(по переписке)»', tagDisplayLabel('[ЧАТ]') === ' (по переписке)');
+  ok('Аня: слот консультации [ЧАТ] → «(по переписке)»', tagDisplayLabel('[ЧАТ]') === ' (по переписке)');
+  ok('Аня: бот предлагает только [ЧАТ]', JSON.stringify(tagsForRequest('consultation')) === JSON.stringify(['[ЧАТ]']));
+  ok('Аня: «чат» и «конса» → [ЧАТ]', ['чат', 'конса'].every((w) => { const r = parseAddSlotCommand(`${w} завтра 10:00-10:30`, new Date('2026-07-13T09:00:00Z')); return r.ok && r.tag === '[ЧАТ]'; }));
 });
+ok('бронь [КОНС] → КОНС ЗАПИСЬ', busyMarkerForTag('[КОНС]', 'consultation') === 'КОНС ЗАПИСЬ');
 
 console.log(`\nMASTER PROFILES: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
