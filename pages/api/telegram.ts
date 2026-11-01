@@ -152,17 +152,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // просто попадёт в обычную воронку с пустым первым сообщением.
   let campaignActivationId: string | null = null;
   let isStartCommand = false;
+  let startPayload: string | null = null;
   if (messageText === '/start' || (messageText && messageText.startsWith('/start '))) {
     isStartCommand = true;
     const payload = messageText.slice('/start'.length).trim();
+    startPayload = payload || null;
     const campaign = getCampaign(payload);
     if (campaign) campaignActivationId = campaign.id;
     messageText = null;
   }
 
+  // Метка /start сохраняется в last_message как есть, даже если она не
+  // совпала ни с одной активной кампанией — иначе произвольная метка
+  // источника (например t.me/bot?start=insta_anya для инстаграма) теряется
+  // и мастеру не видно, откуда пришёл клиент.
   const lastMessageForRecord =
     messageText ??
-    (isStartCommand ? `[/start ${campaignActivationId ?? ''}]`.trim() : '[клиент прислал фото без подписи]');
+    (isStartCommand ? `[/start ${startPayload ?? ''}]`.trim() : '[клиент прислал фото без подписи]');
 
   const isAdminSender = telegramId === MASTER_TELEGRAM_ID;
   const clientLabel = firstName || username || String(telegramId);
