@@ -35,6 +35,11 @@ function masterLinks(p: MasterProfile): string {
   return lines.join('\n');
 }
 
+// Соцсеть спрашиваем не перед слотами, а уже после записи, одним коротким
+// необязательным предложением в конце подтверждения.
+const SOCIAL_AFTER_BOOKING =
+  'В конце, если client_card.social_asked не "yes" и social_link пуст, одним коротким предложением и необязательно попроси инстаграм или фейсбук, чтобы мастеру было видно, с кем будет встреча ("и если пользуешься — скинь инстаграм, не обязательно 🙂"). Не настаивай.';
+
 export function applyProfilePlaceholders(text: string, p: MasterProfile = getMasterProfile()): string {
   const isMale = p.gender === 'male';
   // Блоки профиля подставляются первыми: внутри них тоже бывают
@@ -46,6 +51,12 @@ export function applyProfilePlaceholders(text: string, p: MasterProfile = getMas
     .replace(/\{\{MASTER_RULES\}\}/g, () => p.responderRules().trim() || 'Особых правил нет — действуют общие.')
     .replace(/\{\{MASTER_VALUE\}\}/g, () => p.valueContext())
     .replace(/\{\{TOTAL_ESTIMATE_LIMIT\}\}/g, String(p.totalEstimateDisclosureLimit))
+    .replace(/\{\{CONTACT_CHANNEL_ASK\}\}/g, () =>
+      p.consultationMode === 'chat'
+        ? 'consultation_needed = "yes" — туда же: "...и куда мастеру удобнее потом написать — сюда в телеграм или в вотсап?". '
+        : 'Канал связи НЕ спрашивай: связь остаётся в телеграме. '
+    )
+    .replace(/\{\{SOCIAL_AFTER_BOOKING\}\}/g, SOCIAL_AFTER_BOOKING)
     .replace(/\{\{MASTER_LINKS\}\}/g, () => masterLinks(p))
     .replace(/\{\{MASTER_NAME_GEN\}\}/g, p.nameGenitive)
     .replace(/\{\{MASTER_NAME_DAT\}\}/g, p.nameDative)

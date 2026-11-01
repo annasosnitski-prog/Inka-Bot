@@ -262,6 +262,14 @@ ok('Extractor: возврат после паузы = новый запрос', 
   ok('Платон: предоплата 400₪ после очной встречи', rp.includes('ПОСЛЕ этой встречи') && rp.includes('400₪') && !ra.includes('ПОСЛЕ этой встречи'));
 }
 
+{
+  const rp = buildResponderPrompt(platon);
+  const ra = buildResponderPrompt(anya);
+  ok('канал связи: у Ани спрашиваем, у Платона (очно) нет', ra.includes('сюда в телеграм или в вотсап?". Для тату') && rp.includes('Канал связи НЕ спрашивай'));
+  ok('соцсеть спрашиваем после записи у обоих', rp.includes('и если пользуешься — скинь инстаграм') && ra.includes('и если пользуешься — скинь инстаграм'));
+  ok('плейсхолдеры подставлены', !/\{\{(CONTACT_CHANNEL_ASK|SOCIAL_AFTER_BOOKING)\}\}/.test(rp + ra));
+}
+
 console.log(`\nMASTER PROFILES: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
 
