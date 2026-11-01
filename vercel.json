@@ -9,6 +9,14 @@
       "schedule": "0 10 * * *"
     },
     {
+      "path": "/api/unfinished-dialogs",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/unfinished-dialogs",
+      "schedule": "0 8 * * *"
+    },
+    {
       "path": "/api/waiting-list-check",
       "schedule": "30 14 * * *"
     }

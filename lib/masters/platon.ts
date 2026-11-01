@@ -17,6 +17,7 @@ export const platon: MasterProfile = {
   consultationDepositNote:
     'Обязательно предупреди: если на очной встрече с мастером вы договоритесь о проекте, клиенту нужно будет оставить предоплату {{DEPOSIT}}₪ ПОСЛЕ этой встречи; до встречи ничего платить не нужно. Реквизиты и способ оплаты не называй и не обещай: бот предоплату не берёт, мастер {{MASTER_SELF}} объяснит оплату и подтвердит запись.',
   consultationMode: 'in_person',
+  timezone: 'Asia/Jerusalem',
   tattooBooking: 'master',
   excludesColorRealism: true,
   totalEstimateDisclosureLimit: 6000,

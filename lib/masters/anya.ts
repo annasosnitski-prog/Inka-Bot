@@ -16,6 +16,7 @@ export const anya: MasterProfile = {
   consultationDepositNote:
     'Сразу назови предоплату: если по итогам консультации решишь записываться — нужна предоплата {{DEPOSIT}}₪ (входит в общую стоимость).',
   consultationMode: 'chat',
+  timezone: 'Asia/Jerusalem',
   tattooBooking: 'bot',
   excludesColorRealism: false,
   totalEstimateDisclosureLimit: 2500,

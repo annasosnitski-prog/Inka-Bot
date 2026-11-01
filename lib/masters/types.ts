@@ -29,6 +29,9 @@ export interface MasterProfile {
   //   на небольшие работы) или 'master' (мастер сам; любой запрос про тату
   //   идёт на консультацию).
   consultationMode: 'chat' | 'in_person';
+  // Часовой пояс мастера (IANA). Нужен crons, которые шлют мастеру сводку в
+  // его местное время (Vercel Cron работает только по UTC).
+  timezone: string;
   tattooBooking: 'bot' | 'master';
   // true: мастер не делает цветной реализм. Модель описывает, что видит на
   // референсе, а код сразу ставит service_fit = not_offered

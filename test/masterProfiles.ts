@@ -270,6 +270,22 @@ ok('Extractor: возврат после паузы = новый запрос', 
   ok('плейсхолдеры подставлены', !/\{\{(CONTACT_CHANNEL_ASK|SOCIAL_AFTER_BOOKING)\}\}/.test(rp + ra));
 }
 
+import { buildUnfinishedDialogsDigest, isDigestHour } from '../lib/dailyDigest';
+{
+  const now = new Date('2026-11-01T08:00:00Z'); // 10:00 в Иерусалиме (UTC+2)
+  ok('сводка: 10:00 по Иерусалиму = 08:00 UTC зимой', isDigestHour(now, 'Asia/Jerusalem'));
+  ok('сводка: 07:00 UTC зимой — ещё не время', !isDigestHour(new Date('2026-11-01T07:00:00Z'), 'Asia/Jerusalem'));
+  ok('сводка: 07:00 UTC летом = 10:00', isDigestHour(new Date('2026-07-01T07:00:00Z'), 'Asia/Jerusalem'));
+  const h = (n: number) => new Date(now.getTime() - n * 3_600_000).toISOString();
+  const d = buildUnfinishedDialogsDigest([
+    { fields: { name: 'Лена', username: 'lena', lead_status: 'estimated', price_quoted: 3200, updated_at: h(5) } },
+    { fields: { name: 'Дана', lead_status: 'consultation_booked', updated_at: h(2) } },
+    { fields: { name: 'Старый', lead_status: 'new', updated_at: h(60) } },
+  ], now);
+  ok('сводка: только начатые без брони за сутки', !!d && d.includes('Лена') && d.includes('3200') && !d.includes('Дана') && !d.includes('Старый') && d.includes('(1)'));
+  ok('сводка: пусто → null', buildUnfinishedDialogsDigest([], now) === null);
+}
+
 console.log(`\nMASTER PROFILES: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
 
