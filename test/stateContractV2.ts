@@ -147,12 +147,32 @@ eq(
 eq(
   'persisted lock holds on a later turn with no fresh signal (code remembers, not the LLM)',
   getNextStep(card({ service_fit: 'not_offered' }), signals()),
+  'service_gate_followup_chat'
+);
+eq(
+  'refusal is said once: a fresh not_offered signal still gives the refusal',
+  getNextStep(card({ service_fit: 'not_offered' }), signals({ service_fit: 'not_offered' })),
   'handle_service_not_offered'
+);
+eq(
+  'client under a lock can still ask for the master (not_offered)',
+  getNextStep(card({ service_fit: 'not_offered' }), signals({ client_wants_master_contact: true })),
+  'master_contact_requested'
+);
+eq(
+  'client under a lock can still ask for the master (needs_clarification)',
+  getNextStep(card({ service_fit: 'needs_clarification' }), signals({ client_wants_master_contact: true })),
+  'master_contact_requested'
+);
+eq(
+  'a lock never lets the client reach quote/booking, even on a booking confirmation',
+  getNextStep(card({ service_fit: 'not_offered' }), signals({ client_confirms_booking: 'yes' })),
+  'service_gate_followup_chat'
 );
 eq(
   'a neutral reply ("ок") does not clear a persisted lock',
   getNextStep(card({ service_fit: 'needs_clarification' }), signals()),
-  'clarify_service_fit'
+  'service_gate_followup_chat'
 );
 eq(
   'client explicitly clarifying this turn clears the persisted lock',

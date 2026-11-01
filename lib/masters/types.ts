@@ -10,6 +10,8 @@ export interface MasterProfile {
   // "ассистентка тату-мастера Ани/Платона" — родительный падеж не выводится
   // из имени автоматически.
   nameGenitive: string;
+  // "передала Платону", "куда Ане удобнее написать"
+  nameDative: string;
   gender: 'female' | 'male';
   portfolioUrl: string | null;
   website: string | null;

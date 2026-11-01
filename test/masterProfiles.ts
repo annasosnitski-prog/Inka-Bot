@@ -138,7 +138,7 @@ for (const [label, build] of [
   const r = buildResponderPrompt(platon);
   ok('responder: правило «только этот мастер» у обоих', a.includes('ТОЛЬКО с этим одним мастером') && r.includes('ТОЛЬКО с этим одним мастером'));
   ok('responder: master_contact_requested у Платона говорит «он напишет», у Ани «она»',
-    r.includes('Платон, он напишет') && a.includes('Аня, она напишет'));
+    r.includes('Платону, он напишет') && a.includes('Ане, она напишет'));
   ok('responder: all_done без запрета на выяснение, есть undecided_followup_chat',
     a.includes('undecided_followup_chat') && !a.includes('барьер не выясняем') && !a.includes('Барьер не выясняем'));
   ok('responder: master_contact_requested задаёт вопрос про канал/номер, когда связи нет',
@@ -210,7 +210,7 @@ ok('аргумент цены только из price_reasons', /ТОЛЬКО т
 // Консультация: предоплата по профилю
 withEnv({ MASTER_PROFILE: 'platon' }, () => {
   const t = buildResponderPrompt();
-  ok('Платон: предупреждение о предоплате 400₪ после консультации', /понадобится предоплата 400₪/.test(t));
+  ok('Платон: предупреждение о предоплате 400₪ после консультации', /предоплату 400₪ ПОСЛЕ этой встречи/.test(t));
   ok('{{CONSULTATION_DEPOSIT_NOTE}} подставлен', !t.includes('{{'));
 });
 withEnv({ MASTER_PROFILE: 'anya' }, () => {
@@ -248,9 +248,18 @@ ok('Extractor: возврат после паузы = новый запрос', 
   ok('цветной реализм у Платона → not_offered', applyColorRealismRule(base, { excludesColorRealism: true }).service_fit === 'not_offered');
   ok('цветной реализм у Ани → без изменений', applyColorRealismRule(base, { excludesColorRealism: false }).service_fit === 'needs_clarification');
   ok('клиент согласен на ч/б (allowed) → не перебиваем', applyColorRealismRule({ ...base, service_fit: 'allowed' } as ExtractorOutput, { excludesColorRealism: true }).service_fit === 'allowed');
+  ok('фото старой цветной тату под перекрытие → не стоп', applyColorRealismRule({ ...base, existing_tattoo: 'cover' } as ExtractorOutput, { excludesColorRealism: true }).service_fit === 'needs_clarification');
   ok('цветной акцент → без изменений', applyColorRealismRule({ ...base, reference_color: 'accent' } as ExtractorOutput, { excludesColorRealism: true }).service_fit === 'needs_clarification');
   ok('цветная абстракция (не реализм) → без изменений', applyColorRealismRule({ ...base, reference_is_realistic: false } as ExtractorOutput, { excludesColorRealism: true }).service_fit === 'needs_clarification');
   ok('Платон: excludesColorRealism, Аня нет', platon.excludesColorRealism === true && anya.excludesColorRealism === false);
+}
+
+{
+  const rp = buildResponderPrompt(platon);
+  const ra = buildResponderPrompt(anya);
+  ok('падеж: «передала Платону», у Ани «Ане»', rp.includes('передала Платону') && !rp.includes('передала Платон,') && ra.includes('передала Ане'));
+  ok('шаг service_gate_followup_chat есть в промпте', rp.includes('service_gate_followup_chat') && ra.includes('service_gate_followup_chat'));
+  ok('Платон: предоплата 400₪ после очной встречи', rp.includes('ПОСЛЕ этой встречи') && rp.includes('400₪') && !ra.includes('ПОСЛЕ этой встречи'));
 }
 
 console.log(`\nMASTER PROFILES: ${passed} passed, ${failed} failed`);

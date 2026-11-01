@@ -194,6 +194,7 @@ export type NextStep =
   | 'handle_out_of_scope_block'
   | 'handle_service_not_offered'
   | 'clarify_service_fit'
+  | 'service_gate_followup_chat'
   | 'new_project_after_booking'
   | 'clarify_booked_photo'
   | 'handle_photo_no_caption'
@@ -300,13 +301,25 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   // fresh per-message signal only overrides it when the Extractor actually
   // raised the question THIS message; otherwise the code keeps whatever was
   // already decided, instead of asking the LLM to "remember" it itself.
-  const effectiveServiceFit = signals.service_fit ?? card.service_fit;
-  if (effectiveServiceFit === 'not_offered') return 'handle_service_not_offered';
-  if (effectiveServiceFit === 'needs_clarification') return 'clarify_service_fit';
-
+  //
   // Direct contact with the master works in any funnel state, booked or not,
-  // and never creates a booking by itself.
+  // and never creates a booking by itself — so it goes BEFORE the gate: a
+  // client flagged "not offered"/"needs clarification" must still be able
+  // to reach the master.
   if (signals.client_wants_master_contact) return 'master_contact_requested';
+
+  const freshServiceFit = signals.service_fit ?? null;
+  const effectiveServiceFit = freshServiceFit ?? card.service_fit;
+  // The refusal / clarifying question is said once, on the message that
+  // raised it. Later messages under the same persisted lock ("спасибо",
+  // "ок, подумаю") get a plain follow-up chat: no price, no booking, and
+  // no repeat of the same refusal.
+  if (effectiveServiceFit === 'not_offered') {
+    return freshServiceFit != null ? 'handle_service_not_offered' : 'service_gate_followup_chat';
+  }
+  if (effectiveServiceFit === 'needs_clarification') {
+    return freshServiceFit != null ? 'clarify_service_fit' : 'service_gate_followup_chat';
+  }
 
   // Already-booked conversations are isolated from the acquisition funnel.
   const isAlreadyBooked =

@@ -48,6 +48,7 @@ export function applyProfilePlaceholders(text: string, p: MasterProfile = getMas
     .replace(/\{\{TOTAL_ESTIMATE_LIMIT\}\}/g, String(p.totalEstimateDisclosureLimit))
     .replace(/\{\{MASTER_LINKS\}\}/g, () => masterLinks(p))
     .replace(/\{\{MASTER_NAME_GEN\}\}/g, p.nameGenitive)
+    .replace(/\{\{MASTER_NAME_DAT\}\}/g, p.nameDative)
     .replace(/\{\{MASTER_NAME\}\}/g, p.name)
     .replace(/\{\{MASTER_BUSY\}\}/g, isMale ? 'занят' : 'занята')
     .replace(/\{\{MASTER_SENT\}\}/g, isMale ? 'прислал' : 'прислала')
