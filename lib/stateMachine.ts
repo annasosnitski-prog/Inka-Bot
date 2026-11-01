@@ -5,6 +5,7 @@
 // ============================================================
 
 import { routeCampaign, getCampaignCardPatch } from './campaignFlow';
+import { getMasterProfile } from './masters';
 
 export type Intent =
   | 'admin_test'
@@ -482,7 +483,7 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     if (card.first_tattoo === null) return 'ask_first_tattoo';
     if (!card.phone) return 'ask_phone';
     if (!card.client_name) return 'ask_name';
-    if (card.social_asked !== 'yes') return 'ask_social';
+    // Соцсеть спрашиваем уже после записи (см. confirm_*), не перед слотами.
     return hasSlots(card) ? 'show_tattoo_slots' : 'no_more_slots_waiting';
   }
 
@@ -490,8 +491,11 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   if (card.consultation_needed === 'yes') {
     if (!card.phone) return 'ask_phone';
     if (!card.client_name) return 'ask_name';
-    if (!card.contact_channel) return 'ask_contact_channel';
-    if (card.social_asked !== 'yes') return 'ask_social';
+    // Очная консультация: клиент придёт сам, связь остаётся в телеграме —
+    // канал не спрашиваем. Канал нужен, только когда консультация в переписке.
+    if (!card.contact_channel && getMasterProfile().consultationMode === 'chat') {
+      return 'ask_contact_channel';
+    }
     return hasSlots(card) ? 'show_consultation_slots' : 'no_more_slots_waiting';
   }
 
@@ -585,9 +589,10 @@ export function getCardPatchForStep(
         lead_status: 'tattoo_booked_waiting_payment',
         slot_options: null,
         payment_status: 'waiting_prepayment',
+        social_asked: 'yes',
       };
     case 'confirm_consultation_booked':
-      return { ...patch, lead_status: 'consultation_booked', slot_options: null };
+      return { ...patch, lead_status: 'consultation_booked', slot_options: null, social_asked: 'yes' };
     case 'payment_screenshot_received':
       return { ...patch, payment_status: 'waiting_confirmation' };
     default:

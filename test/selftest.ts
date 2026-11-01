@@ -257,22 +257,25 @@ eq('консультация: телефон и канал есть → show_con
 eq('тату: канал не указан — НЕ спрашиваем (контакт-канал только для консультации)',
   step({ phone: '05011', contact_channel: null }), 'show_tattoo_slots');
 
-console.log('\n▶ getNextStep — ask_social (соцсеть, необязательно, один раз, сразу после телефона)');
-eq('тату: телефон есть, соцсеть ещё не спрашивали → ask_social',
-  step({ phone: '05011', social_asked: null }), 'ask_social');
-eq('тату: телефон есть, соцсеть уже спрашивали → show_tattoo_slots (не зацикливается)',
-  step({ phone: '05011', social_asked: 'yes' }), 'show_tattoo_slots');
-eq('тату: соцсеть не отвечена (social_link=null), но спрошена → всё равно show_tattoo_slots',
-  step({ phone: '05011', social_asked: 'yes', social_link: null }), 'show_tattoo_slots');
-eq('консультация: телефон есть, соцсеть ещё не спрашивали → ask_social',
-  step({ direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: '05011', social_asked: null }),
-  'ask_social');
-eq('консультация: телефон есть, соцсеть уже спрашивали → show_consultation_slots',
-  step({ direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: '05011', social_asked: 'yes' }),
+console.log('\n▶ getNextStep — соцсеть НЕ задерживает слоты (спрашиваем после записи)');
+eq('тату: соцсеть ещё не спрашивали → всё равно show_tattoo_slots',
+  step({ phone: '05011', social_asked: null }), 'show_tattoo_slots');
+eq('консультация: соцсеть ещё не спрашивали → всё равно show_consultation_slots',
+  step({ direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: '05011', contact_channel: 'telegram', social_asked: null }),
   'show_consultation_slots');
 {
-  const patch = getCardPatchForStep('ask_social', baseCard(), sig());
-  eq('патч ask_social: social_asked=yes сразу (fire-and-forget, не ждём ответа)', patch.social_asked, 'yes');
+  const p1 = getCardPatchForStep('confirm_consultation_booked', baseCard(), sig());
+  eq('патч confirm_consultation_booked: social_asked=yes (спросили в подтверждении)', p1.social_asked, 'yes');
+  const p2 = getCardPatchForStep('confirm_slot_awaiting_payment', baseCard(), sig());
+  eq('патч confirm_slot_awaiting_payment: social_asked=yes', p2.social_asked, 'yes');
+}
+{
+  // Очная консультация (Платон): канал не спрашиваем, связь остаётся в телеграме.
+  process.env.MASTER_PROFILE = 'platon';
+  eq('Платон (очно): канал не указан → сразу show_consultation_slots',
+    step({ direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: '05011', client_name: 'Оля', contact_channel: null }),
+    'show_consultation_slots');
+  delete process.env.MASTER_PROFILE;
 }
 
 console.log('\n▶ getNextStep — ask_reference_photo (референс, если ни разу не присылал фото, один раз, до цены)');
