@@ -4,7 +4,7 @@
 import { getMasterProfile } from '../lib/masters';
 import { anya } from '../lib/masters/anya';
 import { platon } from '../lib/masters/platon';
-import { buildExtractorPrompt, normalizeExtractorOutput, type ExtractorOutput } from '../lib/extractor';
+import { buildExtractorPrompt, normalizeExtractorOutput, applyColorRealismRule, type ExtractorOutput } from '../lib/extractor';
 import { buildResponderPrompt, clientPriceReasons, projectTotalEstimate } from '../lib/responder';
 import { buildAdminPrompt } from '../lib/admin';
 import { getCampaign } from '../lib/campaigns';
@@ -91,7 +91,7 @@ for (const [label, build] of [
   ok('responder Платона: его Instagram, без ссылок Ани', r.includes('instagram.com/platon_tattoo__') && !r.includes('ink_anya') && !r.includes('inkanya'));
   ok('responder: вопрос «что ещё обдумать» обязателен при «подумаю»', r.includes('ОБЯЗАТЕЛЬНО') && r.includes('что ещё нужно обдумать'));
   ok('responder Платона: порог раскрытия итога 6000₪', r.includes('порог — 6000₪') && !r.includes('2500₪'));
-  ok('responder Платона: реализм не в списке отказов', /Реализм сам по себе/.test(r));
+  ok('responder Платона: реализм не в списке отказов', /Реализм и портрет сами по себе не запрещены/.test(r));
   const a = buildResponderPrompt(anya);
   ok('responder Ани: её портфолио на месте', a.includes('https://www.instagram.com/ink_anya'));
   ok('responder Ани: депозит 200', a.includes('200₪'));
@@ -231,7 +231,27 @@ withEnv({ MASTER_PROFILE: 'anya' }, () => {
 ok('бронь [КОНС] → КОНС ЗАПИСЬ', busyMarkerForTag('[КОНС]', 'consultation') === 'КОНС ЗАПИСЬ');
 
 ok('Extractor: возврат после паузы = новый запрос', buildExtractorPrompt().includes('ВОЗВРАТ ПОСЛЕ ПАУЗЫ') && buildExtractorPrompt().includes('hours_since_last_message'));
-ok('Платон: всё вне списка «Делает» = мастер не делает; Аня без этого правила', platon.serviceScope().includes('делает ТОЛЬКО то, что есть в «Делает»') && !anya.serviceScope().includes('делает ТОЛЬКО'));
+{
+  const ps = platon.serviceScope();
+  ok('Платон: три статуса и размер/стиль независимо', ps.includes('ТРИ СТАТУСА') && ps.includes('UNCONFIRMED') && ps.includes('два независимых условия'));
+  ok('Платон: цвет A/B/C и цветной реализм исключён', ps.includes('Б. Цвет и чёрный как равноправные') && ps.includes('ЦВЕТНОЙ РЕАЛИЗМ') && ps.includes('EXCLUDED'));
+  ok('Платон: типографика допустима, каллиграфия нет', ps.includes('крупная типографика') || ps.includes('Крупные буквы как графическая форма'));
+  ok('Платон: перекрытия делает', ps.includes('перекрытия существующих'));
+  ok('Платон: scope не попал к Ане', !anya.serviceScope().includes('ТРИ СТАТУСА') && !anya.serviceScope().includes('ЦВЕТНОЙ РЕАЛИЗМ'));
+  const pp = platon.pricingRules();
+  ok('Платон прайс: рёбра/живот +500, потолок 4000', pp.includes('+ 500₪') && pp.includes('4000₪'));
+  ok('Платон прайс: без наценки за перекрытие', pp.includes('никакой наценки за перекрытие'));
+}
+
+{
+  const base = { service_fit: 'needs_clarification', service_fit_reason: null, reference_color: 'dominant', reference_is_realistic: true } as unknown as ExtractorOutput;
+  ok('цветной реализм у Платона → not_offered', applyColorRealismRule(base, { excludesColorRealism: true }).service_fit === 'not_offered');
+  ok('цветной реализм у Ани → без изменений', applyColorRealismRule(base, { excludesColorRealism: false }).service_fit === 'needs_clarification');
+  ok('клиент согласен на ч/б (allowed) → не перебиваем', applyColorRealismRule({ ...base, service_fit: 'allowed' } as ExtractorOutput, { excludesColorRealism: true }).service_fit === 'allowed');
+  ok('цветной акцент → без изменений', applyColorRealismRule({ ...base, reference_color: 'accent' } as ExtractorOutput, { excludesColorRealism: true }).service_fit === 'needs_clarification');
+  ok('цветная абстракция (не реализм) → без изменений', applyColorRealismRule({ ...base, reference_is_realistic: false } as ExtractorOutput, { excludesColorRealism: true }).service_fit === 'needs_clarification');
+  ok('Платон: excludesColorRealism, Аня нет', platon.excludesColorRealism === true && anya.excludesColorRealism === false);
+}
 
 console.log(`\nMASTER PROFILES: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
