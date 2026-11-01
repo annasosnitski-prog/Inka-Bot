@@ -230,6 +230,8 @@ withEnv({ MASTER_PROFILE: 'anya' }, () => {
 });
 ok('бронь [КОНС] → КОНС ЗАПИСЬ', busyMarkerForTag('[КОНС]', 'consultation') === 'КОНС ЗАПИСЬ');
 
+ok('Extractor: возврат после паузы = новый запрос', buildExtractorPrompt().includes('ВОЗВРАТ ПОСЛЕ ПАУЗЫ') && buildExtractorPrompt().includes('hours_since_last_message'));
+
 console.log(`\nMASTER PROFILES: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
 

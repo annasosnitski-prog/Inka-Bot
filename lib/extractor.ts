@@ -136,6 +136,10 @@ export interface ExtractorInput {
   recentHistory: RecentDialogTurn[];
   photoFileId: string | null;
   otherActiveProject?: OtherActiveProjectSummary | null;
+  // Сколько часов прошло с последней активности по этой карточке (null —
+  // неизвестно). Нужно, чтобы отличить возврат клиента с новым запросом от
+  // продолжения разговора.
+  hoursSinceLastMessage?: number | null;
   activeCampaign?: ActiveCampaignContext | null;
   // Set only when campaign_id is null but the client was previously paused
   // out of this campaign (card.campaign_last_id) — gives the Extractor the
@@ -152,6 +156,7 @@ export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutp
     {
       current_card: input.currentCard,
       other_active_project: input.otherActiveProject ?? null,
+      hours_since_last_message: input.hoursSinceLastMessage ?? null,
       active_campaign: input.activeCampaign ?? null,
       last_campaign: input.lastCampaign ?? null,
       is_admin_sender: input.isAdminSender,

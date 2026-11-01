@@ -336,6 +336,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // Сколько прошло с последней активности по карточке — для распознавания
+    // возврата с новым запросом (Extractor, раздел 7, и страховка ниже).
+    const lastActivityMs = existing?.fields?.updated_at ? new Date(existing.fields.updated_at).getTime() : NaN;
+    const hoursSinceLastMessage = Number.isFinite(lastActivityMs)
+      ? (Date.now() - lastActivityMs) / 3_600_000
+      : null;
+
     let extracted = await runExtractor({
       currentCard,
       messageText,
@@ -345,6 +352,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       recentHistory,
       photoFileId,
       otherActiveProject: otherProjectSummary,
+      hoursSinceLastMessage,
       activeCampaign: campaignRoutingBefore
         ? {
             title: campaignRoutingBefore.campaign.title,
@@ -356,6 +364,40 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ? { title: lastCampaignForExtractor.title, offer: lastCampaignForExtractor.offer }
         : null,
     });
+
+    // ВОЗВРАТ С НОВЫМ ФОТО ПОСЛЕ ПАУЗЫ. Клиент вернулся через сутки+ с новой
+    // картинкой, а прошлый проект так и остался без решения: это новый запрос,
+    // а не продолжение. Extractor должен сказать это сам (раздел 7), но если
+    // не сказал, код ставит признак и обнуляет проектные поля старой
+    // карточки, иначе новый запрос получил бы цену прошлого.
+    if (
+      !currentCard.campaign_id &&
+      !isBooked(currentCard) &&
+      currentCard.price_shown === 'yes' &&
+      currentCard.wants_to_book !== 'yes' &&
+      hasPhoto &&
+      hoursSinceLastMessage !== null &&
+      hoursSinceLastMessage >= 24 &&
+      !extracted.is_new_project_request
+    ) {
+      console.log('CODE OVERRIDE: is_new_project_request = true (новое фото после паузы без решения)');
+      extracted = {
+        ...extracted,
+        is_new_project_request: true,
+        category: null,
+        size: null,
+        existing_tattoo: null,
+        skin_notes: null,
+        price_quoted: null,
+        price_explained: null,
+        price_factors: null,
+        direct_tattoo_allowed: null,
+        consultation_needed: null,
+        active_work_time_estimate: null,
+        idea: extracted.idea === currentCard.idea ? null : extracted.idea,
+        placement: extracted.placement === currentCard.placement ? null : extracted.placement,
+      };
+    }
 
     // CAMPAIGN MODE: АВТОМАТИЧЕСКОЕ ПЕРЕКЛЮЧЕНИЕ туда-обратно между кампанией
     // и обычной воронкой (см. lib/campaignFlow.ts). Сделано ДО mergeClientCard/
