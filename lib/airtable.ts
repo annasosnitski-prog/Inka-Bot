@@ -1,3 +1,4 @@
+import { UNFINISHED_LEAD_STATUSES } from './dailyDigest';
 const AIRTABLE_TOKEN = process.env.AIRTABLE_TOKEN!;
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID!;
 const AIRTABLE_TABLE_ID = process.env.AIRTABLE_TABLE_ID!;
@@ -192,6 +193,23 @@ export async function findSilentQuotedLeads(): Promise<ClientRecord[]> {
     throw new Error(`Airtable silent-lead search failed: ${res.status} ${await res.text()}`);
   }
 
+  const data = await res.json();
+  return data.records ?? [];
+}
+
+// Начатые, но не завершённые диалоги (нет брони и блока) — источник для
+// ежедневной сводки мастеру (/api/unfinished-dialogs). Окно по
+// updated_at режется уже в lib/dailyDigest.ts.
+export async function findUnfinishedDialogs(): Promise<ClientRecord[]> {
+  const formula =
+    'OR(' +
+    UNFINISHED_LEAD_STATUSES.map((s) => `{lead_status} = "${s}"`).join(',') +
+    ', {lead_status} = "")';
+  const url = `${AIRTABLE_API_URL}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=100`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` } });
+  if (!res.ok) {
+    throw new Error(`Airtable unfinished-dialogs search failed: ${res.status} ${await res.text()}`);
+  }
   const data = await res.json();
   return data.records ?? [];
 }
