@@ -230,6 +230,9 @@ withEnv({ MASTER_PROFILE: 'anya' }, () => {
 });
 ok('бронь [КОНС] → КОНС ЗАПИСЬ', busyMarkerForTag('[КОНС]', 'consultation') === 'КОНС ЗАПИСЬ');
 
+ok('Extractor: возврат после паузы = новый запрос', buildExtractorPrompt().includes('ВОЗВРАТ ПОСЛЕ ПАУЗЫ') && buildExtractorPrompt().includes('hours_since_last_message'));
+ok('Платон: всё вне списка «Делает» = мастер не делает; Аня без этого правила', platon.serviceScope().includes('делает ТОЛЬКО то, что есть в «Делает»') && !anya.serviceScope().includes('делает ТОЛЬКО'));
+
 console.log(`\nMASTER PROFILES: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
 

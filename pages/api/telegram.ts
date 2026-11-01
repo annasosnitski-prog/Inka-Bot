@@ -336,6 +336,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // Сколько прошло с последней активности по карточке — для распознавания
+    // возврата с новым запросом (Extractor, раздел 7).
+    const lastActivityMs = existing?.fields?.updated_at ? new Date(existing.fields.updated_at).getTime() : NaN;
+    const hoursSinceLastMessage = Number.isFinite(lastActivityMs)
+      ? (Date.now() - lastActivityMs) / 3_600_000
+      : null;
+
     let extracted = await runExtractor({
       currentCard,
       messageText,
@@ -345,6 +352,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       recentHistory,
       photoFileId,
       otherActiveProject: otherProjectSummary,
+      hoursSinceLastMessage,
       activeCampaign: campaignRoutingBefore
         ? {
             title: campaignRoutingBefore.campaign.title,
