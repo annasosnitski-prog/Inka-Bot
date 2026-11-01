@@ -437,7 +437,8 @@ client_confirms_booking — решение клиента про запись (�
   1. ЯВНОЕ решение, сказанное прямо, в любой момент после цены —
      независимо от того, о чём был последний вопрос Инки:
      "хочу записаться", "давай запишемся", "записывай", "запишите меня",
-     "бронируем" → "yes";
+     "бронируем", "как записаться?", "какие есть даты?", "когда можно
+     прийти?" → "yes";
      "нет, спасибо", "неинтересно", "передумал(а), не хочу", "не буду
      записываться", "я уже сказал(а), что не хочу" → "no". "no" — ТОЛЬКО
      окончательный отказ.
@@ -460,6 +461,23 @@ booking в таком сообщении = null. Если одновременн
 сеансов выдержу", "боюсь, что не подойдёт") — это client_has_open_
 question = true, а не client_undecided (оба true можно, если есть и
 вопрос, и "подумаю"). true/false, только этого сообщения.
+
+booking_reply_ambiguous — двоякий ответ на вопрос про запись. Решай в
+два шага.
+  Шаг 1. Посмотри на ПОСЛЕДНЮЮ реплику "inka" в recent_history. Она
+  заканчивается вопросом про запись ("хочешь записаться, или пока
+  думаешь?", "записать тебя?")? Если нет (она про цену, фото, детали
+  работы) — booking_reply_ambiguous = false, что бы клиент ни ответил.
+  Шаг 2. Если да, а клиент ответил коротко и без содержания: "ок",
+  "окей", "хорошо", "ну ладно", "давайте попробуем", "попробуем",
+  "наверное да", "можно попробовать" — booking_reply_ambiguous = true и
+  client_confirms_booking = null. Это не явное "да" ("хочу", "записывай",
+  "да, запишите") и не "подумаю" (client_undecided). Если в сообщении есть
+  вопрос или возражение — false (там client_has_open_question).
+  true/false, только этого сообщения.
+Согласие с оговоркой ("да, но дорого", "хочу, но боюсь") — это НЕ
+двоякий отклик: client_confirms_booking = null, client_has_open_question
+= true (сначала ответ на оговорку).
 
 client_wants_master_contact — клиент хочет поговорить с самим мастером
 напрямую: "можно с мастером поговорить?", "мне бы с самим мастером
@@ -617,6 +635,7 @@ JSON SCHEMA — ТОЧНО ЭТИ ПОЛЯ, НИЧЕГО ЛИШНЕГО
   "client_confirms_booking": "yes" | "no" | null,
   "client_has_open_question": boolean,
   "client_undecided": boolean,
+  "booking_reply_ambiguous": boolean,
   "client_wants_master_contact": boolean,
 
   "reference_color": "none" | "accent" | "equal" | "dominant" | null,
@@ -637,7 +656,8 @@ reference_color: "none" — только чёрный/серый; "accent" — �
 картинке, и только потом service_fit по НАПРАВЛЕНИЮ МАСТЕРА.
 
 service_fit, service_fit_reason, is_new_project_request, photo_purpose,
-client_has_open_question, client_undecided, client_wants_master_contact —
+client_has_open_question, client_undecided, booking_reply_ambiguous,
+client_wants_master_contact —
 сигналы ТОЛЬКО этого сообщения, никогда не наследуй их из current_card.
 
 Верни ТОЛЬКО этот JSON. Никакого текста до или после.

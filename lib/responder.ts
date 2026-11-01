@@ -111,6 +111,7 @@ const PRECISION_CRITICAL_STEPS: ReadonlySet<NextStep> = new Set<NextStep>([
   'price_followup_chat',
   'service_gate_followup_chat',
   'undecided_followup_chat',
+  'clarify_booking_intent',
   'master_contact_requested',
   'all_done',
   'waiting_slots_followup_chat',
