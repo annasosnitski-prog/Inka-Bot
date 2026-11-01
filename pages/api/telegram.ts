@@ -63,6 +63,9 @@ const GATED_HANDOFF_STEPS = new Set<string>([
   'slot_change_requested_waiting',
   'no_more_slots_waiting',
 ]);
+// Пауза, после которой новое фото без решения по старому проекту считается
+// новым запросом, а не продолжением (в живом диалоге фото приходят за минуты).
+const NEW_REQUEST_AFTER_HOURS = 6;
 const BOOKING_STEPS = new Set<string>(['confirm_slot_awaiting_payment', 'confirm_consultation_booked', 'campaign_confirm_slot']);
 
 // Сообщения клиенту при недоставке пинга мастеру: язык по последнему
@@ -365,7 +368,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         : null,
     });
 
-    // ВОЗВРАТ С НОВЫМ ФОТО ПОСЛЕ ПАУЗЫ. Клиент вернулся через сутки+ с новой
+    // ВОЗВРАТ С НОВЫМ ФОТО ПОСЛЕ ПАУЗЫ. Клиент вернулся с новой
     // картинкой, а прошлый проект так и остался без решения: это новый запрос,
     // а не продолжение. Extractor должен сказать это сам (раздел 7), но если
     // не сказал, код ставит признак и обнуляет проектные поля старой
@@ -377,7 +380,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       currentCard.wants_to_book !== 'yes' &&
       hasPhoto &&
       hoursSinceLastMessage !== null &&
-      hoursSinceLastMessage >= 24 &&
+      hoursSinceLastMessage >= NEW_REQUEST_AFTER_HOURS &&
       !extracted.is_new_project_request
     ) {
       console.log('CODE OVERRIDE: is_new_project_request = true (новое фото после паузы без решения)');
