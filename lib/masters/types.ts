@@ -28,6 +28,10 @@ export interface MasterProfile {
   //   идёт на консультацию).
   consultationMode: 'chat' | 'in_person';
   tattooBooking: 'bot' | 'master';
+  // true: мастер не делает цветной реализм. Модель описывает, что видит на
+  // референсе, а код сразу ставит service_fit = not_offered
+  // (lib/extractor.ts, applyColorRealismRule).
+  excludesColorRealism: boolean;
   campaigns: CampaignConfig[];
   // Порог, до которого бот сам называет обоснованный итог по всему проекту.
   // Не потолок цены: дороже — бот сначала говорит цену сеанса и структуру

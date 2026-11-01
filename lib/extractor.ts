@@ -78,6 +78,9 @@ export interface ExtractorOutput {
   client_wants_master_contact: boolean;
 
   // v2 transient contract signals. They describe THIS message only.
+  // Что модель ВИДИТ на референсе этого сообщения (без оценки пригодности).
+  reference_color?: 'none' | 'accent' | 'equal' | 'dominant' | null;
+  reference_is_realistic?: boolean | null;
   service_fit: ServiceFit;
   service_fit_reason: string | null;
   is_new_project_request: boolean;
@@ -241,6 +244,12 @@ export function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput 
   if (!validPhotoPurpose.has(normalized.photo_purpose ?? null)) normalized.photo_purpose = null;
 
   normalized.service_fit_reason = normalized.service_fit_reason ?? null;
+  const validRefColor = new Set(['none', 'accent', 'equal', 'dominant']);
+  normalized.reference_color = validRefColor.has(normalized.reference_color as string)
+    ? normalized.reference_color
+    : null;
+  normalized.reference_is_realistic =
+    typeof normalized.reference_is_realistic === 'boolean' ? normalized.reference_is_realistic : null;
   normalized.is_new_project_request = normalized.is_new_project_request === true;
   normalized.client_has_open_question = normalized.client_has_open_question === true;
   normalized.client_undecided = normalized.client_undecided === true && normalized.client_confirms_booking !== 'no';
@@ -254,5 +263,29 @@ export function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput 
   normalized.campaign_exit_signal = normalized.campaign_exit_signal === true;
   normalized.campaign_return_signal = normalized.campaign_return_signal === true;
 
-  return normalized;
+  return applyColorRealismRule(normalized, getMasterProfile());
+}
+
+// Мастер не делает цветной реализм (профиль: excludesColorRealism). Модель
+// только описывает, что видит на референсе (цвет доминирует + реализм), а
+// решение принимает код: цветной реализм = сразу стоп. Если модель уже
+// сказала "allowed" (клиент сам согласился на ч/б или чёрную основу),
+// не перебиваем.
+export function applyColorRealismRule(
+  out: ExtractorOutput,
+  profile: { excludesColorRealism?: boolean }
+): ExtractorOutput {
+  if (
+    profile.excludesColorRealism &&
+    out.reference_color === 'dominant' &&
+    out.reference_is_realistic === true &&
+    out.service_fit !== 'allowed'
+  ) {
+    return {
+      ...out,
+      service_fit: 'not_offered',
+      service_fit_reason: 'color realism reference (code rule: master does not do color realism)',
+    };
+  }
+  return out;
 }

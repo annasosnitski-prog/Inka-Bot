@@ -617,11 +617,22 @@ JSON SCHEMA — ТОЧНО ЭТИ ПОЛЯ, НИЧЕГО ЛИШНЕГО
   "client_undecided": boolean,
   "client_wants_master_contact": boolean,
 
+  "reference_color": "none" | "accent" | "equal" | "dominant" | null,
+  "reference_is_realistic": boolean | null,
   "service_fit": "allowed" | "needs_clarification" | "not_offered" | null,
   "service_fit_reason": string | null,
   "is_new_project_request": boolean,
   "photo_purpose": "payment_proof" | "reference" | "other" | "unknown" | null
 }
+
+reference_color и reference_is_realistic — ТОЛЬКО то, что ты видишь на
+референсе этого сообщения (фото татуировки или картинка), без оценки
+пригодности для мастера; null, если референса в сообщении нет.
+reference_color: "none" — только чёрный/серый; "accent" — цвет лишь
+небольшими акцентами; "equal" — цвет занимает сопоставимую с чёрным
+часть; "dominant" — цвет формирует изображение (в том числе яркая
+цветная картинка на тёмном фоне). Сначала определи эти два поля по
+картинке, и только потом service_fit по НАПРАВЛЕНИЮ МАСТЕРА.
 
 service_fit, service_fit_reason, is_new_project_request, photo_purpose,
 client_has_open_question, client_undecided, client_wants_master_contact —
