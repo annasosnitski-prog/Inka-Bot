@@ -496,6 +496,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // сообщении значит, что сначала нужен ответ, а не вопрос про запись.
       client_has_open_question: extracted.client_has_open_question || lastMessageForRecord.includes('?'),
       client_undecided: extracted.client_undecided,
+      // Не повторяем уточнение два раза подряд: второй двоякий отклик идёт обычным путём.
+      booking_reply_ambiguous:
+        extracted.booking_reply_ambiguous === true &&
+        lastInkaStep(parseDialogHistory(existing)) !== 'clarify_booking_intent',
       client_wants_master_contact: extracted.client_wants_master_contact,
       undecided_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'undecided_followup_chat'),
     };
@@ -530,7 +534,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       signals.client_confirms_booking === null &&
       currentCard.wants_to_book === null &&
       (!!currentCard.price_quoted || currentCard.price_explained === 'yes') &&
-      (lastStep === undefined || lastStep === 'ask_wants_to_book');
+      (lastStep === undefined || lastStep === 'ask_wants_to_book' || lastStep === 'clarify_booking_intent');
 
     if (stuckOnWantsToBook && messageText) {
       const lower = messageText.toLowerCase().trim();
@@ -587,7 +591,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // номер, уже лежащий в карточке, — тогда возвращающийся клиент без
       // решения записывался бы на любую реплику.
       ((extracted.phone && (messageText ?? '').replace(/\D/g, '').length >= 9) ||
-        /когда\s+(можно\s+)?(прийти|придти|записаться)|когда\s+(будет\s+)?консультаци|(хочу|можно)\s+(записаться|на консультаци)/i.test(messageText ?? ''))
+        /когда\s+(можно\s+)?(прийти|придти|записаться)|как\s+(можно\s+)?записаться|какие\s+(есть\s+)?(даты|окна|свободные)|когда\s+(будет\s+)?консультаци|(хочу|можно)\s+(записаться|на консультаци)/i.test(messageText ?? ''))
     ) {
       signals.client_confirms_booking = 'yes';
       console.log('CODE OVERRIDE: client_confirms_booking = yes (телефон или вопрос "когда прийти" после цены)');

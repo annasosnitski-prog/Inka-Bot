@@ -170,6 +170,8 @@ export interface MessageSignals {
   client_has_open_question?: boolean;
   // Extractor: client is postponing/unsure after the price (not a refusal).
   client_undecided?: boolean;
+  // Extractor: двоякий отклик на вопрос про запись («ок», «давайте попробуем»).
+  booking_reply_ambiguous?: boolean;
   // Extractor: client wants to talk to the master directly.
   client_wants_master_contact?: boolean;
   // Computed by code from dialog_history, like booking_cta_replies_ago: how
@@ -216,6 +218,9 @@ export type NextStep =
   // Commercant picks the action (explain, one gentle question, offer the
   // master, or let it rest). Never routes back to ask_wants_to_book by itself.
   | 'undecided_followup_chat'
+  // Client answered the booking question vaguely ("ок", "давайте попробуем"):
+  // ONE clarifying question, no booking yet.
+  | 'clarify_booking_intent'
   // Client wants to talk to the master directly: the request is passed to
   // the master (existing Telegram ping), no booking is created.
   | 'master_contact_requested'
@@ -467,6 +472,7 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     if (signals.client_has_open_question) return 'price_followup_chat';
     // Thinking is not a refusal and not a reason to ask again.
     if (signals.client_undecided) return 'undecided_followup_chat';
+    if (signals.booking_reply_ambiguous) return 'clarify_booking_intent';
     const ago = signals.booking_cta_replies_ago;
     const undecidedAgo = signals.undecided_replies_ago;
     if (undecidedAgo != null && (ago == null || undecidedAgo < ago)) return 'undecided_followup_chat';

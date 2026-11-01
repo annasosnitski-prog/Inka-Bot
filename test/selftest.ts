@@ -177,6 +177,16 @@ eq('если вопрос про запись задали ПОЗЖЕ неопр
   step({ wants_to_book: null }, { undecided_replies_ago: 6, booking_cta_replies_ago: 3 }), 'ask_wants_to_book');
 eq('явное "хочу записаться" после неопределённости → дальше по воронке',
   step({ wants_to_book: null }, { undecided_replies_ago: 1, client_confirms_booking: 'yes' }), 'ask_phone');
+eq('двоякий отклик ("ок") сразу после вопроса про запись → одно уточнение',
+  step({ wants_to_book: null }, { booking_reply_ambiguous: true, booking_cta_replies_ago: 1 }), 'clarify_booking_intent');
+eq('двоякий отклик + открытый вопрос → ответ по существу, не уточнение',
+  step({ wants_to_book: null }, { booking_reply_ambiguous: true, client_has_open_question: true, booking_cta_replies_ago: 1 }), 'price_followup_chat');
+eq('двоякий отклик + "подумаю" → undecided важнее',
+  step({ wants_to_book: null }, { booking_reply_ambiguous: true, client_undecided: true }), 'undecided_followup_chat');
+eq('явное "да" важнее двоякости → дальше по воронке',
+  step({ wants_to_book: null }, { booking_reply_ambiguous: true, client_confirms_booking: 'yes' }), 'ask_phone');
+eq('без двоякости после недавнего CTA → прежнее поведение',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 1 }), 'price_followup_chat');
 eq('окончательный отказ → all_done',
   step({ wants_to_book: null }, { client_confirms_booking: 'no' }), 'all_done');
 eq('повторный отказ → declined_followup_chat, не all_done',

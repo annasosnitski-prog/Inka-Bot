@@ -73,6 +73,8 @@ export interface ExtractorOutput {
   // Client is postponing / unsure after the price, not refusing ("не знаю
   // пока", "подумаю"). Never counts as a final no.
   client_undecided: boolean;
+  // Двоякий отклик на вопрос про запись («ок», «давайте попробуем»): не да и не нет.
+  booking_reply_ambiguous?: boolean;
   // Client wants to talk to the master directly (asked, or accepted Inka's
   // offer to pass the request on).
   client_wants_master_contact: boolean;
@@ -253,6 +255,10 @@ export function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput 
   normalized.is_new_project_request = normalized.is_new_project_request === true;
   normalized.client_has_open_question = normalized.client_has_open_question === true;
   normalized.client_undecided = normalized.client_undecided === true && normalized.client_confirms_booking !== 'no';
+  normalized.booking_reply_ambiguous =
+    normalized.booking_reply_ambiguous === true &&
+    normalized.client_confirms_booking == null &&
+    normalized.client_undecided !== true;
   normalized.client_wants_master_contact = normalized.client_wants_master_contact === true;
   normalized.photo_purpose = normalized.photo_purpose ?? null;
   normalized.service_fit = normalized.service_fit ?? null;
