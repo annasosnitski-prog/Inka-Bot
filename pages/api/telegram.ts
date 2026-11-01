@@ -496,10 +496,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // сообщении значит, что сначала нужен ответ, а не вопрос про запись.
       client_has_open_question: extracted.client_has_open_question || lastMessageForRecord.includes('?'),
       client_undecided: extracted.client_undecided,
-      // Не повторяем уточнение два раза подряд: второй двоякий отклик идёт обычным путём.
+      // Модель описывает отклик, решает код: двоякость считается только когда
+      // последней репликой Инки был именно вопрос про запись. Так уточнение
+      // не повторяется два раза подряд, а «ок» после цены не трогается.
       booking_reply_ambiguous:
         extracted.booking_reply_ambiguous === true &&
-        lastInkaStep(parseDialogHistory(existing)) !== 'clarify_booking_intent',
+        lastInkaStep(parseDialogHistory(existing)) === 'ask_wants_to_book',
       client_wants_master_contact: extracted.client_wants_master_contact,
       undecided_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'undecided_followup_chat'),
     };
