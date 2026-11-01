@@ -583,7 +583,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       (!!currentCard.price_quoted || currentCard.price_explained === 'yes') &&
       currentCard.price_shown === 'yes' &&
       !signals.client_undecided &&
-      (extracted.phone ||
+      // Телефон должен быть именно в этом сообщении: Extractor может вернуть
+      // номер, уже лежащий в карточке, — тогда возвращающийся клиент без
+      // решения записывался бы на любую реплику.
+      ((extracted.phone && (messageText ?? '').replace(/\D/g, '').length >= 9) ||
         /когда\s+(можно\s+)?(прийти|придти|записаться)|когда\s+(будет\s+)?консультаци|(хочу|можно)\s+(записаться|на консультаци)/i.test(messageText ?? ''))
     ) {
       signals.client_confirms_booking = 'yes';
