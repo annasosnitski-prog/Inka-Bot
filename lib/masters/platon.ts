@@ -8,13 +8,14 @@ export const platon: MasterProfile = {
   id: 'platon',
   name: 'Платон',
   nameGenitive: 'Платона',
+  nameDative: 'Платону',
   gender: 'male',
   // Ссылки Платона пока не даны — без них бот не называет никаких ссылок.
   portfolioUrl: 'https://www.instagram.com/platon_tattoo__/',
   website: null,
   depositAmount: '400',
   consultationDepositNote:
-    'Предупреди: если на консультации договоритесь о встрече (сеансе), понадобится предоплата {{DEPOSIT}}₪. Реквизиты и оплату не обещай: бот предоплату не берёт, мастер {{MASTER_SELF}} свяжется с клиентом, подтвердит запись и объяснит оплату.',
+    'Обязательно предупреди: если на очной встрече с мастером вы договоритесь о проекте, клиенту нужно будет оставить предоплату {{DEPOSIT}}₪ ПОСЛЕ этой встречи; до встречи ничего платить не нужно. Реквизиты и способ оплаты не называй и не обещай: бот предоплату не берёт, мастер {{MASTER_SELF}} объяснит оплату и подтвердит запись.',
   consultationMode: 'in_person',
   tattooBooking: 'master',
   excludesColorRealism: true,

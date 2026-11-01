@@ -279,7 +279,11 @@ export function applyColorRealismRule(
     profile.excludesColorRealism &&
     out.reference_color === 'dominant' &&
     out.reference_is_realistic === true &&
-    out.service_fit !== 'allowed'
+    out.service_fit !== 'allowed' &&
+    // Фото своей старой цветной татуировки под перекрытие — не заказ
+    // цветного реализма.
+    out.existing_tattoo !== 'cover' &&
+    out.existing_tattoo !== 'modification'
   ) {
     return {
       ...out,

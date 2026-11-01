@@ -8,6 +8,7 @@ export const anya: MasterProfile = {
   id: 'anya',
   name: 'Аня',
   nameGenitive: 'Ани',
+  nameDative: 'Ане',
   gender: 'female',
   portfolioUrl: 'https://www.instagram.com/ink_anya',
   website: 'inkanya.co.il',
