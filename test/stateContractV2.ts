@@ -179,6 +179,26 @@ eq(
   getNextStep(card({ service_fit: 'not_offered' }), signals({ service_fit: 'allowed' })),
   'show_tattoo_slots'
 );
+eq(
+  'the clarifying question is asked once: a SECOND fresh needs_clarification (client answered/elaborated, still unconfirmed) does not repeat it',
+  getNextStep(card({ service_fit: 'needs_clarification' }), signals({ service_fit: 'needs_clarification' })),
+  'service_fit_unconfirmed_followup_chat'
+);
+eq(
+  'resolving to allowed after being asked once clears the lock as usual, not the new followup step',
+  getNextStep(card({ service_fit: 'needs_clarification' }), signals({ service_fit: 'allowed' })),
+  'show_tattoo_slots'
+);
+eq(
+  'resolving to not_offered after being asked once still gives the refusal, not the followup step',
+  getNextStep(card({ service_fit: 'needs_clarification' }), signals({ service_fit: 'not_offered' })),
+  'handle_service_not_offered'
+);
+eq(
+  'client under the unconfirmed-followup turn can still ask for the master',
+  getNextStep(card({ service_fit: 'needs_clarification' }), signals({ service_fit: 'needs_clarification', client_wants_master_contact: true })),
+  'master_contact_requested'
+);
 const serviceFitPatch = getCardPatchForStep(
   'clarify_service_fit',
   card({ idea: null, service_fit: null }),

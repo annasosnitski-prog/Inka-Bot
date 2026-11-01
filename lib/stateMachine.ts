@@ -197,6 +197,13 @@ export type NextStep =
   | 'handle_out_of_scope_block'
   | 'handle_service_not_offered'
   | 'clarify_service_fit'
+  // The ONE clarifying question was already asked (card.service_fit was
+  // already "needs_clarification" before this message) and the client's
+  // new message still resolves to "needs_clarification" — they answered/
+  // elaborated, the ambiguity itself didn't go away. Don't re-ask the same
+  // question: acknowledge what's new and move toward the real resolution
+  // (master contact / consultation), never a second identical prompt.
+  | 'service_fit_unconfirmed_followup_chat'
   | 'service_gate_followup_chat'
   | 'new_project_after_booking'
   | 'clarify_booked_photo'
@@ -324,7 +331,16 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     return freshServiceFit != null ? 'handle_service_not_offered' : 'service_gate_followup_chat';
   }
   if (effectiveServiceFit === 'needs_clarification') {
-    return freshServiceFit != null ? 'clarify_service_fit' : 'service_gate_followup_chat';
+    if (freshServiceFit == null) return 'service_gate_followup_chat';
+    // card.service_fit here is the PRE-this-message persisted value (merge
+    // never touches it, see getCardPatchForStep below) — "needs_clarification"
+    // already means the one clarifying question was already asked on an
+    // earlier turn. A fresh signal that still lands on needs_clarification
+    // is the client's answer/elaboration, not a brand new ambiguity: don't
+    // ask the same question again.
+    return card.service_fit === 'needs_clarification'
+      ? 'service_fit_unconfirmed_followup_chat'
+      : 'clarify_service_fit';
   }
 
   // Already-booked conversations are isolated from the acquisition funnel.
