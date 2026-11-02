@@ -271,29 +271,19 @@ const noSignalPatch = getCardPatchForStep(
 );
 eq('no signal this turn leaves service_fit out of the patch', noSignalPatch.service_fit, undefined);
 
-// An unresolved master-judgment call doesn't block pricing (2026-11-02,
-// Anna, reacting to a real screenshot): if the Extractor already computed
-// price_quoted despite service_fit still being unconfirmed, responder.txt
-// now names it as a preliminary estimate — mark price_shown so quote_price
-// doesn't repeat the same number once service_fit later resolves.
+// An unresolved master-judgment call doesn't block pricing forever
+// (2026-11-02, Anna, reacting to a real screenshot) — but the FIRST reply
+// (service_fit_master_judgment) still never names a price: blackwork
+// principle + what's unclear comes first, a price is only volunteered once
+// the client keeps the conversation going (Anna, same day, refining this).
 const masterJudgmentPricePatch = getCardPatchForStep(
   'service_fit_master_judgment',
   card({ service_fit: null, price_quoted: '3100₪', price_shown: null }),
   signals({ service_fit: 'needs_clarification', service_fit_needs_master_judgment: true })
 );
 eq(
-  'service_fit_master_judgment marks price shown when a price was already computable',
+  'service_fit_master_judgment never marks price shown — the first reply never names a price',
   masterJudgmentPricePatch.price_shown,
-  'yes'
-);
-const masterJudgmentNoPricePatch = getCardPatchForStep(
-  'service_fit_master_judgment',
-  card({ service_fit: null, price_quoted: null, price_shown: null }),
-  signals({ service_fit: 'needs_clarification', service_fit_needs_master_judgment: true })
-);
-eq(
-  'service_fit_master_judgment leaves price_shown untouched when nothing was computable',
-  masterJudgmentNoPricePatch.price_shown,
   undefined
 );
 const unconfirmedFollowupPricePatch = getCardPatchForStep(

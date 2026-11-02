@@ -655,11 +655,12 @@ export function getCardPatchForStep(
       return { ...patch, reference_asked: 'yes' };
     case 'quote_price':
       return { ...patch, price_shown: 'yes' };
-    // The master-judgment hold doesn't block pricing (see responder.txt):
-    // if a price was already computable, Responder names it here as a
-    // preliminary estimate. Mark it shown so quote_price doesn't repeat
-    // the same number once service_fit later resolves to "allowed".
-    case 'service_fit_master_judgment':
+    // The first master-judgment reply never names a price (responder.txt:
+    // blackwork principle + what's unclear comes first, see Anna
+    // 2026-11-02). Only once the client keeps the conversation going
+    // (service_fit_unconfirmed_followup_chat) is a price volunteered, if
+    // one was already computable — mark it shown so quote_price doesn't
+    // repeat the same number once service_fit later resolves to "allowed".
     case 'service_fit_unconfirmed_followup_chat':
       return card.price_quoted ? { ...patch, price_shown: 'yes' } : patch;
     case 'show_tattoo_slots':
