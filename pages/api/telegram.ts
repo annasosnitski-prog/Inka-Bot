@@ -488,6 +488,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       client_confirms_booking: extracted.client_confirms_booking,
       service_fit: extracted.service_fit,
       service_fit_reason: extracted.service_fit_reason,
+      service_fit_needs_master_judgment: extracted.service_fit_needs_master_judgment,
       is_new_project_request: extracted.is_new_project_request,
       photo_purpose: extracted.photo_purpose,
       campaign_field_answer: extracted.campaign_field_answer,
@@ -603,6 +604,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // (slot_options из Airtable могут быть устаревшими — сейчас
     // только определяем, в какую сторону движется диалог).
     let nextStep = getNextStep(mergedCard, signals);
+
+    // Agreeing to the master under an unresolved needs_clarification lock
+    // routes straight into the consultation slot sequence (see getNextStep/
+    // getCardPatchForStep) — mirror that here too so THIS turn's calendar
+    // lookup below actually fires instead of waiting for the card patch
+    // (computed later) to catch up on the next message.
+    if (mergedCard.service_fit === 'needs_clarification' && signals.client_wants_master_contact) {
+      mergedCard = { ...mergedCard, consultation_needed: 'yes' };
+    }
 
     // CAMPAIGN MODE: тот же routing, что произвёл nextStep выше (чистая
     // функция, повторный вызов безопасен) — нужен, чтобы знать, КАКОЕ

@@ -153,6 +153,14 @@ export interface MessageSignals {
   // v2: all are current-message signals, never persisted as project facts.
   service_fit?: ServiceFit;
   service_fit_reason?: string | null;
+  // Only meaningful alongside a fresh service_fit === 'needs_clarification'
+  // this same message: true when the client already named a concrete image/
+  // color and the remaining ambiguity is a style/color judgment call only
+  // the master can make — not missing info a text question could resolve.
+  // Routes the FIRST occurrence straight past clarify_service_fit's
+  // recap+question (see 'service_fit_master_judgment'). Not persisted on
+  // the card — only ever read in the same request it was extracted.
+  service_fit_needs_master_judgment?: boolean;
   is_new_project_request?: boolean;
   photo_purpose?: PhotoPurpose;
   // Campaign mode only: this message's answer to the currently pending
@@ -197,6 +205,20 @@ export type NextStep =
   | 'handle_out_of_scope_block'
   | 'handle_service_not_offered'
   | 'clarify_service_fit'
+  // First time needs_clarification fires, but the Extractor judged the
+  // remaining ambiguity as something only the master can decide (client
+  // already named a concrete image/color — not missing info a text
+  // question could resolve). Skips clarify_service_fit's recap+question:
+  // recognizes the idea as a sufficient starting point and offers the
+  // master/consultation directly. See signals.service_fit_needs_master_judgment.
+  | 'service_fit_master_judgment'
+  // The ONE clarifying question was already asked (card.service_fit was
+  // already "needs_clarification" before this message) and the client's
+  // new message still resolves to "needs_clarification" — they answered/
+  // elaborated, the ambiguity itself didn't go away. Don't re-ask the same
+  // question: acknowledge what's new and move toward the real resolution
+  // (master contact / consultation), never a second identical prompt.
+  | 'service_fit_unconfirmed_followup_chat'
   | 'service_gate_followup_chat'
   | 'new_project_after_booking'
   | 'clarify_booked_photo'
@@ -312,7 +334,24 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   // and never creates a booking by itself — so it goes BEFORE the gate: a
   // client flagged "not offered"/"needs clarification" must still be able
   // to reach the master.
-  if (signals.client_wants_master_contact) return 'master_contact_requested';
+  //
+  // Under an unresolved needs_clarification lock specifically, agreeing to
+  // involve the master IS agreeing to a real consultation (that's what
+  // resolves the ambiguity) — not just a one-off ping. Route to the same
+  // phone/name/slots sequence the normal consultation route uses, skipping
+  // the idea/size/price diagnosis (irrelevant to a question only the master
+  // can answer). getCardPatchForStep sets consultation_needed='yes' to match.
+  if (signals.client_wants_master_contact) {
+    if (card.service_fit === 'needs_clarification') {
+      if (!card.phone) return 'ask_phone';
+      if (!card.client_name) return 'ask_name';
+      if (!card.contact_channel && getMasterProfile().consultationMode === 'chat') {
+        return 'ask_contact_channel';
+      }
+      return hasSlots(card) ? 'show_consultation_slots' : 'no_more_slots_waiting';
+    }
+    return 'master_contact_requested';
+  }
 
   const freshServiceFit = signals.service_fit ?? null;
   const effectiveServiceFit = freshServiceFit ?? card.service_fit;
@@ -324,7 +363,20 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     return freshServiceFit != null ? 'handle_service_not_offered' : 'service_gate_followup_chat';
   }
   if (effectiveServiceFit === 'needs_clarification') {
-    return freshServiceFit != null ? 'clarify_service_fit' : 'service_gate_followup_chat';
+    if (freshServiceFit == null) return 'service_gate_followup_chat';
+    // card.service_fit here is the PRE-this-message persisted value (merge
+    // never touches it, see getCardPatchForStep below) — "needs_clarification"
+    // already means the one clarifying question was already asked on an
+    // earlier turn. A fresh signal that still lands on needs_clarification
+    // is the client's answer/elaboration, not a brand new ambiguity: don't
+    // ask the same question again.
+    if (card.service_fit === 'needs_clarification') return 'service_fit_unconfirmed_followup_chat';
+    // First time: a concrete idea whose only open question is the master's
+    // artistic call skips the clarifying question entirely (nothing left
+    // for the client to answer in text).
+    return signals.service_fit_needs_master_judgment
+      ? 'service_fit_master_judgment'
+      : 'clarify_service_fit';
   }
 
   // Already-booked conversations are isolated from the acquisition funnel.
@@ -520,6 +572,7 @@ export interface CardPatch {
   decline_followup_asked?: YesNo;
   reference_asked?: YesNo;
   service_fit?: ServiceFit;
+  consultation_needed?: YesNo;
   second_project_flagged?: YesNo;
   campaign_collected?: Record<string, string> | null;
   campaign_handoff_sent?: YesNo;
@@ -549,6 +602,14 @@ export function getCardPatchForStep(
   // existing value untouched rather than overwriting it with null.
   if (signals.service_fit != null) {
     patch.service_fit = signals.service_fit;
+  }
+
+  // Agreeing to involve the master under an unresolved needs_clarification
+  // lock IS agreeing to a real consultation (see getNextStep) — mark the
+  // route so telegram.ts's calendar lookup actually fires for it, same as
+  // any other consultation_needed='yes' card.
+  if (card.service_fit === 'needs_clarification' && signals.client_wants_master_contact) {
+    patch.consultation_needed = 'yes';
   }
 
   // A real project/reference photo satisfies the per-project reference ask.
