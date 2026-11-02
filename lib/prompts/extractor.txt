@@ -532,6 +532,22 @@ service_fit — сигнал ТЕКУЩЕГО сообщения, может л�
     раньше — не пытайся это "помнить".
 service_fit_reason — короткая внутренняя причина, например "client
 explicitly requires fine line". Не текст для клиента, не придумывай.
+service_fit_needs_master_judgment — ТОЛЬКО когда service_fit этого
+сообщения = "needs_clarification". true, если клиент УЖЕ назвал сам
+образ (конкретный мотив, предмет, сюжет, цвет — не просто "что-то
+цветное" или "ярче"), и дальше неясно не то, чего хочет клиент, а
+подойдёт ли такое сочетание направлению мастера — то есть вопрос
+текстом клиенту уже не задать, ответить может только сам мастер.
+false — когда неясно само пожелание клиента (техника упомянута мимоходом,
+важность не названа, масштаб не указан и т.п.) — здесь как раз нужен
+обычный уточняющий вопрос клиенту. Сомневаешься — false.
+  true: "хочу красные маки или розы на чёрном" (образ и цвет названы,
+    вопрос только в сочетании с направлением мастера); "хочу цветную
+    абстракцию, примерно поровну с чёрным" (сочетание конкретное,
+    решает мастер).
+  false: "хотелось бы что-то с цветом" (не названо что именно); "а
+    можно fine line?" без уточнения, что для клиента важнее — техника
+    или образ.
 
 ════════════════════════════════════════
 7. НОВЫЙ ПРОЕКТ (is_new_project_request)
@@ -645,6 +661,7 @@ JSON SCHEMA — ТОЧНО ЭТИ ПОЛЯ, НИЧЕГО ЛИШНЕГО
   "reference_is_realistic": boolean | null,
   "service_fit": "allowed" | "needs_clarification" | "not_offered" | null,
   "service_fit_reason": string | null,
+  "service_fit_needs_master_judgment": boolean,
   "is_new_project_request": boolean,
   "photo_purpose": "payment_proof" | "reference" | "other" | "unknown" | null
 }
@@ -658,9 +675,9 @@ reference_color: "none" — только чёрный/серый; "accent" — �
 цветная картинка на тёмном фоне). Сначала определи эти два поля по
 картинке, и только потом service_fit по НАПРАВЛЕНИЮ МАСТЕРА.
 
-service_fit, service_fit_reason, is_new_project_request, photo_purpose,
-client_has_open_question, client_undecided, booking_reply_ambiguous,
-client_wants_master_contact —
+service_fit, service_fit_reason, service_fit_needs_master_judgment,
+is_new_project_request, photo_purpose, client_has_open_question,
+client_undecided, booking_reply_ambiguous, client_wants_master_contact —
 сигналы ТОЛЬКО этого сообщения, никогда не наследуй их из current_card.
 
 Верни ТОЛЬКО этот JSON. Никакого текста до или после.

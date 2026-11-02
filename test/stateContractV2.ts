@@ -124,6 +124,7 @@ function extracted(over: Partial<ExtractorOutput> = {}): ExtractorOutput {
     client_confirms_booking: null,
     service_fit: null,
     service_fit_reason: null,
+    service_fit_needs_master_judgment: false,
     is_new_project_request: false,
     photo_purpose: null,
     campaign_field_answer: null,
@@ -145,6 +146,22 @@ eq(
   'clarify_service_fit'
 );
 eq(
+  'a concrete idea whose only open question is the master\'s call skips the clarifying question (first occurrence)',
+  getNextStep(
+    card(),
+    signals({ service_fit: 'needs_clarification', service_fit_needs_master_judgment: true })
+  ),
+  'service_fit_master_judgment'
+);
+eq(
+  'the master-judgment skip never fires on a SECOND occurrence — same as any other needs_clarification repeat',
+  getNextStep(
+    card({ service_fit: 'needs_clarification' }),
+    signals({ service_fit: 'needs_clarification', service_fit_needs_master_judgment: true })
+  ),
+  'service_fit_unconfirmed_followup_chat'
+);
+eq(
   'persisted lock holds on a later turn with no fresh signal (code remembers, not the LLM)',
   getNextStep(card({ service_fit: 'not_offered' }), signals()),
   'service_gate_followup_chat'
@@ -160,9 +177,51 @@ eq(
   'master_contact_requested'
 );
 eq(
-  'client under a lock can still ask for the master (needs_clarification)',
+  'client under a needs_clarification lock who agrees to the master goes to a REAL consultation booking, not just a ping (phone/name/channel already known)',
   getNextStep(card({ service_fit: 'needs_clarification' }), signals({ client_wants_master_contact: true })),
-  'master_contact_requested'
+  'show_consultation_slots'
+);
+eq(
+  'same agreement, but phone missing — ask for it first',
+  getNextStep(
+    card({ service_fit: 'needs_clarification', phone: null }),
+    signals({ client_wants_master_contact: true })
+  ),
+  'ask_phone'
+);
+eq(
+  'same agreement, phone known but name missing — ask for it next',
+  getNextStep(
+    card({ service_fit: 'needs_clarification', client_name: null }),
+    signals({ client_wants_master_contact: true })
+  ),
+  'ask_name'
+);
+eq(
+  'same agreement, phone+name known, chat-mode channel missing — ask for it',
+  getNextStep(
+    card({ service_fit: 'needs_clarification', contact_channel: null }),
+    signals({ client_wants_master_contact: true })
+  ),
+  'ask_contact_channel'
+);
+eq(
+  'same agreement, nothing known yet and no slots fetched — waiting, not a ping',
+  getNextStep(
+    card({ service_fit: 'needs_clarification', slot_options: null }),
+    signals({ client_wants_master_contact: true })
+  ),
+  'no_more_slots_waiting'
+);
+const masterJudgmentConsultPatch = getCardPatchForStep(
+  'show_consultation_slots',
+  card({ service_fit: 'needs_clarification' }),
+  signals({ client_wants_master_contact: true })
+);
+eq(
+  'agreeing under a needs_clarification lock marks consultation_needed so telegram.ts fetches real slots',
+  masterJudgmentConsultPatch.consultation_needed,
+  'yes'
 );
 eq(
   'a lock never lets the client reach quote/booking, even on a booking confirmation',
@@ -195,9 +254,9 @@ eq(
   'handle_service_not_offered'
 );
 eq(
-  'client under the unconfirmed-followup turn can still ask for the master',
+  'client under the unconfirmed-followup turn who agrees to the master also gets a REAL consultation booking',
   getNextStep(card({ service_fit: 'needs_clarification' }), signals({ service_fit: 'needs_clarification', client_wants_master_contact: true })),
-  'master_contact_requested'
+  'show_consultation_slots'
 );
 const serviceFitPatch = getCardPatchForStep(
   'clarify_service_fit',

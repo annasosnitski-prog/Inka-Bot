@@ -71,6 +71,7 @@ function emptyExtracted(over: Partial<ExtractorOutput> = {}): ExtractorOutput {
     photo_has_caption: false, client_picked_slot_id: null, client_wants_other_slots: false,
     client_asks_for_more_slots: false, client_wants_to_reschedule: false,
     client_confirms_booking: null, service_fit: null, service_fit_reason: null,
+    service_fit_needs_master_judgment: false,
     is_new_project_request: false, photo_purpose: null, campaign_field_answer: null,
     campaign_exit_signal: false, campaign_return_signal: false,
     ...over,

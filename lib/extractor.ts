@@ -85,6 +85,11 @@ export interface ExtractorOutput {
   reference_is_realistic?: boolean | null;
   service_fit: ServiceFit;
   service_fit_reason: string | null;
+  // Only meaningful alongside service_fit === 'needs_clarification' this
+  // same message: true when the remaining ambiguity is a style/color call
+  // only the master can make, not missing info a text question could
+  // resolve. See lib/stateMachine.ts 'service_fit_master_judgment'.
+  service_fit_needs_master_judgment: boolean;
   is_new_project_request: boolean;
   photo_purpose: PhotoPurpose;
 
@@ -252,6 +257,8 @@ export function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput 
     : null;
   normalized.reference_is_realistic =
     typeof normalized.reference_is_realistic === 'boolean' ? normalized.reference_is_realistic : null;
+  normalized.service_fit_needs_master_judgment =
+    normalized.service_fit_needs_master_judgment === true && normalized.service_fit === 'needs_clarification';
   normalized.is_new_project_request = normalized.is_new_project_request === true;
   normalized.client_has_open_question = normalized.client_has_open_question === true;
   normalized.client_undecided = normalized.client_undecided === true && normalized.client_confirms_booking !== 'no';
@@ -295,6 +302,7 @@ export function applyColorRealismRule(
       ...out,
       service_fit: 'not_offered',
       service_fit_reason: 'color realism reference (code rule: master does not do color realism)',
+      service_fit_needs_master_judgment: false,
     };
   }
   return out;
