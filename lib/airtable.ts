@@ -214,6 +214,21 @@ export async function findUnfinishedDialogs(): Promise<ClientRecord[]> {
   return data.records ?? [];
 }
 
+// Клиенты с новой бронью (тату ИЛИ консультация) — источник для ежедневной
+// сводки мастеру (/api/unfinished-dialogs, та же cron-джоба). Окно по
+// booked_at режется уже в lib/dailyDigest.ts, как и для unfinished-dialogs.
+export async function findRecentBookings(): Promise<ClientRecord[]> {
+  const formula =
+    'AND(OR({lead_status} = "tattoo_booked_waiting_payment", {lead_status} = "consultation_booked"), {booked_at} != "")';
+  const url = `${AIRTABLE_API_URL}?filterByFormula=${encodeURIComponent(formula)}&maxRecords=100`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` } });
+  if (!res.ok) {
+    throw new Error(`Airtable recent-bookings search failed: ${res.status} ${await res.text()}`);
+  }
+  const data = await res.json();
+  return data.records ?? [];
+}
+
 // Клиенты в листе ожидания слотов (тату ИЛИ консультация) — источник для
 // cron-джобы /api/waiting-list-check, которая сама проверяет календарь и,
 // если появились варианты, пишет клиенту напрямую, не дожидаясь, пока он

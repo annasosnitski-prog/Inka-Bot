@@ -12,6 +12,8 @@ export interface MasterProfile {
   nameGenitive: string;
   // "передала Платону", "куда Ане удобнее написать"
   nameDative: string;
+  // "обсудить вместе с Платоном", "решите вместе с Аней" — творительный падеж
+  nameInstrumental: string;
   gender: 'female' | 'male';
   portfolioUrl: string | null;
   website: string | null;

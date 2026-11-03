@@ -1,17 +1,18 @@
 // ============================================================
-// INKA-BOT — ежедневная сводка мастеру по начатым, но не завершённым
-// диалогам. Общее для всех мастеров (ядро); профиль задаёт только часовой
-// пояс. Vercel Cron работает по UTC, поэтому в vercel.json два запуска
-// (07:00 и 08:00 UTC), а здесь шлём только когда у мастера 10:00.
+// INKA-BOT — ежедневные сводки мастеру: начатые, но не завершённые
+// диалоги, и новые брони за сутки (два отдельных сообщения, одна
+// cron-джоба). Общее для всех мастеров (ядро); профиль задаёт только
+// часовой пояс. Vercel Cron работает по UTC, поэтому в vercel.json два
+// запуска (07:00 и 08:00 UTC), а здесь шлём только когда у мастера 10:00.
 // ============================================================
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { timingSafeEqual } from 'crypto';
 import { getMasterTelegramId } from '../../lib/masterTelegramId';
 import { getMasterProfile } from '../../lib/masters';
-import { findUnfinishedDialogs } from '../../lib/airtable';
+import { findUnfinishedDialogs, findRecentBookings } from '../../lib/airtable';
 import { sendTelegramMessage } from '../../lib/telegramApi';
-import { buildUnfinishedDialogsDigest, isDigestHour } from '../../lib/dailyDigest';
+import { buildUnfinishedDialogsDigest, buildNewBookingsDigest, isDigestHour } from '../../lib/dailyDigest';
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -37,13 +38,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!isDigestHour(now, getMasterProfile().timezone)) {
       return res.status(200).json({ ok: true, skipped: 'not digest hour' });
     }
-    const records = await findUnfinishedDialogs();
-    const text = buildUnfinishedDialogsDigest(records, now);
-    if (!text) return res.status(200).json({ ok: true, sent: false, reason: 'no unfinished dialogs' });
-    if (!(await sendTelegramMessage(getMasterTelegramId(), text))) {
-      throw new Error('Telegram send failed');
+
+    const [unfinishedRecords, bookingRecords] = await Promise.all([
+      findUnfinishedDialogs(),
+      findRecentBookings(),
+    ]);
+
+    const unfinishedText = buildUnfinishedDialogsDigest(unfinishedRecords, now);
+    const bookingsText = buildNewBookingsDigest(bookingRecords, now);
+
+    let unfinishedSent = false;
+    let bookingsSent = false;
+    if (unfinishedText) {
+      if (!(await sendTelegramMessage(getMasterTelegramId(), unfinishedText))) {
+        throw new Error('Telegram send failed (unfinished dialogs)');
+      }
+      unfinishedSent = true;
     }
-    return res.status(200).json({ ok: true, sent: true });
+    if (bookingsText) {
+      if (!(await sendTelegramMessage(getMasterTelegramId(), bookingsText))) {
+        throw new Error('Telegram send failed (new bookings)');
+      }
+      bookingsSent = true;
+    }
+
+    return res.status(200).json({ ok: true, unfinishedSent, bookingsSent });
   } catch (err) {
     console.error('unfinished-dialogs error:', err);
     return res.status(500).json({ error: 'internal error' });

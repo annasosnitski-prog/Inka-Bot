@@ -270,7 +270,7 @@ ok('Extractor: возврат после паузы = новый запрос', 
   ok('плейсхолдеры подставлены', !/\{\{(CONTACT_CHANNEL_ASK|SOCIAL_AFTER_BOOKING)\}\}/.test(rp + ra));
 }
 
-import { buildUnfinishedDialogsDigest, isDigestHour } from '../lib/dailyDigest';
+import { buildUnfinishedDialogsDigest, buildNewBookingsDigest, isDigestHour } from '../lib/dailyDigest';
 {
   const now = new Date('2026-11-01T08:00:00Z'); // 10:00 в Иерусалиме (UTC+2)
   ok('сводка: 10:00 по Иерусалиму = 08:00 UTC зимой', isDigestHour(now, 'Asia/Jerusalem'));
@@ -284,6 +284,46 @@ import { buildUnfinishedDialogsDigest, isDigestHour } from '../lib/dailyDigest';
   ], now);
   ok('сводка: только начатые без брони за сутки', !!d && d.includes('Лена') && d.includes('3200') && !d.includes('Дана') && !d.includes('Старый') && d.includes('(1)'));
   ok('сводка: пусто → null', buildUnfinishedDialogsDigest([], now) === null);
+
+  const bookings = buildNewBookingsDigest([
+    {
+      fields: {
+        name: 'Ира',
+        username: 'ira',
+        lead_status: 'tattoo_booked_waiting_payment',
+        booked_slot_display: '12 ноября, 14:00',
+        phone: '+972500000000',
+        booked_at: h(3),
+      },
+    },
+    {
+      fields: {
+        name: 'Света',
+        lead_status: 'consultation_booked',
+        booked_slot_display: '13 ноября, 11:00',
+        booked_at: h(20),
+      },
+    },
+    { fields: { name: 'Вчерашняя', lead_status: 'consultation_booked', booked_at: h(30) } },
+    { fields: { name: 'Без брони', lead_status: 'estimated', booked_at: h(1) } },
+  ], now);
+  ok(
+    'сводка новых записей: тату и консультация за сутки, старые и небронь — нет',
+    !!bookings &&
+      bookings.includes('Ира') &&
+      bookings.includes('тату') &&
+      bookings.includes('12 ноября, 14:00') &&
+      bookings.includes('Света') &&
+      bookings.includes('консультация') &&
+      !bookings.includes('Вчерашняя') &&
+      !bookings.includes('Без брони') &&
+      bookings.includes('(2)')
+  );
+  ok('сводка новых записей: пусто → null', buildNewBookingsDigest([], now) === null);
+  ok(
+    'сводка новых записей: без booked_at не попадает',
+    buildNewBookingsDigest([{ fields: { name: 'Нет даты', lead_status: 'consultation_booked' } }], now) === null
+  );
 }
 
 console.log(`\nMASTER PROFILES: ${passed} passed, ${failed} failed`);

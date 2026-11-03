@@ -739,6 +739,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const pickedDisplay = pickedIndex >= 0 ? slotsDisplay?.[pickedIndex] ?? null : null;
         const isTattooBooking = nextStep === 'confirm_slot_awaiting_payment';
         const isCampaignBooking = nextStep === 'campaign_confirm_slot';
+        const isConsultationBooking = nextStep === 'confirm_consultation_booked';
         const pickedStartIso =
           (isTattooBooking || isCampaignBooking) && pickedIndex >= 0
             ? rawSlots?.[pickedIndex]?.start ?? null
@@ -749,7 +750,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           booked_slot_display: pickedDisplay,
           booked_slot_start_iso: pickedStartIso,
           payment_reminder_sent: null,
-          booked_at: isTattooBooking || isCampaignBooking ? new Date().toISOString() : liveCard.booked_at,
+          // Любая реальная бронь (тату/кампания/консультация) помечается
+          // booked_at — источник для ежедневной сводки о новых записях
+          // (findRecentBookings/buildNewBookingsDigest), не только для
+          // напоминаний об оплате.
+          booked_at:
+            isTattooBooking || isCampaignBooking || isConsultationBooking
+              ? new Date().toISOString()
+              : liveCard.booked_at,
           payment_reminder_early_sent: isTattooBooking ? null : liveCard.payment_reminder_early_sent,
         };
       }

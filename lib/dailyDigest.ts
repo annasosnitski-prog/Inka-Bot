@@ -1,9 +1,10 @@
 // ============================================================
-// INKA-BOT — ежедневная сводка мастеру по начатым, но не завершённым
-// диалогам (pages/api/unfinished-dialogs.ts). Чистая логика вынесена
-// сюда, чтобы покрыть тестами: роут завязан на Airtable/Telegram.
+// INKA-BOT — ежедневные сводки мастеру (pages/api/unfinished-dialogs.ts,
+// та же cron-джоба шлёт обе): начатые, но не завершённые диалоги, и новые
+// брони за сутки. Чистая логика вынесена сюда, чтобы покрыть тестами: роут
+// завязан на Airtable/Telegram.
 //
-// Сводка — для всех мастеров одинаковая (ядро), время отправки — 10:00
+// Сводки — для всех мастеров одинаковые (ядро), время отправки — 10:00
 // по часовому поясу профиля мастера.
 // ============================================================
 
@@ -76,4 +77,43 @@ export function buildUnfinishedDialogsDigest(
   const shown = rows.slice(0, MAX_LINES).map((r) => r.line);
   const more = rows.length > MAX_LINES ? `\n…и ещё ${rows.length - MAX_LINES}` : '';
   return `🗂 Начатые диалоги за сутки без записи (${rows.length}):\n${shown.join('\n')}${more}\nМожет, кому-то стоит написать лично.`;
+}
+
+const BOOKING_TYPE_LABELS: Record<string, string> = {
+  tattoo_booked_waiting_payment: 'тату',
+  consultation_booked: 'консультация',
+};
+
+// Новые брони за сутки (тату и консультации). Окно — по booked_at (момент
+// самой брони), не updated_at — иначе бронь "потеряется" из сводки, если
+// клиент потом написал что-то ещё и обновил updated_at за пределами окна,
+// или наоборот будет напоминать о себе каждый день, пока клиент молчит.
+export function buildNewBookingsDigest(
+  records: { fields: Record<string, any> }[],
+  now: Date
+): string | null {
+  const rows: { bookedAt: number; line: string }[] = [];
+  for (const r of records) {
+    const f = r.fields;
+    const type = BOOKING_TYPE_LABELS[f.lead_status as string];
+    if (!type) continue;
+    const t = f.booked_at ? new Date(f.booked_at).getTime() : NaN;
+    if (!Number.isFinite(t)) continue;
+    const hours = (now.getTime() - t) / 3_600_000;
+    if (hours < 0 || hours > DIGEST_WINDOW_HOURS) continue;
+
+    const who = f.name
+      ? `${f.name}${f.username ? ` (@${f.username})` : ''}`
+      : f.username
+      ? `@${f.username}`
+      : 'клиент';
+    const slot = f.booked_slot_display ? `, ${f.booked_slot_display}` : '';
+    const phone = f.phone ? `, тел. ${f.phone}` : '';
+    rows.push({ bookedAt: t, line: `• ${who} — ${type}${slot}${phone}` });
+  }
+  if (rows.length === 0) return null;
+  rows.sort((a, b) => a.bookedAt - b.bookedAt);
+  const shown = rows.slice(0, MAX_LINES).map((r) => r.line);
+  const more = rows.length > MAX_LINES ? `\n…и ещё ${rows.length - MAX_LINES}` : '';
+  return `✅ Новые записи за сутки (${rows.length}):\n${shown.join('\n')}${more}`;
 }

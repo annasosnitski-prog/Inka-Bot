@@ -359,10 +359,18 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   // raised it. Later messages under the same persisted lock ("спасибо",
   // "ок, подумаю") get a plain follow-up chat: no price, no booking, and
   // no repeat of the same refusal.
+  //
+  // Picking a slot is exempt: client_wants_master_contact already routed a
+  // needs_clarification card into the real show_consultation_slots sequence
+  // above, and that bypass never clears card.service_fit — so without this
+  // guard, the client's actual slot pick on a LATER message would be
+  // swallowed back into this gate (effectiveServiceFit still
+  // "needs_clarification", freshServiceFit null) instead of reaching
+  // slots_shown/slots_shown_clarifying below.
   if (effectiveServiceFit === 'not_offered') {
     return freshServiceFit != null ? 'handle_service_not_offered' : 'service_gate_followup_chat';
   }
-  if (effectiveServiceFit === 'needs_clarification') {
+  if (!signals.client_picked_slot_id && effectiveServiceFit === 'needs_clarification') {
     if (freshServiceFit == null) return 'service_gate_followup_chat';
     // card.service_fit here is the PRE-this-message persisted value (merge
     // never touches it, see getCardPatchForStep below) — "needs_clarification"
@@ -647,6 +655,14 @@ export function getCardPatchForStep(
       return { ...patch, reference_asked: 'yes' };
     case 'quote_price':
       return { ...patch, price_shown: 'yes' };
+    // The first master-judgment reply never names a price (responder.txt:
+    // blackwork principle + what's unclear comes first, see Anna
+    // 2026-11-02). Only once the client keeps the conversation going
+    // (service_fit_unconfirmed_followup_chat) is a price volunteered, if
+    // one was already computable — mark it shown so quote_price doesn't
+    // repeat the same number once service_fit later resolves to "allowed".
+    case 'service_fit_unconfirmed_followup_chat':
+      return card.price_quoted ? { ...patch, price_shown: 'yes' } : patch;
     case 'show_tattoo_slots':
     case 'show_consultation_slots':
       return { ...patch, lead_status: 'slots_shown' };

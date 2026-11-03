@@ -271,6 +271,46 @@ const noSignalPatch = getCardPatchForStep(
 );
 eq('no signal this turn leaves service_fit out of the patch', noSignalPatch.service_fit, undefined);
 
+// An unresolved master-judgment call doesn't block pricing forever
+// (2026-11-02, Anna, reacting to a real screenshot) — but the FIRST reply
+// (service_fit_master_judgment) still never names a price: blackwork
+// principle + what's unclear comes first, a price is only volunteered once
+// the client keeps the conversation going (Anna, same day, refining this).
+const masterJudgmentPricePatch = getCardPatchForStep(
+  'service_fit_master_judgment',
+  card({ service_fit: null, price_quoted: '3100₪', price_shown: null }),
+  signals({ service_fit: 'needs_clarification', service_fit_needs_master_judgment: true })
+);
+eq(
+  'service_fit_master_judgment never marks price shown — the first reply never names a price',
+  masterJudgmentPricePatch.price_shown,
+  undefined
+);
+const unconfirmedFollowupPricePatch = getCardPatchForStep(
+  'service_fit_unconfirmed_followup_chat',
+  card({ service_fit: 'needs_clarification', price_quoted: '3100₪', price_shown: null }),
+  signals({ service_fit: 'needs_clarification' })
+);
+eq(
+  'service_fit_unconfirmed_followup_chat marks price shown the same way',
+  unconfirmedFollowupPricePatch.price_shown,
+  'yes'
+);
+
+// Found while fixing the above: agreeing to a real consultation under a
+// needs_clarification lock (see the show_consultation_slots block earlier
+// in this section) never clears card.service_fit, so without an explicit
+// exemption the client's actual slot pick on a LATER turn would be
+// swallowed back into this same gate instead of confirming the booking.
+eq(
+  'picking a slot is exempt from the needs_clarification gate — the lock never cleared, but the pick must still land',
+  getNextStep(
+    card({ service_fit: 'needs_clarification', lead_status: 'slots_shown', slot_options: ['ev1'], direct_tattoo_allowed: 'no' }),
+    signals({ client_picked_slot_id: 'ev1' })
+  ),
+  'confirm_consultation_booked'
+);
+
 console.log('\n▶ v2 booked-photo classification');
 const bookedPhoto = card({
   lead_status: 'tattoo_booked_waiting_payment',
