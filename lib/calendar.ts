@@ -635,7 +635,49 @@ export async function bookSlot(
     return { success: false, error: `Calendar events.patch failed: ${patchResponse.status} ${errText}` };
   }
 
+  // Кампейн: Аня предлагает клиенту несколько времён одного дня (13:00,
+  // 14:00, 15:00 — отдельные [КАМПЕЙН]-слоты), но как только одно выбрано,
+  // остальные времена этого дня должны пропасть из подбора — "весь день
+  // закрыт". bookSlot переименовывает только сам выбранный слот, поэтому
+  // досылаем закрытие остальных свободных [КАМПЕЙН]-слотов того же
+  // календарного дня (Asia/Jerusalem) прямо здесь. Не фатально для самой
+  // брони, если не получится — она уже подтверждена клиенту.
+  if (type === 'campaign') {
+    const startIso: string | undefined = event.start?.dateTime ?? event.start?.date;
+    if (startIso) {
+      await closeOtherSameDaySlots(type, jerusalemDayKey(startIso), eventId).catch((err) =>
+        console.error('bookSlot: closeOtherSameDaySlots failed:', err)
+      );
+    }
+  }
+
   return { success: true, newSummary };
+}
+
+// См. комментарий в bookSlot() выше — закрывает оставшиеся свободные
+// слоты того же дня и того же типа после того, как клиент выбрал один из
+// предложенных. Берёт текущий свободный пул через getAvailableSlots (она
+// уже исключает занятые и заблокированные слоты), поэтому просто
+// переименовывает всё, что осталось свободным в этот день.
+async function closeOtherSameDaySlots(type: BookingType, dayKey: string, excludeEventId: string): Promise<void> {
+  const token = await getAccessToken();
+  const remaining = await getAvailableSlots(type, 50);
+  const sameDay = remaining.filter((slot) => slot.id !== excludeEventId && jerusalemDayKey(slot.start) === dayKey);
+
+  for (const slot of sameDay) {
+    const patchUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+      CALENDAR_ID
+    )}/events/${encodeURIComponent(slot.id)}`;
+    const newSummary = `${slot.summary} ${MASTER_CLOSED_MARKER}`;
+    const res = await fetch(patchUrl, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ summary: newSummary }),
+    });
+    if (!res.ok) {
+      console.error('closeOtherSameDaySlots: events.patch failed:', res.status, await res.text());
+    }
+  }
 }
 
 // ----------------------------------------------------------
