@@ -276,7 +276,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       } catch (adminErr) {
         console.error('Admin handler error:', adminErr);
         if (chatId) {
-          await sendTelegramMessage(chatId, 'ошибка в admin-режиме, глянь логи.');
+          await sendTelegramMessage(
+            chatId,
+            'не получилось ответить — OpenAI сейчас недоступен (ошибка на их стороне). попробуй через минуту.'
+          );
         }
       }
       return res.status(200).json({ ok: true });
