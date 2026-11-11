@@ -93,6 +93,11 @@ function failureNotice(kind: NoticeKind, clientText: string): string {
   return NOTICES[lang][kind];
 }
 
+function minNonNull(...values: Array<number | null>): number | null {
+  const nums = values.filter((v): v is number => v !== null);
+  return nums.length ? Math.min(...nums) : null;
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(200).json({ ok: true, info: 'inka-bot webhook alive' });
@@ -501,7 +506,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       is_new_project_request: extracted.is_new_project_request,
       photo_purpose: extracted.photo_purpose,
       campaign_field_answer: extracted.campaign_field_answer,
-      booking_cta_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'ask_wants_to_book'),
+      // Мягкий следующий шаг в конце цены (quote_price / ценность+цена) —
+      // тоже «вопрос про запись», поэтому отдельный ask_wants_to_book сразу
+      // следом не нужен: считаем ближайший из этих шагов.
+      booking_cta_replies_ago: minNonNull(
+        inkaRepliesSinceStep(parseDialogHistory(existing), 'ask_wants_to_book'),
+        inkaRepliesSinceStep(parseDialogHistory(existing), 'quote_price'),
+        inkaRepliesSinceStep(parseDialogHistory(existing), 'offer_value_before_price')
+      ),
       // Страховка на случай промаха Extractor: вопросительный знак в
       // сообщении значит, что сначала нужен ответ, а не вопрос про запись.
       client_has_open_question: extracted.client_has_open_question || lastMessageForRecord.includes('?'),
@@ -511,7 +523,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // не повторяется два раза подряд, а «ок» после цены не трогается.
       booking_reply_ambiguous:
         extracted.booking_reply_ambiguous === true &&
-        lastInkaStep(parseDialogHistory(existing)) === 'ask_wants_to_book',
+        ['ask_wants_to_book', 'quote_price', 'offer_value_before_price'].includes(
+          lastInkaStep(parseDialogHistory(existing)) ?? ''
+        ),
       client_wants_master_contact: extracted.client_wants_master_contact,
       undecided_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'undecided_followup_chat'),
     };
