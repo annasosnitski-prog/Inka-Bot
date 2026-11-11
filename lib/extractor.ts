@@ -21,21 +21,33 @@ import { getTelegramFileDataUrl } from './telegramApi';
 import type { RecentDialogTurn } from './dialogLog';
 import { getMasterProfile, applyProfilePlaceholders, type MasterProfile } from './masters';
 
-let cachedPrompt: string | null = null;
+let cachedPromptWithCampaign: string | null = null;
+let cachedPromptWithoutCampaign: string | null = null;
 
 // Ядро (lib/prompts/extractor.txt) + блок кампаний. Всё, что зависит от
 // мастера (прайс, направление), подставляется из профиля плейсхолдерами —
 // отдельных overlay-файлов "поверх" ядра больше нет.
-export function buildExtractorPrompt(profile: MasterProfile = getMasterProfile()): string {
+//
+// includeCampaign=false пропускает campaignExtractor.txt целиком.
+// campaignExtractor.txt сам прямо говорит "если ОБА поля (active_campaign
+// И last_campaign) null — игнорируй весь этот файл" — то есть пропуск
+// файла в этом случае НЕ меняет поведение модели, только экономит токены
+// на обычных (не campaign) диалогах, которых большинство.
+export function buildExtractorPrompt(
+  profile: MasterProfile = getMasterProfile(),
+  includeCampaign = true
+): string {
   const core = fs.readFileSync(path.join(process.cwd(), 'lib', 'prompts', 'extractor.txt'), 'utf-8');
-  // Блок кампаний действует только при active_campaign/last_campaign != null
-  // во входных данных — иначе модель его игнорирует (сказано в самом блоке).
+  if (!includeCampaign) {
+    return applyProfilePlaceholders(core, profile);
+  }
   const campaign = fs.readFileSync(path.join(process.cwd(), 'lib', 'prompts', 'campaignExtractor.txt'), 'utf-8');
   return applyProfilePlaceholders(`${core}\n\n${campaign}`, profile);
 }
 
-function getExtractorPrompt(): string {
-  return (cachedPrompt ??= buildExtractorPrompt());
+function getExtractorPrompt(includeCampaign: boolean): string {
+  if (includeCampaign) return (cachedPromptWithCampaign ??= buildExtractorPrompt(undefined, true));
+  return (cachedPromptWithoutCampaign ??= buildExtractorPrompt(undefined, false));
 }
 
 export interface ExtractorOutput {
@@ -160,7 +172,10 @@ export interface ExtractorInput {
 }
 
 export async function runExtractor(input: ExtractorInput): Promise<ExtractorOutput> {
-  const systemPrompt = getExtractorPrompt();
+  // campaignExtractor.txt only ever matters when one of these is set — see
+  // buildExtractorPrompt above.
+  const needsCampaignPrompt = !!input.activeCampaign || !!input.lastCampaign;
+  const systemPrompt = getExtractorPrompt(needsCampaignPrompt);
 
   const userContent = JSON.stringify(
     {
