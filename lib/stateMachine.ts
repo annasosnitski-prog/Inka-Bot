@@ -81,6 +81,10 @@ export interface ClientCard {
   price_shown: YesNo;
   wants_to_book: YesNo;
   decline_followup_asked: YesNo;
+  // One-time gate, same lifecycle as reference_asked/value_shown: has the
+  // "what's stopping you?" question already been asked for THIS decline?
+  // See ask_decline_reason.
+  decline_reason_asked: YesNo;
   phone: string | null;
   client_name: string | null;
   contact_channel: ContactChannel;
@@ -98,6 +102,14 @@ export interface ClientCard {
   booked_at: string | null;
   payment_reminder_early_sent: YesNo;
   reference_asked: YesNo;
+  // One-time gate, parallel to reference_asked: has the value-before-price
+  // beat (pricing principle + co-design invitation + honest heads-up on the
+  // free consultation/prepayment) already been given for THIS project?
+  // Anna's explicit product rule (2026-11-11): the client must never get a
+  // bare number — value and preparation for the master come first. Set once
+  // by getCardPatchForStep('offer_value_before_price') and never reset
+  // except by a genuinely new project the same way reference_asked is.
+  value_shown: YesNo;
   photos_count: number;
   has_photo_this_message: boolean;
   photo_has_caption: boolean;
@@ -229,6 +241,13 @@ export type NextStep =
   | 'ask_existing_tattoo_or_skin'
   | 'ask_skin_notes_detail'
   | 'ask_reference_photo'
+  // Diagnosis is complete, price is not shown yet. Fires exactly ONCE per
+  // project, before the first quote_price: pricing principle (how price is
+  // built, not "design X = price Y"), invitation to build the design
+  // together with the master, and an honest heads-up about the free
+  // consultation + prepayment — so the client is prepared for the master
+  // before seeing a number, never after a bare price. See value_shown.
+  | 'offer_value_before_price'
   | 'quote_price'
   | 'ask_wants_to_book'
   // Price shown, no booking decision yet, and either the client has an open
@@ -264,6 +283,9 @@ export type NextStep =
   | 'confirm_consultation_booked'
   | 'payment_screenshot_received'
   | 'booked_followup_chat'
+  // First explicit decline, no reason given with it: ONE question about
+  // what's stopping them, before accepting it as final. See decline_reason_asked.
+  | 'ask_decline_reason'
   | 'all_done'
   | 'declined_followup_chat'
   // Campaign/recruitment mode (see lib/campaignFlow.ts). Generic across all
@@ -519,6 +541,9 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   }
 
   // Price must be shown, not merely calculated internally.
+  // Value before price, always, once per project — see value_shown.
+  if (card.value_shown !== 'yes') return 'offer_value_before_price';
+
   const hasPrice = !!card.price_quoted || card.price_explained === 'yes';
   if (!hasPrice || card.price_shown !== 'yes') return 'quote_price';
 
@@ -540,6 +565,16 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     return 'ask_wants_to_book';
   }
   if (effectiveWantsToBook === 'no') {
+    // Anna's explicit reversal (2026-11-11): a bare decline ("нет, спасибо")
+    // gets ONE question about what's stopping them, before accepting it —
+    // so the bot can try to address a real objection on the spot, or at
+    // least pass a concrete reason to the master. Only when the decline
+    // already came WITH a reason (client_has_open_question this message)
+    // do we skip straight to all_done, which already answers that reason —
+    // asking again would just repeat a question the client already answered.
+    if (card.decline_reason_asked !== 'yes' && !signals.client_has_open_question) {
+      return 'ask_decline_reason';
+    }
     return card.decline_followup_asked === 'yes' ? 'declined_followup_chat' : 'all_done';
   }
 
@@ -578,7 +613,9 @@ export interface CardPatch {
   social_asked?: YesNo;
   price_shown?: YesNo;
   decline_followup_asked?: YesNo;
+  decline_reason_asked?: YesNo;
   reference_asked?: YesNo;
+  value_shown?: YesNo;
   service_fit?: ServiceFit;
   consultation_needed?: YesNo;
   second_project_flagged?: YesNo;
@@ -632,6 +669,8 @@ export function getCardPatchForStep(
   }
 
   switch (step) {
+    case 'ask_decline_reason':
+      return { ...patch, decline_reason_asked: 'yes' };
     case 'all_done':
       return { ...patch, decline_followup_asked: 'yes' };
     case 'handle_out_of_scope_warning_1':
@@ -653,6 +692,8 @@ export function getCardPatchForStep(
       return { ...patch, social_asked: 'yes' };
     case 'ask_reference_photo':
       return { ...patch, reference_asked: 'yes' };
+    case 'offer_value_before_price':
+      return { ...patch, value_shown: 'yes' };
     case 'quote_price':
       return { ...patch, price_shown: 'yes' };
     // The first master-judgment reply never names a price (responder.txt:

@@ -43,12 +43,12 @@ function card(over: Partial<ClientCard> = {}): ClientCard {
     existing_tattoo: null, direct_tattoo_allowed: null, consultation_needed: null,
     active_work_time_estimate: null, price_quoted: null, price_explained: null,
     price_factors: null, price_shown: null, wants_to_book: null,
-    decline_followup_asked: null, phone: null, client_name: null,
+    decline_followup_asked: null, decline_reason_asked: null, phone: null, client_name: null,
     contact_channel: null, social_link: null, social_asked: null,
     payment_status: null, client_type: null, skin_notes: null, spam_count: 0,
     chosen_slot_id: null, slot_options: null, booked_slot_display: null,
     booked_slot_start_iso: null, payment_reminder_sent: null, booked_at: null,
-    payment_reminder_early_sent: null, reference_asked: null, photos_count: 0,
+    payment_reminder_early_sent: null, reference_asked: null, value_shown: null, photos_count: 0,
     has_photo_this_message: false, photo_has_caption: false, force_client_mode: null,
     service_fit: null, second_project_flagged: null,
     campaign_id: null, campaign_collected: null, campaign_handoff_sent: null, campaign_last_id: null, campaign_return_pending: null,
@@ -331,7 +331,7 @@ console.log('\n▶ 6. обычный клиент без campaign_id идёт п
 {
   const c = card({
     idea: 'роза', placement: 'предплечье', size: '10см', existing_tattoo: 'no',
-    reference_asked: 'yes', direct_tattoo_allowed: 'yes', consultation_needed: 'no',
+    reference_asked: 'yes', value_shown: 'yes', direct_tattoo_allowed: 'yes', consultation_needed: 'no',
     price_quoted: '800₪', price_shown: 'yes', wants_to_book: 'yes', phone: '0501112233',
     client_name: 'Маша', social_asked: 'yes', first_tattoo: 'no', slot_options: ['ev1'],
   });
