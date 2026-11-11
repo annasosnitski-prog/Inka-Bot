@@ -84,7 +84,7 @@ export interface ResponderInput {
 
 // Шаги, где точность стоит дороже экономии, остаются на полноразмерной
 // модели; остальные (где ответ — по сути фиксированная фраза на этот шаг)
-// переведены на mini. Два вида критичных шагов:
+// переведены на mini. Виды критичных шагов:
 // 1) цена и подтверждения брони/хендоффа — клиент действует по тексту бота
 //    (оплата, итоговое время; баг из прода с ценой без "за сеанс" — см.
 //    scripts/dialogEval.ts);
@@ -101,6 +101,15 @@ export interface ResponderInput {
 //    ("расходники"). Полный перевод офера — та же категория риска, что и
 //    (2), поэтому эти два шага тоже на gpt-5.4; остальные campaign_*-шаги
 //    (слоты, подтверждения полей) — заготовленные фразы, mini их не ломает.
+// 4) ask_phone/ask_name/ask_contact_channel — изначально (PR #66) считались
+//    чисто шаблонными "спроси одно поле" шагами и жили на mini. Реальный
+//    прогон 2026-11-11 (не eval:dialog, который эти шаги не проверяет)
+//    показал ту же категорию риска, что в (2): клиент пишет содержательный
+//    вопрос В ТОМ ЖЕ сообщении, где отвечает (или не отвечает) на поле —
+//    mini игнорирует вопрос и повторяет скрипт по кругу (6 ходов подряд на
+//    ask_phone). Вернули на gpt-5.4, пока в lib/prompts/responder.txt не
+//    появится та же оговорка "сначала ответь по существу", что у
+//    ask_wants_to_book/*_followup_chat — тогда можно будет пересмотреть.
 const PRECISION_CRITICAL_STEPS: ReadonlySet<NextStep> = new Set<NextStep>([
   'quote_price',
   'confirm_slot_awaiting_payment',
@@ -120,6 +129,9 @@ const PRECISION_CRITICAL_STEPS: ReadonlySet<NextStep> = new Set<NextStep>([
   'campaign_followup_chat',
   'campaign_intro',
   'campaign_ask_field',
+  'ask_phone',
+  'ask_name',
+  'ask_contact_channel',
 ]);
 
 function pickResponderModel(step: NextStep): string {
