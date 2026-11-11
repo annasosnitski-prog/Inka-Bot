@@ -41,6 +41,7 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     social_link: null,
     social_asked: 'yes',
     reference_asked: 'yes',
+    value_shown: 'yes',
     payment_status: null,
     client_type: '2_reference',
     skin_notes: null,

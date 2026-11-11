@@ -57,6 +57,7 @@ function card(over: Partial<ClientCard> = {}): ClientCard {
     booked_at: null,
     payment_reminder_early_sent: null,
     reference_asked: 'yes',
+    value_shown: 'yes',
     photos_count: 0,
     has_photo_this_message: false,
     photo_has_caption: false,

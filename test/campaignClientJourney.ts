@@ -52,7 +52,7 @@ function freshCard(): ClientCard {
     payment_status: null, client_type: null, skin_notes: null, spam_count: 0,
     chosen_slot_id: null, slot_options: null, booked_slot_display: null,
     booked_slot_start_iso: null, payment_reminder_sent: null, booked_at: null,
-    payment_reminder_early_sent: null, reference_asked: null, photos_count: 0,
+    payment_reminder_early_sent: null, reference_asked: null, value_shown: null, photos_count: 0,
     has_photo_this_message: false, photo_has_caption: false, force_client_mode: null,
     service_fit: null, second_project_flagged: null,
     campaign_id: null, campaign_collected: null, campaign_handoff_sent: null, campaign_last_id: null, campaign_return_pending: null,

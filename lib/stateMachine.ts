@@ -98,6 +98,14 @@ export interface ClientCard {
   booked_at: string | null;
   payment_reminder_early_sent: YesNo;
   reference_asked: YesNo;
+  // One-time gate, parallel to reference_asked: has the value-before-price
+  // beat (pricing principle + co-design invitation + honest heads-up on the
+  // free consultation/prepayment) already been given for THIS project?
+  // Anna's explicit product rule (2026-11-11): the client must never get a
+  // bare number — value and preparation for the master come first. Set once
+  // by getCardPatchForStep('offer_value_before_price') and never reset
+  // except by a genuinely new project the same way reference_asked is.
+  value_shown: YesNo;
   photos_count: number;
   has_photo_this_message: boolean;
   photo_has_caption: boolean;
@@ -229,6 +237,13 @@ export type NextStep =
   | 'ask_existing_tattoo_or_skin'
   | 'ask_skin_notes_detail'
   | 'ask_reference_photo'
+  // Diagnosis is complete, price is not shown yet. Fires exactly ONCE per
+  // project, before the first quote_price: pricing principle (how price is
+  // built, not "design X = price Y"), invitation to build the design
+  // together with the master, and an honest heads-up about the free
+  // consultation + prepayment — so the client is prepared for the master
+  // before seeing a number, never after a bare price. See value_shown.
+  | 'offer_value_before_price'
   | 'quote_price'
   | 'ask_wants_to_book'
   // Price shown, no booking decision yet, and either the client has an open
@@ -519,6 +534,9 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   }
 
   // Price must be shown, not merely calculated internally.
+  // Value before price, always, once per project — see value_shown.
+  if (card.value_shown !== 'yes') return 'offer_value_before_price';
+
   const hasPrice = !!card.price_quoted || card.price_explained === 'yes';
   if (!hasPrice || card.price_shown !== 'yes') return 'quote_price';
 
@@ -579,6 +597,7 @@ export interface CardPatch {
   price_shown?: YesNo;
   decline_followup_asked?: YesNo;
   reference_asked?: YesNo;
+  value_shown?: YesNo;
   service_fit?: ServiceFit;
   consultation_needed?: YesNo;
   second_project_flagged?: YesNo;
@@ -653,6 +672,8 @@ export function getCardPatchForStep(
       return { ...patch, social_asked: 'yes' };
     case 'ask_reference_photo':
       return { ...patch, reference_asked: 'yes' };
+    case 'offer_value_before_price':
+      return { ...patch, value_shown: 'yes' };
     case 'quote_price':
       return { ...patch, price_shown: 'yes' };
     // The first master-judgment reply never names a price (responder.txt:

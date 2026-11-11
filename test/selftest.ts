@@ -103,6 +103,10 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     // него спотыкаться; тесты именно на ask_reference_photo переопределяют
     // явно.
     reference_asked: 'yes',
+    // value_shown по умолчанию 'yes' в тестовой фабрике, по той же причине:
+    // большинство тестов ходит воронку ПОСЛЕ offer_value_before_price;
+    // тесты именно на этот шаг переопределяют явно.
+    value_shown: 'yes',
     payment_status: null, client_type: '2_reference', skin_notes: null, spam_count: 0,
     chosen_slot_id: null, slot_options: ['ev1', 'ev2'], booked_slot_display: null,
     booked_slot_start_iso: null, payment_reminder_sent: null, photos_count: 0,
@@ -298,6 +302,21 @@ eq('фото уже присылал (photos_count>0), референс не с�
 {
   const patch = getCardPatchForStep('ask_reference_photo', baseCard(), sig());
   eq('патч ask_reference_photo: reference_asked=yes сразу (fire-and-forget, не ждём ответа)', patch.reference_asked, 'yes');
+}
+
+console.log('\n▶ getNextStep — offer_value_before_price (ценность перед ценой, один раз за проект)');
+eq('диагностика завершена, value_shown ещё null, цены ещё нет → offer_value_before_price (не quote_price)',
+  step({ value_shown: null, price_shown: null, price_quoted: null, price_explained: null }),
+  'offer_value_before_price');
+eq('value_shown уже yes, цены ещё нет → обычный quote_price',
+  step({ value_shown: 'yes', price_shown: null, price_quoted: null, price_explained: null }),
+  'quote_price');
+eq('value_shown ещё null, но цена уже показана раньше → всё равно сначала offer_value_before_price',
+  step({ value_shown: null }),
+  'offer_value_before_price');
+{
+  const patch = getCardPatchForStep('offer_value_before_price', baseCard(), sig());
+  eq('патч offer_value_before_price: value_shown=yes', patch.value_shown, 'yes');
 }
 
 console.log('\n▶ getNextStep — waiting_slots (лист ожидания не должен повторять спич на каждую реплику)');

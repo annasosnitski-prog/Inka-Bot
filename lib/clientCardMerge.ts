@@ -80,6 +80,9 @@ export function mergeClientCard(
       // been asked/supplied. This distinguishes it from legacy cards where
       // reference_asked=null but photos_count>0 already proves an old photo.
       reference_asked: 'no',
+      // Same reasoning as reference_asked above: the value-before-price beat
+      // belongs to THIS project, not the previous one.
+      value_shown: 'no',
       // service_fit is a per-project gate — a lock from the previous project
       // must not silently carry over onto an unrelated new one.
       service_fit: null,
