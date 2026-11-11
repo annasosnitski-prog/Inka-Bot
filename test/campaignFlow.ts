@@ -43,7 +43,7 @@ function card(over: Partial<ClientCard> = {}): ClientCard {
     existing_tattoo: null, direct_tattoo_allowed: null, consultation_needed: null,
     active_work_time_estimate: null, price_quoted: null, price_explained: null,
     price_factors: null, price_shown: null, wants_to_book: null,
-    decline_followup_asked: null, phone: null, client_name: null,
+    decline_followup_asked: null, decline_reason_asked: null, phone: null, client_name: null,
     contact_channel: null, social_link: null, social_asked: null,
     payment_status: null, client_type: null, skin_notes: null, spam_count: 0,
     chosen_slot_id: null, slot_options: null, booked_slot_display: null,

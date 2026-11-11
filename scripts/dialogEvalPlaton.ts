@@ -36,6 +36,7 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     wants_to_book: null,
     phone: null,
     decline_followup_asked: null,
+    decline_reason_asked: null,
     client_name: 'Тест',
     contact_channel: 'telegram',
     social_link: null,

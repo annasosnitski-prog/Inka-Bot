@@ -83,6 +83,7 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     // decline_followup_asked по умолчанию null — тесты именно на
     // all_done/declined_followup_chat переопределяют явно.
     decline_followup_asked: null,
+    decline_reason_asked: null,
     // client_name по умолчанию задано в тестовой фабрике — та же причина,
     // что и у остальных "спрошено один раз" полей ниже: большинство тестов
     // ходит воронку ПОСЛЕ ask_name и не должно об него спотыкаться; тесты
@@ -141,7 +142,12 @@ eq('консультация с телефоном → show_consultation_slots',
 eq('нет цены → quote_price', step({ price_quoted: null, price_explained: null }), 'quote_price');
 eq('цена есть, wants_to_book null → ask_wants_to_book',
   step({ wants_to_book: null }), 'ask_wants_to_book');
-eq('явный отказ → all_done', step({ wants_to_book: 'no' }), 'all_done');
+eq('явный отказ без причины → сначала ask_decline_reason, не all_done',
+  step({ wants_to_book: 'no' }), 'ask_decline_reason');
+eq('явный отказ С причиной сразу (client_has_open_question) → сразу all_done, без повторного вопроса',
+  step({ wants_to_book: 'no' }, { client_has_open_question: true }), 'all_done');
+eq('причину уже спрашивали (decline_reason_asked=yes) → all_done, не переспрашиваем снова',
+  step({ wants_to_book: 'no', decline_reason_asked: 'yes' }), 'all_done');
 
 console.log('\n▶ getNextStep — частота вопроса "хочешь записаться?"');
 eq('вопрос про запись ещё не задавался → ask_wants_to_book',
@@ -154,8 +160,8 @@ eq('два ответа на вопросы после CTA → можно спр
   step({ wants_to_book: null }, { booking_cta_replies_ago: 2 }), 'ask_wants_to_book');
 eq('явное "хочу записаться" в price_followup_chat → дальше по воронке',
   step({ wants_to_book: null }, { booking_cta_replies_ago: 1, client_confirms_booking: 'yes' }), 'ask_phone');
-eq('явный отказ после ответа на вопросы → all_done',
-  step({ wants_to_book: null }, { booking_cta_replies_ago: 1, client_confirms_booking: 'no' }), 'all_done');
+eq('явный отказ после ответа на вопросы, без причины → ask_decline_reason',
+  step({ wants_to_book: null }, { booking_cta_replies_ago: 1, client_confirms_booking: 'no' }), 'ask_decline_reason');
 eq('открытый вопрос клиента, CTA ещё не было → ответ без CTA',
   step({ wants_to_book: null }, { booking_cta_replies_ago: null, client_has_open_question: true }), 'price_followup_chat');
 eq('открытый вопрос клиента, интервал давно прошёл → всё равно ответ без CTA',
@@ -191,10 +197,13 @@ eq('явное "да" важнее двоякости → дальше по во
   step({ wants_to_book: null }, { booking_reply_ambiguous: true, client_confirms_booking: 'yes' }), 'ask_phone');
 eq('без двоякости после недавнего CTA → прежнее поведение',
   step({ wants_to_book: null }, { booking_cta_replies_ago: 1 }), 'price_followup_chat');
-eq('окончательный отказ → all_done',
-  step({ wants_to_book: null }, { client_confirms_booking: 'no' }), 'all_done');
-eq('повторный отказ → declined_followup_chat, не all_done',
-  step({ wants_to_book: 'no', decline_followup_asked: 'yes' }, { client_confirms_booking: 'no' }), 'declined_followup_chat');
+eq('окончательный отказ, без причины → сначала ask_decline_reason',
+  step({ wants_to_book: null }, { client_confirms_booking: 'no' }), 'ask_decline_reason');
+eq('повторный отказ (причину уже спрашивали) → declined_followup_chat, не all_done',
+  step(
+    { wants_to_book: 'no', decline_followup_asked: 'yes', decline_reason_asked: 'yes' },
+    { client_confirms_booking: 'no' }
+  ), 'declined_followup_chat');
 eq('конкретное сомнение (вопрос) → price_followup_chat, не отказ',
   step({ wants_to_book: null }, { client_has_open_question: true, client_undecided: true }), 'price_followup_chat');
 eq('хочет поговорить с мастером → master_contact_requested (после цены)',
@@ -214,8 +223,8 @@ console.log('  свалило клиента в all_done — у Extractor нет
 eq('wants_to_book уже yes, случайный сигнал "no" в ЭТОМ сообщении → всё равно едет дальше, не all_done',
   step({ wants_to_book: 'yes', phone: '05011' }, { client_confirms_booking: 'no' }),
   'show_tattoo_slots');
-eq('wants_to_book ещё null, сигнал "no" → всё-таки all_done (это настоящий первый отказ)',
-  step({ wants_to_book: null }, { client_confirms_booking: 'no' }), 'all_done');
+eq('wants_to_book ещё null, сигнал "no" → всё-таки ask_decline_reason (это настоящий первый отказ)',
+  step({ wants_to_book: null }, { client_confirms_booking: 'no' }), 'ask_decline_reason');
 {
   const patchSticky = getCardPatchForStep(
     'show_tattoo_slots',
@@ -226,16 +235,22 @@ eq('wants_to_book ещё null, сигнал "no" → всё-таки all_done (�
 }
 
 console.log('\n▶ getNextStep — declined_followup_chat (не повторять "что-то останавливает?" на каждую реплику)');
-eq('первый отказ → all_done',
-  step({ wants_to_book: null }, { client_confirms_booking: 'no' }), 'all_done');
-eq('уже спрашивали (decline_followup_asked=yes), клиент просто продолжает → declined_followup_chat',
-  step({ wants_to_book: 'no', decline_followup_asked: 'yes' }), 'declined_followup_chat');
+eq('первый отказ, причина ещё не спрошена → ask_decline_reason',
+  step({ wants_to_book: null }, { client_confirms_booking: 'no' }), 'ask_decline_reason');
+eq('причину уже спрашивали и уже сказали all_done (decline_followup_asked=yes), клиент просто продолжает → declined_followup_chat',
+  step({ wants_to_book: 'no', decline_followup_asked: 'yes', decline_reason_asked: 'yes' }), 'declined_followup_chat');
 eq('уже спрашивали, но клиент явно передумал → едет дальше, не declined_followup_chat',
-  step({ wants_to_book: 'no', decline_followup_asked: 'yes', phone: '05011' }, { client_confirms_booking: 'yes' }),
-  'show_tattoo_slots');
+  step(
+    { wants_to_book: 'no', decline_followup_asked: 'yes', decline_reason_asked: 'yes', phone: '05011' },
+    { client_confirms_booking: 'yes' }
+  ), 'show_tattoo_slots');
 {
   const patchAllDone = getCardPatchForStep('all_done', baseCard({ wants_to_book: 'no' }), sig());
   eq('патч all_done: decline_followup_asked=yes сразу', patchAllDone.decline_followup_asked, 'yes');
+}
+{
+  const patchAskReason = getCardPatchForStep('ask_decline_reason', baseCard({ wants_to_book: 'no' }), sig());
+  eq('патч ask_decline_reason: decline_reason_asked=yes сразу', patchAskReason.decline_reason_asked, 'yes');
 }
 
 console.log('\n▶ getNextStep — price_shown (цену Extractor мог посчитать молча в этом же сообщении,');

@@ -81,6 +81,10 @@ export interface ClientCard {
   price_shown: YesNo;
   wants_to_book: YesNo;
   decline_followup_asked: YesNo;
+  // One-time gate, same lifecycle as reference_asked/value_shown: has the
+  // "what's stopping you?" question already been asked for THIS decline?
+  // See ask_decline_reason.
+  decline_reason_asked: YesNo;
   phone: string | null;
   client_name: string | null;
   contact_channel: ContactChannel;
@@ -279,6 +283,9 @@ export type NextStep =
   | 'confirm_consultation_booked'
   | 'payment_screenshot_received'
   | 'booked_followup_chat'
+  // First explicit decline, no reason given with it: ONE question about
+  // what's stopping them, before accepting it as final. See decline_reason_asked.
+  | 'ask_decline_reason'
   | 'all_done'
   | 'declined_followup_chat'
   // Campaign/recruitment mode (see lib/campaignFlow.ts). Generic across all
@@ -558,6 +565,16 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     return 'ask_wants_to_book';
   }
   if (effectiveWantsToBook === 'no') {
+    // Anna's explicit reversal (2026-11-11): a bare decline ("нет, спасибо")
+    // gets ONE question about what's stopping them, before accepting it —
+    // so the bot can try to address a real objection on the spot, or at
+    // least pass a concrete reason to the master. Only when the decline
+    // already came WITH a reason (client_has_open_question this message)
+    // do we skip straight to all_done, which already answers that reason —
+    // asking again would just repeat a question the client already answered.
+    if (card.decline_reason_asked !== 'yes' && !signals.client_has_open_question) {
+      return 'ask_decline_reason';
+    }
     return card.decline_followup_asked === 'yes' ? 'declined_followup_chat' : 'all_done';
   }
 
@@ -596,6 +613,7 @@ export interface CardPatch {
   social_asked?: YesNo;
   price_shown?: YesNo;
   decline_followup_asked?: YesNo;
+  decline_reason_asked?: YesNo;
   reference_asked?: YesNo;
   value_shown?: YesNo;
   service_fit?: ServiceFit;
@@ -651,6 +669,8 @@ export function getCardPatchForStep(
   }
 
   switch (step) {
+    case 'ask_decline_reason':
+      return { ...patch, decline_reason_asked: 'yes' };
     case 'all_done':
       return { ...patch, decline_followup_asked: 'yes' };
     case 'handle_out_of_scope_warning_1':

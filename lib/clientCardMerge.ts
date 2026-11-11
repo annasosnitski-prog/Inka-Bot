@@ -68,6 +68,7 @@ export function mergeClientCard(
       price_shown: null,
       wants_to_book: null,
       decline_followup_asked: null,
+      decline_reason_asked: null,
       chosen_slot_id: null,
       slot_options: null,
       payment_status: null,

@@ -40,6 +40,7 @@ function card(over: Partial<ClientCard> = {}): ClientCard {
     price_shown: 'yes',
     wants_to_book: 'yes',
     decline_followup_asked: null,
+    decline_reason_asked: null,
     phone: '0501112233',
     client_name: 'Маша',
     contact_channel: 'telegram',
