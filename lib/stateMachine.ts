@@ -194,6 +194,12 @@ export interface MessageSignals {
   booking_reply_ambiguous?: boolean;
   // Extractor: client wants to talk to the master directly.
   client_wants_master_contact?: boolean;
+  // Extractor (+ code regex fallback in telegram.ts): the client asks WHEN
+  // they can come / which windows are free — wants to see the time before
+  // leaving contacts. Lets the booking route show slots first and collect
+  // phone/name after the pick (see bookingContactsOrSlots). Message-level,
+  // never persisted.
+  client_asks_for_slots?: boolean;
   // Computed by code from dialog_history, like booking_cta_replies_ago: how
   // many Inka replies ago the undecided step was last used. While that is
   // more recent than the last booking question, the bot does not return to
@@ -269,6 +275,12 @@ export type NextStep =
   | 'master_contact_requested'
   | 'ask_phone'
   | 'ask_name'
+  // Client picked a window BEFORE leaving phone/name (slots were shown
+  // first). The pick is held in chosen_slot_id and lead_status stays
+  // 'slots_shown'; Inka asks only for the missing contacts. As soon as
+  // they arrive, the booking goes through on the held window — no second
+  // slot list, no repeat of the choice.
+  | 'slot_held_ask_contacts'
   | 'ask_contact_channel'
   | 'ask_social'
   | 'show_tattoo_slots'
@@ -310,6 +322,58 @@ export type NextStep =
 
 function hasSlots(card: ClientCard): boolean {
   return !!card.slot_options && card.slot_options.length > 0;
+}
+
+// Contacts the booking itself needs: phone + name always; contact channel
+// only for a consultation held in chat. Never book without them.
+function missingBookingContacts(card: ClientCard, isConsultation: boolean): boolean {
+  if (!card.phone || !card.client_name) return true;
+  return isConsultation && !card.contact_channel && getMasterProfile().consultationMode === 'chat';
+}
+
+// The window this message books: a fresh pick, or — when the client picked
+// earlier, before leaving contacts (slot_held_ask_contacts) — the held one,
+// as long as it is still in the list that was shown. Used by getNextStep
+// and by pages/api/telegram.ts (bookSlot) so both read the same id.
+export function getEffectivePickedSlotId(card: ClientCard, signals: MessageSignals): string | null {
+  if (signals.client_picked_slot_id) return signals.client_picked_slot_id;
+  if (signals.client_wants_other_slots || signals.client_asks_for_more_slots) return null;
+  if (
+    card.lead_status === 'slots_shown' &&
+    card.chosen_slot_id &&
+    hasSlots(card) &&
+    card.slot_options!.includes(card.chosen_slot_id)
+  ) {
+    return card.chosen_slot_id;
+  }
+  return null;
+}
+
+// Booking route, contacts not complete yet. Default order is unchanged
+// (phone → name → channel → slots). Only when the client himself asks
+// "when can I come?" and real slots exist does the time come first — the
+// contacts are then asked after the pick (slot_held_ask_contacts).
+function bookingContactsOrSlots(
+  card: ClientCard,
+  signals: MessageSignals,
+  isConsultation: boolean
+): NextStep {
+  const slotStep: NextStep = isConsultation ? 'show_consultation_slots' : 'show_tattoo_slots';
+  if (missingBookingContacts(card, isConsultation)) {
+    if (signals.client_asks_for_slots && hasSlots(card)) return slotStep;
+    if (!card.phone) return 'ask_phone';
+    if (!card.client_name) return 'ask_name';
+    return 'ask_contact_channel';
+  }
+  return hasSlots(card) ? slotStep : 'no_more_slots_waiting';
+}
+
+// A valid pick (fresh or held): book only with full contacts, otherwise
+// hold the window and ask for what is missing.
+function confirmOrHold(card: ClientCard): NextStep {
+  const isConsultation = card.direct_tattoo_allowed !== 'yes';
+  if (missingBookingContacts(card, isConsultation)) return 'slot_held_ask_contacts';
+  return isConsultation ? 'confirm_consultation_booked' : 'confirm_slot_awaiting_payment';
 }
 
 export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep {
@@ -366,12 +430,7 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   // can answer). getCardPatchForStep sets consultation_needed='yes' to match.
   if (signals.client_wants_master_contact) {
     if (card.service_fit === 'needs_clarification') {
-      if (!card.phone) return 'ask_phone';
-      if (!card.client_name) return 'ask_name';
-      if (!card.contact_channel && getMasterProfile().consultationMode === 'chat') {
-        return 'ask_contact_channel';
-      }
-      return hasSlots(card) ? 'show_consultation_slots' : 'no_more_slots_waiting';
+      return bookingContactsOrSlots(card, signals, true);
     }
     return 'master_contact_requested';
   }
@@ -487,21 +546,19 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     if (signals.client_picked_slot_id) {
       const isValidChoice = hasSlots(card) && card.slot_options!.includes(signals.client_picked_slot_id);
       if (!isValidChoice) return 'slot_taken_pick_again';
-      return card.direct_tattoo_allowed === 'yes'
-        ? 'confirm_slot_awaiting_payment'
-        : 'confirm_consultation_booked';
+      return confirmOrHold(card);
     }
     return 'slot_change_requested_waiting';
   }
 
   // Slots already shown: interpret the client's choice before anything else.
   if (card.lead_status === 'slots_shown') {
-    if (signals.client_picked_slot_id) {
-      const isValidChoice = hasSlots(card) && card.slot_options!.includes(signals.client_picked_slot_id);
+    // A fresh pick, or the window already held while contacts are collected.
+    const pickedSlotId = getEffectivePickedSlotId(card, signals);
+    if (pickedSlotId) {
+      const isValidChoice = hasSlots(card) && card.slot_options!.includes(pickedSlotId);
       if (!isValidChoice) return 'slot_taken_pick_again';
-      return card.direct_tattoo_allowed === 'yes'
-        ? 'confirm_slot_awaiting_payment'
-        : 'confirm_consultation_booked';
+      return confirmOrHold(card);
     }
     // Before treating the decline as a dead-end, ask what specifically
     // doesn't fit and whether there's a preferred day/time — the answer
@@ -585,22 +642,16 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     // «Первая ли тату» — необязательный вопрос про клиента, он спрашивается
     // раньше, вместе со сбором информации (ask_existing_tattoo_or_skin), и
     // запись не блокирует.
-    if (!card.phone) return 'ask_phone';
-    if (!card.client_name) return 'ask_name';
     // Соцсеть спрашиваем уже после записи (см. confirm_*), не перед слотами.
-    return hasSlots(card) ? 'show_tattoo_slots' : 'no_more_slots_waiting';
+    return bookingContactsOrSlots(card, signals, false);
   }
 
   // Consultation route.
   if (card.consultation_needed === 'yes') {
-    if (!card.phone) return 'ask_phone';
-    if (!card.client_name) return 'ask_name';
     // Очная консультация: клиент придёт сам, связь остаётся в телеграме —
-    // канал не спрашиваем. Канал нужен, только когда консультация в переписке.
-    if (!card.contact_channel && getMasterProfile().consultationMode === 'chat') {
-      return 'ask_contact_channel';
-    }
-    return hasSlots(card) ? 'show_consultation_slots' : 'no_more_slots_waiting';
+    // канал не спрашиваем. Канал нужен, только когда консультация в переписке
+    // (см. missingBookingContacts).
+    return bookingContactsOrSlots(card, signals, true);
   }
 
   return 'quote_price';
@@ -685,7 +736,11 @@ export function getCardPatchForStep(
     case 'reschedule_requested_ping_master':
       return { ...patch, lead_status: 'waiting_slots_pinged' };
     case 'slot_preference_clarify':
-      return { ...patch, lead_status: 'slots_shown_clarifying' };
+      return { ...patch, chosen_slot_id: null, lead_status: 'slots_shown_clarifying' };
+    // Hold the picked window; lead_status stays 'slots_shown' so the next
+    // message with the contacts books exactly this window.
+    case 'slot_held_ask_contacts':
+      return { ...patch, chosen_slot_id: getEffectivePickedSlotId(card, signals) };
     case 'slot_change_requested_waiting':
     case 'no_more_slots_waiting':
       return { ...patch, chosen_slot_id: null, lead_status: 'waiting_slots' };
@@ -711,9 +766,10 @@ export function getCardPatchForStep(
     // repeat the same number once service_fit later resolves to "allowed".
     case 'service_fit_unconfirmed_followup_chat':
       return card.price_quoted ? { ...patch, price_shown: 'yes' } : patch;
+    // A fresh list drops any earlier hold — the client picks again from it.
     case 'show_tattoo_slots':
     case 'show_consultation_slots':
-      return { ...patch, lead_status: 'slots_shown' };
+      return { ...patch, chosen_slot_id: null, lead_status: 'slots_shown' };
     case 'confirm_slot_awaiting_payment':
       return {
         ...patch,

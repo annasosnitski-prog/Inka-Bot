@@ -14,6 +14,7 @@
 import {
   getNextStep,
   getCardPatchForStep,
+  getEffectivePickedSlotId,
   type ClientCard,
   type MessageSignals,
   type NextStep,
@@ -366,6 +367,46 @@ eq('просит другие слоты → slot_preference_clarify (уточн
 {
   const patch = getCardPatchForStep('slot_preference_clarify', baseCard({ lead_status: 'slots_shown', phone: '05011' }), sig());
   eq('патч slot_preference_clarify: lead_status=slots_shown_clarifying', patch.lead_status, 'slots_shown_clarifying');
+}
+
+console.log('\n▶ getNextStep — слоты раньше телефона (клиент сам спросил про время)');
+eq('нет телефона, клиент спросил "когда можно прийти", слоты есть → show_tattoo_slots',
+  step({ phone: null, client_name: null }, { client_asks_for_slots: true }), 'show_tattoo_slots');
+eq('нет телефона, спросил про время, но слотов нет → ask_phone (лист ожидания без номера не создаём)',
+  step({ phone: null, slot_options: [] }, { client_asks_for_slots: true }), 'ask_phone');
+eq('нет телефона, про время не спрашивал → ask_phone (порядок по умолчанию прежний)',
+  step({ phone: null }), 'ask_phone');
+eq('консультация, нет телефона, спросил про время → show_consultation_slots',
+  step({ direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: null }, { client_asks_for_slots: true }),
+  'show_consultation_slots');
+eq('слоты показаны без телефона, клиент выбрал окно → slot_held_ask_contacts (не бронь)',
+  step({ lead_status: 'slots_shown', phone: null }, { client_picked_slot_id: 'ev2' }), 'slot_held_ask_contacts');
+eq('телефон есть, имени нет, выбрал окно → slot_held_ask_contacts',
+  step({ lead_status: 'slots_shown', phone: '05011', client_name: null }, { client_picked_slot_id: 'ev2' }), 'slot_held_ask_contacts');
+{
+  const c = baseCard({ lead_status: 'slots_shown', phone: null });
+  const patch = getCardPatchForStep('slot_held_ask_contacts', c, sig({ client_picked_slot_id: 'ev2' }));
+  eq('патч slot_held_ask_contacts: окно удержано (chosen_slot_id=ev2)', patch.chosen_slot_id, 'ev2');
+  eq('патч slot_held_ask_contacts: lead_status не меняется (остаётся slots_shown)', patch.lead_status, undefined);
+}
+eq('окно удержано, клиент прислал номер (имя есть) → бронь по удержанному окну без нового выбора',
+  step({ lead_status: 'slots_shown', phone: '05011', chosen_slot_id: 'ev2' }), 'confirm_slot_awaiting_payment');
+eq('окно удержано, номера всё ещё нет → slot_held_ask_contacts (не unclear_slot_choice, список не повторяем)',
+  step({ lead_status: 'slots_shown', phone: null, chosen_slot_id: 'ev2' }), 'slot_held_ask_contacts');
+eq('окно удержано, но клиент передумал и просит другие → slot_preference_clarify',
+  step({ lead_status: 'slots_shown', phone: null, chosen_slot_id: 'ev2' }, { client_wants_other_slots: true }), 'slot_preference_clarify');
+eq('окно удержано, клиент выбрал другое и дал номер → бронь нового выбора',
+  getEffectivePickedSlotId(baseCard({ lead_status: 'slots_shown', phone: '05011', chosen_slot_id: 'ev2' }), sig({ client_picked_slot_id: 'ev1' })), 'ev1');
+eq('удержанное окно пропало из показанного списка → не считается выбором',
+  getEffectivePickedSlotId(baseCard({ lead_status: 'slots_shown', chosen_slot_id: 'ghost' }), sig()), null);
+eq('chosen_slot_id после брони не считается удержанием (статус уже не slots_shown)',
+  getEffectivePickedSlotId(baseCard({ lead_status: 'tattoo_booked_waiting_payment', chosen_slot_id: 'ev1' }), sig()), null);
+eq('консультация в переписке: окно удержано, канала нет → slot_held_ask_contacts или бронь по профилю мастера',
+  ['slot_held_ask_contacts', 'confirm_consultation_booked'].includes(
+    step({ lead_status: 'slots_shown', direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', contact_channel: null, chosen_slot_id: 'ev1' })), true);
+{
+  const patch = getCardPatchForStep('show_tattoo_slots', baseCard({ chosen_slot_id: 'ev2' }), sig());
+  eq('новый список слотов снимает старое удержание', patch.chosen_slot_id, null);
 }
 
 console.log('\n▶ getNextStep — slot_preference_clarify (ответ клиента про день/время идёт дальше, не зависает)');

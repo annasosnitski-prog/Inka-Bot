@@ -510,6 +510,13 @@ client_wants_master_contact — клиент хочет поговорить с 
 мастер это делает?" про его работу — false. Это сигнал только этого
 сообщения, в любой момент диалога (с ценой или без).
 
+client_asks_for_slots — клиент сам спрашивает, КОГДА можно прийти или
+какие есть свободные окна/даты, хочет сначала увидеть время ("когда
+можно прийти?", "а какие есть даты?", "покажи окна", "когда у него есть
+время?", "сначала скажи время, потом номер"). Просто "хочу записаться"
+без вопроса про время — false. Вопрос про длительность сеанса ("сколько
+по времени?") — false. Сигнал только этого сообщения.
+
 client_has_open_question — в ЭТОМ сообщении есть то, на что нужно
 ответить по существу: вопрос ("почему 3000?", "а фрихенд входит?", "как
 вообще начать такой проект?"), возражение или наблюдение ("так там же
@@ -679,6 +686,7 @@ JSON SCHEMA — ТОЧНО ЭТИ ПОЛЯ, НИЧЕГО ЛИШНЕГО
   "client_undecided": boolean,
   "booking_reply_ambiguous": boolean,
   "client_wants_master_contact": boolean,
+  "client_asks_for_slots": boolean,
 
   "reference_color": "none" | "accent" | "equal" | "dominant" | null,
   "reference_is_realistic": boolean | null,
@@ -700,7 +708,8 @@ reference_color: "none" — только чёрный/серый; "accent" — �
 
 service_fit, service_fit_reason, service_fit_needs_master_judgment,
 is_new_project_request, photo_purpose, client_has_open_question,
-client_undecided, booking_reply_ambiguous, client_wants_master_contact —
+client_undecided, booking_reply_ambiguous, client_wants_master_contact,
+client_asks_for_slots —
 сигналы ТОЛЬКО этого сообщения, никогда не наследуй их из current_card.
 
 Верни ТОЛЬКО этот JSON. Никакого текста до или после.
