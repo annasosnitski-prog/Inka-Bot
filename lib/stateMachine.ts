@@ -245,8 +245,10 @@ export type NextStep =
   // project, before the first quote_price: pricing principle (how price is
   // built, not "design X = price Y"), invitation to build the design
   // together with the master, and an honest heads-up about the free
-  // consultation + prepayment — so the client is prepared for the master
-  // before seeing a number, never after a bare price. See value_shown.
+  // consultation + prepayment — and then, in the SAME message, the price
+  // itself (when it is already computed), so the client is prepared for the
+  // master before seeing a number, never after a bare price, and never has
+  // to send another message just to hear it. See value_shown.
   | 'offer_value_before_price'
   | 'quote_price'
   | 'ask_wants_to_book'
@@ -265,7 +267,6 @@ export type NextStep =
   // Client wants to talk to the master directly: the request is passed to
   // the master (existing Telegram ping), no booking is created.
   | 'master_contact_requested'
-  | 'ask_first_tattoo'
   | 'ask_phone'
   | 'ask_name'
   | 'ask_contact_channel'
@@ -581,7 +582,9 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   // Direct tattoo route.
   if (card.direct_tattoo_allowed === 'yes') {
     if (!card.price_quoted) return 'quote_price';
-    if (card.first_tattoo === null) return 'ask_first_tattoo';
+    // «Первая ли тату» — необязательный вопрос про клиента, он спрашивается
+    // раньше, вместе со сбором информации (ask_existing_tattoo_or_skin), и
+    // запись не блокирует.
     if (!card.phone) return 'ask_phone';
     if (!card.client_name) return 'ask_name';
     // Соцсеть спрашиваем уже после записи (см. confirm_*), не перед слотами.
@@ -692,8 +695,12 @@ export function getCardPatchForStep(
       return { ...patch, social_asked: 'yes' };
     case 'ask_reference_photo':
       return { ...patch, reference_asked: 'yes' };
+    // Ценность и цена теперь одним сообщением: если цена уже посчитана, она
+    // названа в этой же реплике, поэтому quote_price её не повторяет.
     case 'offer_value_before_price':
-      return { ...patch, value_shown: 'yes' };
+      return card.price_quoted || card.price_explained === 'yes'
+        ? { ...patch, value_shown: 'yes', price_shown: 'yes' }
+        : { ...patch, value_shown: 'yes' };
     case 'quote_price':
       return { ...patch, price_shown: 'yes' };
     // The first master-judgment reply never names a price (responder.txt:

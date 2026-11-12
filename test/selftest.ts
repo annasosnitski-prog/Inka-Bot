@@ -215,8 +215,8 @@ eq('хочет поговорить с мастером при активной 
 eq('master_contact_requested не создаёт запись и не меняет статус',
   JSON.stringify(getCardPatchForStep('master_contact_requested', baseCard({ wants_to_book: null }), sig({ client_wants_master_contact: true }))),
   JSON.stringify(getCardPatchForStep('price_followup_chat', baseCard({ wants_to_book: null }), sig({}))));
-eq('первое тату неизвестно → ask_first_tattoo',
-  step({ phone: '05011', first_tattoo: null }), 'ask_first_tattoo');
+eq('первое тату неизвестно → не блокирует запись, сразу телефон/имя',
+  step({ phone: null, first_tattoo: null }), 'ask_phone');
 
 console.log('\n▶ getNextStep — once yes, always yes (баг с живых тестов: "нет" на инстаграм после "хочу"');
 console.log('  свалило клиента в all_done — у Extractor нет памяти переписки, чтобы понять, на что отвечает "нет")');
@@ -332,6 +332,9 @@ eq('value_shown ещё null, но цена уже показана раньше 
 {
   const patch = getCardPatchForStep('offer_value_before_price', baseCard(), sig());
   eq('патч offer_value_before_price: value_shown=yes', patch.value_shown, 'yes');
+  eq('цена уже посчитана → названа в этом же сообщении, price_shown=yes', patch.price_shown, 'yes');
+  const noPrice = getCardPatchForStep('offer_value_before_price', baseCard({ price_quoted: null, price_explained: null }), sig());
+  eq('цены ещё нет → price_shown не трогаем', noPrice.price_shown, undefined);
 }
 
 console.log('\n▶ getNextStep — waiting_slots (лист ожидания не должен повторять спич на каждую реплику)');

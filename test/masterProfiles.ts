@@ -81,6 +81,13 @@ for (const [label, build] of [
   ok(`${label}: в промпте Платона нет Ани и её ссылок`, anyaInPlaton.length === 0, anyaInPlaton.join(','));
   const platonInAnya = PLATON_MARKERS.filter((m) => forAnya.includes(m));
   ok(`${label}: в промпте Ани нет Платона`, platonInAnya.length === 0, platonInAnya.join(','));
+  // Смысловая утечка (не буквальное имя): правило Платона "основа — чёрный,
+  // цвет только дополнение" не должно попадать в промпт мастера, у которого
+  // такого ограничения нет (баг прогона 2026-11-11: Инка говорила за Аню
+  // "основа держится на чёрной композиции").
+  const BLACK_BASE_RULES = ['основа — чёрный цвет', 'только дополнение внутри чёрной', 'не наравне с ней'];
+  const blackBaseInAnya = BLACK_BASE_RULES.filter((m) => forAnya.includes(m));
+  ok(`${label}: в промпте Ани нет правила Платона про чёрную основу`, blackBaseInAnya.length === 0, blackBaseInAnya.join(','));
   const genderInPlaton = GENDER_LEAKS.filter((m) => forPlaton.includes(m));
   ok(`${label}: у Платона нет женского рода мастера`, genderInPlaton.length === 0, genderInPlaton.join(','));
 }
