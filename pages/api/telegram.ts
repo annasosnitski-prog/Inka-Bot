@@ -9,7 +9,7 @@ import {
 import type { ClientRecord } from '../../lib/airtable';
 import { runExtractor } from '../../lib/extractor';
 import { mergeClientCard, isBooked } from '../../lib/clientCardMerge';
-import { getNextStep, getCardPatchForStep } from '../../lib/stateMachine';
+import { getNextStep, getCardPatchForStep, getEffectivePickedSlotId } from '../../lib/stateMachine';
 import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
 import { runAdmin } from '../../lib/admin';
@@ -527,6 +527,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           lastInkaStep(parseDialogHistory(existing)) ?? ''
         ),
       client_wants_master_contact: extracted.client_wants_master_contact,
+      // Клиент сам спрашивает, когда можно прийти / какие окна — тогда время
+      // показывается раньше телефона (см. bookingContactsOrSlots). Страховка
+      // регуляркой на случай промаха Extractor.
+      client_asks_for_slots:
+        extracted.client_asks_for_slots === true ||
+        /когда\s+(можно\s+)?(прийти|придти|записаться)|какие\s+(есть\s+)?(даты|окна|дни|свободные)|когда\s+(у\s+(него|не[её]|мастера)\s+)?(есть\s+)?(свободн|окн)|покажи(те)?\s+(окна|даты|время|свободн)/i.test(messageText ?? ''),
       undecided_replies_ago: inkaRepliesSinceStep(parseDialogHistory(existing), 'undecided_followup_chat'),
     };
 
@@ -616,7 +622,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Телефон должен быть именно в этом сообщении: Extractor может вернуть
       // номер, уже лежащий в карточке, — тогда возвращающийся клиент без
       // решения записывался бы на любую реплику.
-      ((extracted.phone && (messageText ?? '').replace(/\D/g, '').length >= 9) ||
+      // Вопрос «что есть / когда можно» после цены — тоже согласие увидеть
+      // время (PR #97: окна раньше телефона).
+      (signals.client_asks_for_slots ||
+        (extracted.phone && (messageText ?? '').replace(/\D/g, '').length >= 9) ||
         /когда\s+(можно\s+)?(прийти|придти|записаться)|как\s+(можно\s+)?записаться|какие\s+(есть\s+)?(даты|окна|свободные)|когда\s+(будет\s+)?консультаци|(хочу|можно)\s+(записаться|на консультаци)/i.test(messageText ?? ''))
     ) {
       signals.client_confirms_booking = 'yes';
@@ -673,8 +682,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       'campaign_no_slots',
       'campaign_confirm_slot',
     ];
+    // Без телефона календарь тоже нужен, если клиент сам спросил про время
+    // (слоты раньше телефона) или список уже показан и он из него выбирает.
+    // На шагах сбора контактов с таким вопросом подгружаем слоты, чтобы
+    // второй проход getNextStep мог показать время сразу.
+    const contactSteps: NextStep[] = ['ask_phone', 'ask_name', 'ask_contact_channel'];
+    const slotsBeforePhone =
+      !!signals.client_asks_for_slots ||
+      mergedCard.lead_status === 'slots_shown' ||
+      mergedCard.lead_status === 'slots_shown_clarifying';
     const needsFreshSlots =
-      (routeChosen && hasPhone && slotLookupSteps.includes(nextStep)) ||
+      (routeChosen && (hasPhone || slotsBeforePhone) && slotLookupSteps.includes(nextStep)) ||
+      (routeChosen && !!signals.client_asks_for_slots && contactSteps.includes(nextStep)) ||
       (campaignSelfBooksSlots && slotLookupSteps.includes(nextStep));
 
     // Если первый проход уже валидно подтвердил бронь по списку, который
@@ -728,11 +747,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // переименовываем событие в календаре. Если бронирование не
     // удалось (слот увели секунду назад) — откатываем на повторный
     // выбор, не притворяясь, что всё прошло гладко.
+    // Окно — либо выбранное этим сообщением, либо удержанное раньше, пока
+    // клиент оставлял контакты (slot_held_ask_contacts). Считаем по карточке
+    // ДО обновления слотов: удержанное окно было в показанном списке.
+    const bookingSlotId = mergedCard.campaign_id
+      ? signals.client_picked_slot_id
+      : getEffectivePickedSlotId(mergedCard, signals);
     if (
       (nextStep === 'confirm_slot_awaiting_payment' ||
         nextStep === 'confirm_consultation_booked' ||
         nextStep === 'campaign_confirm_slot') &&
-      signals.client_picked_slot_id
+      bookingSlotId
     ) {
       const slotType: BookingType =
         nextStep === 'confirm_slot_awaiting_payment'
@@ -740,8 +765,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           : nextStep === 'campaign_confirm_slot'
             ? 'campaign'
             : 'consultation';
+      // Удержанное окно могло выпасть из свежего top-3 (появилось более
+      // раннее) — ищем его в расширенном списке ДО брони (после брони оно
+      // уже занято и в выдачу не попадёт), чтобы не потерять дату для
+      // подтверждения и напоминаний об оплате.
+      if (slotType !== 'campaign' && !(liveCard.slot_options ?? []).includes(bookingSlotId)) {
+        try {
+          const wider = await getAvailableSlots(slotType, 20);
+          const held = wider.find((sl) => sl.id === bookingSlotId);
+          if (held) {
+            rawSlots = [...(rawSlots ?? []), held];
+            slotsDisplay = [...(slotsDisplay ?? []), formatSlotForDisplay(held)];
+            liveCard = { ...liveCard, slot_options: [...(liveCard.slot_options ?? []), bookingSlotId] };
+          }
+        } catch (lookupErr) {
+          console.error('Held slot lookup failed (booking continues):', lookupErr);
+        }
+      }
       const result = await bookSlot(
-        signals.client_picked_slot_id,
+        bookingSlotId,
         slotType,
         liveCard.client_name || clientLabel,
         liveCard.phone
@@ -758,7 +800,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         slotsDisplay = freshSlots.map(formatSlotForDisplay);
         nextStep = nextStep === 'campaign_confirm_slot' ? 'campaign_show_slots' : 'slot_taken_pick_again';
       } else {
-        const pickedIndex = liveCard.slot_options?.indexOf(signals.client_picked_slot_id) ?? -1;
+        const pickedIndex = liveCard.slot_options?.indexOf(bookingSlotId) ?? -1;
         const pickedDisplay = pickedIndex >= 0 ? slotsDisplay?.[pickedIndex] ?? null : null;
         const isTattooBooking = nextStep === 'confirm_slot_awaiting_payment';
         const isCampaignBooking = nextStep === 'campaign_confirm_slot';
@@ -769,7 +811,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             : null;
         liveCard = {
           ...liveCard,
-          chosen_slot_id: signals.client_picked_slot_id,
+          chosen_slot_id: bookingSlotId,
           booked_slot_display: pickedDisplay,
           booked_slot_start_iso: pickedStartIso,
           payment_reminder_sent: null,
