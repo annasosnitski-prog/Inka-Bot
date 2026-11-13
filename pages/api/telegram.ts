@@ -622,7 +622,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Телефон должен быть именно в этом сообщении: Extractor может вернуть
       // номер, уже лежащий в карточке, — тогда возвращающийся клиент без
       // решения записывался бы на любую реплику.
-      ((extracted.phone && (messageText ?? '').replace(/\D/g, '').length >= 9) ||
+      // Вопрос «что есть / когда можно» после цены — тоже согласие увидеть
+      // время (PR #97: окна раньше телефона).
+      (signals.client_asks_for_slots ||
+        (extracted.phone && (messageText ?? '').replace(/\D/g, '').length >= 9) ||
         /когда\s+(можно\s+)?(прийти|придти|записаться)|как\s+(можно\s+)?записаться|какие\s+(есть\s+)?(даты|окна|свободные)|когда\s+(будет\s+)?консультаци|(хочу|можно)\s+(записаться|на консультаци)/i.test(messageText ?? ''))
     ) {
       signals.client_confirms_booking = 'yes';
