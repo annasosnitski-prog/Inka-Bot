@@ -124,8 +124,8 @@ for (const [label, build] of [
   ok('responder: блок КОММЕРСАНТ есть у обоих', a.includes('КОММЕРСАНТ') && r.includes('КОММЕРСАНТ'));
   ok('responder: есть шаг price_followup_chat', a.includes('price_followup_chat'));
   const e = buildExtractorPrompt(platon);
-  ok('extractor Платона: его шкала цен', e.includes('3700₪') && !e.includes('350–600₪'));
-  ok('extractor Ани: её матрица', buildExtractorPrompt(anya).includes('350–600₪'));
+  ok('extractor Платона: его шкала цен', e.includes('3700₪') && !e.includes('400–700₪'));
+  ok('extractor Ани: её матрица', buildExtractorPrompt(anya).includes('400–700₪'));
 }
 
 console.log('\n▶ один мастер: бот не отправляет к другим');

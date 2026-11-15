@@ -229,22 +229,22 @@ const ALL: Scenario[] = [
   {
     name: 'G2 — Аня: ссылки и род свои, итог многосеансовой работы не выдумывает',
     profile: 'anya',
-    card: card({ category: 'project', idea: 'спина, графика', size: 'full_back', price_quoted: '2400',
+    card: card({ category: 'project', idea: 'спина, графика', size: 'full_back', price_quoted: '2750',
       price_factors: 'большая зона — вся спина; авторская композиция || project, итог: нет данных' }),
     turns: [
       { client: 'а где посмотреть работы мастера?', step: 'price_followup_chat',
         checks: [has(/ink_anya|inkanya/i, 'портфолио Ани'), hasNot(/Платон/i, 'Платон')] },
-      { client: 'и сколько всего выйдет спина?', step: 'price_followup_chat', checks: [noSum(2400)] },
+      { client: 'и сколько всего выйдет спина?', step: 'price_followup_chat', checks: [noSum(2750)] },
     ],
   },
   {
     name: 'G3 — Аня: прикидка ≤2500₪ — можно назвать',
     profile: 'anya',
-    card: card({ category: 'large', idea: 'бедро, графика', size: 'large', price_quoted: '1200',
-      price_factors: 'большая графика без плотной заливки || large, 2 встречи, итог ≈ 2000–2400₪' }),
+    card: card({ category: 'large', idea: 'бедро, графика', size: 'large', price_quoted: '1350',
+      price_factors: 'большая графика без плотной заливки || large, 2 встречи, итог ≈ 2300–2450₪' }),
     turns: [
       { client: 'а всего сколько примерно получится?', step: 'price_followup_chat',
-        checks: [has(/2\s?000|2\s?400/, 'диапазон итога'), noSum(2500), hasNot(/6\s?000/, 'порог Платона')] },
+        checks: [has(/2\s?300|2\s?450/, 'диапазон итога'), noSum(2500), hasNot(/6\s?000/, 'порог Платона')] },
     ],
   },
   // ---- ТЗ 28.10 (вторая часть): отказ, неопределённость, мастер ----
