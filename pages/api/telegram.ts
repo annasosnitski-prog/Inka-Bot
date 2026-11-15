@@ -9,7 +9,7 @@ import {
 import type { ClientRecord } from '../../lib/airtable';
 import { runExtractor } from '../../lib/extractor';
 import { mergeClientCard, isBooked } from '../../lib/clientCardMerge';
-import { getNextStep, getCardPatchForStep, getEffectivePickedSlotId } from '../../lib/stateMachine';
+import { getNextStep, getCardPatchForStep, getEffectivePickedSlotId, isEarlyConsultation } from '../../lib/stateMachine';
 import type { ClientCard, MessageSignals, NextStep } from '../../lib/stateMachine';
 import { runResponder } from '../../lib/responder';
 import { runAdmin } from '../../lib/admin';
@@ -530,6 +530,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Клиент сам спрашивает, когда можно прийти / какие окна — тогда время
       // показывается раньше телефона (см. bookingContactsOrSlots). Страховка
       // регуляркой на случай промаха Extractor.
+      client_wants_consultation: extracted.client_wants_consultation === true,
       client_asks_for_slots:
         extracted.client_asks_for_slots === true ||
         /когда\s+(можно\s+)?(прийти|придти|записаться)|какие\s+(есть\s+)?(даты|окна|дни|свободные)|когда\s+(у\s+(него|не[её]|мастера)\s+)?(есть\s+)?(свободн|окн)|покажи(те)?\s+(окна|даты|время|свободн)/i.test(messageText ?? ''),
@@ -643,6 +644,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // lookup below actually fires instead of waiting for the card patch
     // (computed later) to catch up on the next message.
     if (mergedCard.service_fit === 'needs_clarification' && signals.client_wants_master_contact) {
+      mergedCard = { ...mergedCard, consultation_needed: 'yes' };
+    }
+    // Same for a consultation the client asked for before the diagnosis is
+    // complete (isEarlyConsultation) — the calendar lookup below needs the route now.
+    if (!mergedCard.campaign_id && isEarlyConsultation(mergedCard, signals)) {
       mergedCard = { ...mergedCard, consultation_needed: 'yes' };
     }
 

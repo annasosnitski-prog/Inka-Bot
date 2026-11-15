@@ -200,6 +200,11 @@ export interface MessageSignals {
   // phone/name after the pick (see bookingContactsOrSlots). Message-level,
   // never persisted.
   client_asks_for_slots?: boolean;
+  // Extractor: the client himself asks for / agrees to a consultation or an
+  // in-person meeting with the master ("консультация бесплатная? могу
+  // подъехать", "давай на консультацию"), at ANY point — also before the
+  // price. See isEarlyConsultation.
+  client_wants_consultation?: boolean;
   // Computed by code from dialog_history, like booking_cta_replies_ago: how
   // many Inka replies ago the undecided step was last used. While that is
   // more recent than the last booking question, the bot does not return to
@@ -366,6 +371,22 @@ function bookingContactsOrSlots(
     return 'ask_contact_channel';
   }
   return hasSlots(card) ? slotStep : 'no_more_slots_waiting';
+}
+
+// Anna's decision (2026-11-15): a client who himself asks for a
+// consultation (or, on a consultation-route project, for the time) while
+// the tattoo info is still being collected goes straight to booking the
+// free consultation — the master clarifies the rest in person. No price is
+// named on this path (diagnosis is not complete). Never for a confirmed
+// direct (bot-booked) tattoo, and only before the price — after it the
+// normal booking flow already covers this. Persisted via
+// consultation_needed='yes' + wants_to_book='yes' (getCardPatchForStep), so
+// the next messages (phone, name, slot pick) stay on this route.
+export function isEarlyConsultation(card: ClientCard, signals: MessageSignals): boolean {
+  if (card.direct_tattoo_allowed === 'yes' || card.price_shown === 'yes') return false;
+  if (signals.client_wants_consultation) return true;
+  if (card.consultation_needed !== 'yes') return false;
+  return !!signals.client_asks_for_slots || card.wants_to_book === 'yes';
 }
 
 // A valid pick (fresh or held): book only with full contacts, otherwise
@@ -575,6 +596,10 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     return 'unclear_slot_choice';
   }
 
+  // Client asked for the consultation before the diagnosis is complete —
+  // book it now instead of continuing the questionnaire.
+  if (isEarlyConsultation(card, signals)) return bookingContactsOrSlots(card, signals, true);
+
   // Diagnosis / pricing inputs.
   if (!card.idea) return 'ask_idea';
   if (!card.placement) return 'ask_placement';
@@ -709,6 +734,18 @@ export function getCardPatchForStep(
   // any other consultation_needed='yes' card.
   if (card.service_fit === 'needs_clarification' && signals.client_wants_master_contact) {
     patch.consultation_needed = 'yes';
+  }
+
+  // Early consultation (see isEarlyConsultation): persist the route so the
+  // following messages stay on it and telegram.ts fetches consultation slots.
+  if (
+    !card.campaign_id &&
+    card.lead_status !== 'tattoo_booked_waiting_payment' &&
+    card.lead_status !== 'consultation_booked' &&
+    isEarlyConsultation(card, signals)
+  ) {
+    patch.consultation_needed = 'yes';
+    patch.wants_to_book = 'yes';
   }
 
   // A real project/reference photo satisfies the per-project reference ask.

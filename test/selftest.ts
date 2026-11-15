@@ -15,6 +15,7 @@ import {
   getNextStep,
   getCardPatchForStep,
   getEffectivePickedSlotId,
+  isEarlyConsultation,
   type ClientCard,
   type MessageSignals,
   type NextStep,
@@ -407,6 +408,31 @@ eq('консультация в переписке: окно удержано, �
 {
   const patch = getCardPatchForStep('show_tattoo_slots', baseCard({ chosen_slot_id: 'ev2' }), sig());
   eq('новый список слотов снимает старое удержание', patch.chosen_slot_id, null);
+}
+
+console.log('\n▶ getNextStep — консультация до конца сбора данных (решение Анны 15.11)');
+{
+  const early = { idea: null, size: null, placement: null, direct_tattoo_allowed: null, consultation_needed: null,
+    price_quoted: null, price_shown: null, value_shown: null, wants_to_book: null, phone: null, client_name: null } as Partial<ClientCard>;
+  eq('нет идеи, клиент сам просит консультацию → ask_phone (не ask_idea)',
+    step(early, { client_wants_consultation: true }), 'ask_phone');
+  eq('то же, но спросил и про время, слоты есть → окна консультации сразу',
+    step(early, { client_wants_consultation: true, client_asks_for_slots: true }), 'show_consultation_slots');
+  eq('без просьбы о консультации — сбор данных как раньше',
+    step(early), 'ask_idea');
+  eq('спросил про время, но маршрут не консультация (мелкая тату не определена) → сбор данных',
+    step(early, { client_asks_for_slots: true }), 'ask_idea');
+  eq('маршрут консультации уже известен (крупно), спросил про время → окна',
+    step({ ...early, consultation_needed: 'yes' }, { client_asks_for_slots: true }), 'show_consultation_slots');
+  eq('следующее сообщение (номер есть, имени нет) остаётся на маршруте → ask_name',
+    step({ ...early, consultation_needed: 'yes', wants_to_book: 'yes', phone: '05011' }), 'ask_name');
+  eq('прямая тату (бот записывает сам) — ранняя консультация не включается',
+    step({ ...early, direct_tattoo_allowed: 'yes', idea: 'надпись' }, { client_wants_consultation: true }), 'ask_placement');
+  eq('после цены — обычный путь, isEarlyConsultation=false',
+    isEarlyConsultation(baseCard({ consultation_needed: 'yes', direct_tattoo_allowed: 'no', price_shown: 'yes' }), sig({ client_wants_consultation: true })), false);
+  const patch = getCardPatchForStep('ask_phone', baseCard(early), sig({ client_wants_consultation: true }));
+  eq('патч: маршрут консультации закреплён', patch.consultation_needed, 'yes');
+  eq('патч: желание записаться закреплено', patch.wants_to_book, 'yes');
 }
 
 console.log('\n▶ getNextStep — slot_preference_clarify (ответ клиента про день/время идёт дальше, не зависает)');

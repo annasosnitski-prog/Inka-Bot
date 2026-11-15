@@ -93,6 +93,8 @@ export interface ExtractorOutput {
   // Client asks when they can come / which windows are free (wants the
   // time before leaving contacts). See lib/stateMachine.ts bookingContactsOrSlots.
   client_asks_for_slots?: boolean;
+  // Client asks for / agrees to a consultation or in-person meeting, any time.
+  client_wants_consultation?: boolean;
 
   // v2 transient contract signals. They describe THIS message only.
   // Что модель ВИДИТ на референсе этого сообщения (без оценки пригодности).
@@ -286,6 +288,7 @@ export function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput 
     normalized.client_undecided !== true;
   normalized.client_wants_master_contact = normalized.client_wants_master_contact === true;
   normalized.client_asks_for_slots = normalized.client_asks_for_slots === true;
+  normalized.client_wants_consultation = normalized.client_wants_consultation === true;
   normalized.photo_purpose = normalized.photo_purpose ?? null;
   normalized.service_fit = normalized.service_fit ?? null;
   normalized.campaign_field_answer =
