@@ -435,6 +435,23 @@ console.log('\n▶ getNextStep — консультация до конца сб
   eq('патч: желание записаться закреплено', patch.wants_to_book, 'yes');
 }
 
+console.log('\n▶ getNextStep — после ранней консультации: что и куда, затем ценность+цена (решение Анны 15.11)');
+{
+  const booked = { lead_status: 'consultation_booked', direct_tattoo_allowed: null, consultation_needed: 'yes',
+    idea: null, placement: null, size: null, price_shown: null, value_shown: null, price_quoted: null } as Partial<ClientCard>;
+  eq('консультация назначена, идеи нет → ask_idea', step(booked), 'ask_idea');
+  eq('идея есть, места нет → ask_placement', step({ ...booked, idea: 'ворон' }), 'ask_placement');
+  eq('что и куда есть, размера нет → ask_size', step({ ...booked, idea: 'ворон', placement: 'предплечье' }), 'ask_size');
+  eq('всё есть → ценность + цена + предоплата', step({ ...booked, idea: 'ворон', placement: 'предплечье', size: '15 см', price_quoted: '3200' }), 'offer_value_before_price');
+  eq('ценность уже была → обычный разговор после записи',
+    step({ ...booked, idea: 'ворон', placement: 'предплечье', size: '15 см', value_shown: 'yes', price_shown: 'yes' }), 'booked_followup_chat');
+  eq('вопрос клиента важнее брифа', step(booked, { client_has_open_question: true }), 'booked_followup_chat');
+  eq('тот же вопрос только что задавали и клиент не ответил → не повторяем', step(booked, { last_inka_step: 'ask_idea' }), 'booked_followup_chat');
+  eq('запись на тату (не консультация) брифом не трогаем',
+    step({ ...booked, lead_status: 'tattoo_booked_waiting_payment' }), 'booked_followup_chat');
+  eq('перенос записи важнее брифа', step(booked, { client_wants_to_reschedule: true }), 'reschedule_requested_ping_master');
+}
+
 console.log('\n▶ getNextStep — slot_preference_clarify (ответ клиента про день/время идёт дальше, не зависает)');
 eq('любой ответ на уточнение (не номер слота) → slot_change_requested_waiting',
   step({ lead_status: 'slots_shown_clarifying', phone: '05011' }), 'slot_change_requested_waiting');

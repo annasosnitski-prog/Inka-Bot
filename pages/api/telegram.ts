@@ -531,6 +531,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // показывается раньше телефона (см. bookingContactsOrSlots). Страховка
       // регуляркой на случай промаха Extractor.
       client_wants_consultation: extracted.client_wants_consultation === true,
+      last_inka_step: lastInkaStep(parseDialogHistory(existing)),
       client_asks_for_slots:
         extracted.client_asks_for_slots === true ||
         /когда\s+(можно\s+)?(прийти|придти|записаться)|какие\s+(есть\s+)?(даты|окна|дни|свободные)|когда\s+(у\s+(него|не[её]|мастера)\s+)?(есть\s+)?(свободн|окн)|покажи(те)?\s+(окна|даты|время|свободн)/i.test(messageText ?? ''),

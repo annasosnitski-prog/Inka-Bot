@@ -205,6 +205,9 @@ export interface MessageSignals {
   // подъехать", "давай на консультацию"), at ANY point — also before the
   // price. See isEarlyConsultation.
   client_wants_consultation?: boolean;
+  // Computed by code from dialog_history: the step of Inka's previous reply.
+  // Used so a post-booking question is never asked twice in a row.
+  last_inka_step?: string | null;
   // Computed by code from dialog_history, like booking_cta_replies_ago: how
   // many Inka replies ago the undecided step was last used. While that is
   // more recent than the last booking question, the bot does not return to
@@ -389,6 +392,24 @@ export function isEarlyConsultation(card: ClientCard, signals: MessageSignals): 
   return !!signals.client_asks_for_slots || card.wants_to_book === 'yes';
 }
 
+// Post-booking brief for a consultation booked before the diagnosis/price
+// (see getNextStep isAlreadyBooked). Only consultation bookings without a
+// shown price; stops as soon as value+price were given.
+function getPostBookingBriefStep(card: ClientCard, signals: MessageSignals): NextStep | null {
+  if (card.lead_status !== 'consultation_booked') return null;
+  if (card.price_shown === 'yes' || card.value_shown === 'yes') return null;
+  if (signals.client_has_open_question) return null;
+  let step: NextStep;
+  if (!card.idea) step = 'ask_idea';
+  else if (!card.placement) step = 'ask_placement';
+  else if (!card.size) step = 'ask_size';
+  else step = 'offer_value_before_price';
+  // Asked exactly this last time and the client didn't answer it — don't
+  // repeat; the brief resumes on a later message if he comes back to it.
+  if (step !== 'offer_value_before_price' && signals.last_inka_step === step) return null;
+  return step;
+}
+
 // A valid pick (fresh or held): book only with full contacts, otherwise
 // hold the window and ask for what is missing.
 function confirmOrHold(card: ClientCard): NextStep {
@@ -509,6 +530,17 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     }
 
     if (signals.client_wants_to_reschedule) return 'reschedule_requested_ping_master';
+
+    // Anna's decision (2026-11-15): Inka has two goals — bring the client to
+    // a booking AND make the master's life easier. A consultation booked
+    // before the diagnosis was complete (early consultation) still gets the
+    // minimal brief AFTER the booking: what and where (+ size, needed for
+    // the price), then value + price + prepayment heads-up, so the master
+    // comes prepared and "почему так дорого" is taken off the table before
+    // the meeting. Never twice in a row (client ignored the question → just
+    // talk), and a real question from the client comes first.
+    const postBookingBrief = getPostBookingBriefStep(card, signals);
+    if (postBookingBrief) return postBookingBrief;
 
     // v2: a generic photo is NOT proof of payment. Production always supplies
     // photo_purpose explicitly (possibly null/unknown). The absent-key branch
