@@ -132,6 +132,8 @@ const PRECISION_CRITICAL_STEPS: ReadonlySet<NextStep> = new Set<NextStep>([
   'ask_phone',
   'ask_name',
   'ask_contact_channel',
+  // Same risk as ask_phone: client may ask something in the same message.
+  'slot_held_ask_contacts',
 ]);
 
 function pickResponderModel(step: NextStep): string {

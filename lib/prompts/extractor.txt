@@ -510,6 +510,23 @@ client_wants_master_contact — клиент хочет поговорить с 
 мастер это делает?" про его работу — false. Это сигнал только этого
 сообщения, в любой момент диалога (с ценой или без).
 
+client_asks_for_slots — клиент сам спрашивает, КОГДА можно прийти или
+какие есть свободные окна/даты, хочет сначала увидеть время ("когда
+можно прийти?", "а какие есть даты?", "покажи окна", "когда у него есть
+время?", "сначала скажи время, потом номер", "суббота или воскресенье,
+что есть?", "когда свободно?"). Просто "хочу записаться"
+без вопроса про время — false. Вопрос про длительность сеанса ("сколько
+по времени?") — false. Сигнал только этого сообщения.
+
+client_wants_consultation — клиент САМ просит консультацию/встречу с
+мастером или соглашается на неё, в любой момент диалога, в том числе до
+цены: "можно на консультацию?", "консультация бесплатная? могу
+подъехать", "давай на консультацию", "хочу сначала встретиться с
+мастером", "да, давай консультацию" (в ответ на предложение Инки). Просто
+вопрос "а консультация платная?" без желания прийти — false. Желание
+написать мастеру в чат — это client_wants_master_contact, не это поле.
+Сигнал только этого сообщения.
+
 client_has_open_question — в ЭТОМ сообщении есть то, на что нужно
 ответить по существу: вопрос ("почему 3000?", "а фрихенд входит?", "как
 вообще начать такой проект?"), возражение или наблюдение ("так там же
@@ -612,6 +629,10 @@ social_link.
 tattoo_booked_waiting_payment или consultation_booked): поставь true, НО
 проектные поля забронированной работы НЕ переписывай — оставь как в
 current_card. Код заведёт второму проекту отдельную запись.
+Исключение: консультация записана раньше, чем собраны детали (в
+current_card idea/placement/size ещё пустые), и Инка спросила, что
+клиент хочет и куда, — ответ про это и есть ТОТ ЖЕ проект:
+is_new_project_request = false, заполняй idea/placement/size как обычно.
 
 other_active_project (если передан) — ДРУГОЙ уже существующий проект
 того же клиента. Если тема сообщения явно совпадает с ним, а не с
@@ -679,6 +700,8 @@ JSON SCHEMA — ТОЧНО ЭТИ ПОЛЯ, НИЧЕГО ЛИШНЕГО
   "client_undecided": boolean,
   "booking_reply_ambiguous": boolean,
   "client_wants_master_contact": boolean,
+  "client_asks_for_slots": boolean,
+  "client_wants_consultation": boolean,
 
   "reference_color": "none" | "accent" | "equal" | "dominant" | null,
   "reference_is_realistic": boolean | null,
@@ -700,7 +723,8 @@ reference_color: "none" — только чёрный/серый; "accent" — �
 
 service_fit, service_fit_reason, service_fit_needs_master_judgment,
 is_new_project_request, photo_purpose, client_has_open_question,
-client_undecided, booking_reply_ambiguous, client_wants_master_contact —
+client_undecided, booking_reply_ambiguous, client_wants_master_contact,
+client_asks_for_slots, client_wants_consultation —
 сигналы ТОЛЬКО этого сообщения, никогда не наследуй их из current_card.
 
 Верни ТОЛЬКО этот JSON. Никакого текста до или после.

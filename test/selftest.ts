@@ -14,6 +14,8 @@
 import {
   getNextStep,
   getCardPatchForStep,
+  getEffectivePickedSlotId,
+  isEarlyConsultation,
   type ClientCard,
   type MessageSignals,
   type NextStep,
@@ -366,6 +368,88 @@ eq('просит другие слоты → slot_preference_clarify (уточн
 {
   const patch = getCardPatchForStep('slot_preference_clarify', baseCard({ lead_status: 'slots_shown', phone: '05011' }), sig());
   eq('патч slot_preference_clarify: lead_status=slots_shown_clarifying', patch.lead_status, 'slots_shown_clarifying');
+}
+
+console.log('\n▶ getNextStep — слоты раньше телефона (клиент сам спросил про время)');
+eq('нет телефона, клиент спросил "когда можно прийти", слоты есть → show_tattoo_slots',
+  step({ phone: null, client_name: null }, { client_asks_for_slots: true }), 'show_tattoo_slots');
+eq('нет телефона, спросил про время, но слотов нет → ask_phone (лист ожидания без номера не создаём)',
+  step({ phone: null, slot_options: [] }, { client_asks_for_slots: true }), 'ask_phone');
+eq('нет телефона, про время не спрашивал → ask_phone (порядок по умолчанию прежний)',
+  step({ phone: null }), 'ask_phone');
+eq('консультация, нет телефона, спросил про время → show_consultation_slots',
+  step({ direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: null }, { client_asks_for_slots: true }),
+  'show_consultation_slots');
+eq('слоты показаны без телефона, клиент выбрал окно → slot_held_ask_contacts (не бронь)',
+  step({ lead_status: 'slots_shown', phone: null }, { client_picked_slot_id: 'ev2' }), 'slot_held_ask_contacts');
+eq('телефон есть, имени нет, выбрал окно → slot_held_ask_contacts',
+  step({ lead_status: 'slots_shown', phone: '05011', client_name: null }, { client_picked_slot_id: 'ev2' }), 'slot_held_ask_contacts');
+{
+  const c = baseCard({ lead_status: 'slots_shown', phone: null });
+  const patch = getCardPatchForStep('slot_held_ask_contacts', c, sig({ client_picked_slot_id: 'ev2' }));
+  eq('патч slot_held_ask_contacts: окно удержано (chosen_slot_id=ev2)', patch.chosen_slot_id, 'ev2');
+  eq('патч slot_held_ask_contacts: lead_status не меняется (остаётся slots_shown)', patch.lead_status, undefined);
+}
+eq('окно удержано, клиент прислал номер (имя есть) → бронь по удержанному окну без нового выбора',
+  step({ lead_status: 'slots_shown', phone: '05011', chosen_slot_id: 'ev2' }), 'confirm_slot_awaiting_payment');
+eq('окно удержано, номера всё ещё нет → slot_held_ask_contacts (не unclear_slot_choice, список не повторяем)',
+  step({ lead_status: 'slots_shown', phone: null, chosen_slot_id: 'ev2' }), 'slot_held_ask_contacts');
+eq('окно удержано, но клиент передумал и просит другие → slot_preference_clarify',
+  step({ lead_status: 'slots_shown', phone: null, chosen_slot_id: 'ev2' }, { client_wants_other_slots: true }), 'slot_preference_clarify');
+eq('окно удержано, клиент выбрал другое и дал номер → бронь нового выбора',
+  getEffectivePickedSlotId(baseCard({ lead_status: 'slots_shown', phone: '05011', chosen_slot_id: 'ev2' }), sig({ client_picked_slot_id: 'ev1' })), 'ev1');
+eq('удержанное окно пропало из показанного списка → не считается выбором',
+  getEffectivePickedSlotId(baseCard({ lead_status: 'slots_shown', chosen_slot_id: 'ghost' }), sig()), null);
+eq('chosen_slot_id после брони не считается удержанием (статус уже не slots_shown)',
+  getEffectivePickedSlotId(baseCard({ lead_status: 'tattoo_booked_waiting_payment', chosen_slot_id: 'ev1' }), sig()), null);
+eq('консультация в переписке: окно удержано, канала нет → slot_held_ask_contacts или бронь по профилю мастера',
+  ['slot_held_ask_contacts', 'confirm_consultation_booked'].includes(
+    step({ lead_status: 'slots_shown', direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', contact_channel: null, chosen_slot_id: 'ev1' })), true);
+{
+  const patch = getCardPatchForStep('show_tattoo_slots', baseCard({ chosen_slot_id: 'ev2' }), sig());
+  eq('новый список слотов снимает старое удержание', patch.chosen_slot_id, null);
+}
+
+console.log('\n▶ getNextStep — консультация до конца сбора данных (решение Анны 15.11)');
+{
+  const early = { idea: null, size: null, placement: null, direct_tattoo_allowed: null, consultation_needed: null,
+    price_quoted: null, price_shown: null, value_shown: null, wants_to_book: null, phone: null, client_name: null } as Partial<ClientCard>;
+  eq('нет идеи, клиент сам просит консультацию → ask_phone (не ask_idea)',
+    step(early, { client_wants_consultation: true }), 'ask_phone');
+  eq('то же, но спросил и про время, слоты есть → окна консультации сразу',
+    step(early, { client_wants_consultation: true, client_asks_for_slots: true }), 'show_consultation_slots');
+  eq('без просьбы о консультации — сбор данных как раньше',
+    step(early), 'ask_idea');
+  eq('спросил про время, но маршрут не консультация (мелкая тату не определена) → сбор данных',
+    step(early, { client_asks_for_slots: true }), 'ask_idea');
+  eq('маршрут консультации уже известен (крупно), спросил про время → окна',
+    step({ ...early, consultation_needed: 'yes' }, { client_asks_for_slots: true }), 'show_consultation_slots');
+  eq('следующее сообщение (номер есть, имени нет) остаётся на маршруте → ask_name',
+    step({ ...early, consultation_needed: 'yes', wants_to_book: 'yes', phone: '05011' }), 'ask_name');
+  eq('прямая тату (бот записывает сам) — ранняя консультация не включается',
+    step({ ...early, direct_tattoo_allowed: 'yes', idea: 'надпись' }, { client_wants_consultation: true }), 'ask_placement');
+  eq('после цены — обычный путь, isEarlyConsultation=false',
+    isEarlyConsultation(baseCard({ consultation_needed: 'yes', direct_tattoo_allowed: 'no', price_shown: 'yes' }), sig({ client_wants_consultation: true })), false);
+  const patch = getCardPatchForStep('ask_phone', baseCard(early), sig({ client_wants_consultation: true }));
+  eq('патч: маршрут консультации закреплён', patch.consultation_needed, 'yes');
+  eq('патч: желание записаться закреплено', patch.wants_to_book, 'yes');
+}
+
+console.log('\n▶ getNextStep — после ранней консультации: что и куда, затем ценность+цена (решение Анны 15.11)');
+{
+  const booked = { lead_status: 'consultation_booked', direct_tattoo_allowed: null, consultation_needed: 'yes',
+    idea: null, placement: null, size: null, price_shown: null, value_shown: null, price_quoted: null } as Partial<ClientCard>;
+  eq('консультация назначена, идеи нет → ask_idea', step(booked), 'ask_idea');
+  eq('идея есть, места нет → ask_placement', step({ ...booked, idea: 'ворон' }), 'ask_placement');
+  eq('что и куда есть, размера нет → ask_size', step({ ...booked, idea: 'ворон', placement: 'предплечье' }), 'ask_size');
+  eq('всё есть → ценность + цена + предоплата', step({ ...booked, idea: 'ворон', placement: 'предплечье', size: '15 см', price_quoted: '3200' }), 'offer_value_before_price');
+  eq('ценность уже была → обычный разговор после записи',
+    step({ ...booked, idea: 'ворон', placement: 'предплечье', size: '15 см', value_shown: 'yes', price_shown: 'yes' }), 'booked_followup_chat');
+  eq('вопрос клиента важнее брифа', step(booked, { client_has_open_question: true }), 'booked_followup_chat');
+  eq('тот же вопрос только что задавали и клиент не ответил → не повторяем', step(booked, { last_inka_step: 'ask_idea' }), 'booked_followup_chat');
+  eq('запись на тату (не консультация) брифом не трогаем',
+    step({ ...booked, lead_status: 'tattoo_booked_waiting_payment' }), 'booked_followup_chat');
+  eq('перенос записи важнее брифа', step(booked, { client_wants_to_reschedule: true }), 'reschedule_requested_ping_master');
 }
 
 console.log('\n▶ getNextStep — slot_preference_clarify (ответ клиента про день/время идёт дальше, не зависает)');
