@@ -150,6 +150,13 @@ export interface ClientCard {
   // an explicit answer — see pages/api/telegram.ts. null the rest of the
   // time, including once the client confirms or declines.
   campaign_return_pending: YesNo;
+  // Ad-attribution label: the raw /start payload from a deep link that did
+  // NOT match an active campaign (e.g. t.me/bot?start=he_coverup from a
+  // Google Ads landing page button) — set once on first touch and never
+  // overwritten by later messages, so the master can see which ad link a
+  // client came in on. Unrelated to campaign_id/campaign_last_id, which are
+  // only for the model_recruitment campaign flow (lib/campaignFlow.ts).
+  lead_source: string | null;
 }
 
 export interface MessageSignals {
