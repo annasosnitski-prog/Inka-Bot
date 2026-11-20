@@ -116,7 +116,7 @@ function baseCard(over: Partial<ClientCard> = {}): ClientCard {
     has_photo_this_message: false, photo_has_caption: false, force_client_mode: null,
     booked_at: null, payment_reminder_early_sent: null, service_fit: null,
     second_project_flagged: null,
-    campaign_id: null, campaign_collected: null, campaign_handoff_sent: null, campaign_last_id: null, campaign_return_pending: null, lead_source: null,
+    campaign_id: null, campaign_collected: null, campaign_handoff_sent: null, campaign_last_id: null, campaign_return_pending: null, lead_source: null, old_photo_asked: null, old_photo_followup_asked: null,
     ...over,
   };
 }
@@ -307,6 +307,32 @@ eq('консультация: соцсеть ещё не спрашивали �
     step({ direct_tattoo_allowed: 'no', consultation_needed: 'yes', category: 'large', phone: '05011', client_name: 'Оля', contact_channel: null }),
     'show_consultation_slots');
   delete process.env.MASTER_PROFILE;
+}
+
+console.log('\n▶ getNextStep — ask_old_tattoo_photo (перекрытие/шрам, фото обязательно)');
+eq('cover, фото не было, не спрашивали → ask_old_tattoo_photo',
+  step({ existing_tattoo: 'cover', skin_notes: 'старая, чёрная', photos_count: 0, old_photo_asked: null, old_photo_followup_asked: null }),
+  'ask_old_tattoo_photo');
+eq('cover, уже спросили раз, фото так и нет → ask_old_tattoo_photo_followup (мягкий повтор)',
+  step({ existing_tattoo: 'cover', skin_notes: 'старая, чёрная', photos_count: 0, old_photo_asked: 'yes', old_photo_followup_asked: null }),
+  'ask_old_tattoo_photo_followup');
+eq('cover, спросили дважды, фото так и нет → не блокируем дальше, едет как обычно',
+  step({ existing_tattoo: 'cover', skin_notes: 'старая, чёрная', photos_count: 0, old_photo_asked: 'yes', old_photo_followup_asked: 'yes', reference_asked: 'yes' }),
+  'ask_phone');
+eq('scar_work ведёт себя так же, как cover',
+  step({ existing_tattoo: 'scar_work', skin_notes: 'плоский шрам', photos_count: 0, old_photo_asked: null, old_photo_followup_asked: null }),
+  'ask_old_tattoo_photo');
+eq('modification НЕ требует обязательного фото (это не cover/scar_work)',
+  step({ existing_tattoo: 'modification', skin_notes: 'добавить деталь', photos_count: 0, old_photo_asked: null, old_photo_followup_asked: null, reference_asked: 'yes' }),
+  'ask_phone');
+eq('cover, но фото уже присылал (photos_count>0) → не спрашиваем',
+  step({ existing_tattoo: 'cover', skin_notes: 'старая, чёрная', photos_count: 1, old_photo_asked: null, old_photo_followup_asked: null, reference_asked: 'yes' }),
+  'ask_phone');
+{
+  const patch1 = getCardPatchForStep('ask_old_tattoo_photo', baseCard(), sig());
+  eq('патч ask_old_tattoo_photo: old_photo_asked=yes', patch1.old_photo_asked, 'yes');
+  const patch2 = getCardPatchForStep('ask_old_tattoo_photo_followup', baseCard(), sig());
+  eq('патч ask_old_tattoo_photo_followup: old_photo_followup_asked=yes', patch2.old_photo_followup_asked, 'yes');
 }
 
 console.log('\n▶ getNextStep — ask_reference_photo (референс, если ни разу не присылал фото, один раз, до цены)');
