@@ -24,7 +24,7 @@ import {
   forwardTelegramMessage,
   pickVisionTelegramPhoto,
 } from '../../lib/telegramApi';
-import { getDepositAmount } from '../../lib/masters';
+import { getDepositAmount, getMasterProfile } from '../../lib/masters';
 import { getCampaign } from '../../lib/campaigns';
 import {
   routeCampaign,
@@ -256,6 +256,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // campaignActivationId в этом случае просто null.
     if (campaignActivationId) {
       currentCard = activateCampaign(currentCard, campaignActivationId);
+    }
+
+    // 1c-2. МЕТКА РЕКЛАМНОЙ ССЫЛКИ (lead_source). Отдельно от кампаний выше:
+    // /start-payload, который НЕ совпал с активной campaign (например
+    // he_project/he_coverup с лендинга Платона в Google Ads — см.
+    // pages/index.tsx), сохраняем как есть при первом касании, чтобы мастеру
+    // было видно, с какой рекламной кнопки пришёл клиент. Пишем только на
+    // деплое Платона (getMasterProfile().id==='platon') — поле lead_source
+    // есть только в его Airtable-базе; у Ани отправка неизвестного ключа
+    // поля сломала бы весь upsert.
+    if (
+      isStartCommand &&
+      startPayload &&
+      !campaignActivationId &&
+      !currentCard.lead_source &&
+      getMasterProfile().id === 'platon'
+    ) {
+      currentCard = { ...currentCard, lead_source: startPayload };
     }
 
     // 1b. ПОСЛЕДНИЕ РЕПЛИКИ ПЕРЕПИСКИ — контекст этого хода для Extractor
@@ -1156,6 +1174,7 @@ function recordToClientCard(
     service_fit: fields.service_fit ?? null,
     second_project_flagged: fields.second_project_flagged ?? null,
     campaign_id: fields.campaign_id ?? null,
+    lead_source: fields.lead_source ?? null,
     ...(() => {
       const { collected, handoff_sent, last_id, return_pending } = parseCampaignData(fields.campaign_data);
       return {
@@ -1233,6 +1252,9 @@ function clientCardToAirtableFields(
     second_project_flagged: card.second_project_flagged,
     campaign_id: card.campaign_id,
     campaign_data: serializeCampaignData(card),
+    // Only sent on Платон's deploy — see the lead_source assignment above
+    // for why (field doesn't exist in Anya's Airtable base).
+    ...(getMasterProfile().id === 'platon' ? { lead_source: card.lead_source } : {}),
   };
 }
 
