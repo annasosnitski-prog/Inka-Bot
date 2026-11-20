@@ -7,7 +7,7 @@ import Head from 'next/head';
 // одного мастера не попал в деплой другого. На любом другом деплое "/" отдаёт
 // простую нейтральную страницу 200, а не 404 (которую не принимает Google Ads),
 // но без рекламных обещаний.
-const BOT_USERNAME = 'inka_ps_bot'; // TODO(Anna): подтвердить точный @username бота Платона в Telegram
+const BOT_USERNAME = 'inka_ps_bot'; // подтверждено Анной 2026-11-20
 const INSTAGRAM_URL = 'https://www.instagram.com/platon_tattoo__/';
 
 type Props = { isPlaton: boolean };
@@ -78,7 +78,30 @@ export default function Home({ isPlaton }: Props) {
           content="Private tattoo studio in Haifa. Large-scale Blackwork, Blackout, Abstract & complex Cover-Up projects. Full-day custom sessions."
         />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        {/* Google Tag Manager — container GTM-WTZK4P2W (Anna, 2026-11-20).
+            Конверсии настраиваются внутри GTM, trackConversion() ниже шлёт
+            события через window.gtag, который этот сниппет направляет в
+            dataLayer. */}
+        <script async src="https://www.googletagmanager.com/gtm.js?id=GTM-WTZK4P2W" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.dataLayer = window.dataLayer || [];
+              function gtag(){dataLayer.push(arguments);}
+              gtag('js', new Date());
+            `,
+          }}
+        />
       </Head>
+      {/* GTM noscript fallback — стандартная часть установки, идёт сразу после <body>. */}
+      <noscript>
+        <iframe
+          src="https://www.googletagmanager.com/ns.html?id=GTM-WTZK4P2W"
+          height="0"
+          width="0"
+          style={{ display: 'none', visibility: 'hidden' }}
+        />
+      </noscript>
       <style>{`
         :root {
           --bg: #0c0c0d;
@@ -145,7 +168,6 @@ export default function Home({ isPlaton }: Props) {
           `,
         }}
       />
-      {/* ВСТАВИТЬ СЮДА GLOBAL SITE TAG (gtag.js) ПОСЛЕ СОЗДАНИЯ КОНВЕРСИИ В GOOGLE ADS */}
       <div className="page-wrap" dir="rtl" lang="he">
         <div className="container">
           <header>
