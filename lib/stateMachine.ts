@@ -157,6 +157,11 @@ export interface ClientCard {
   // client came in on. Unrelated to campaign_id/campaign_last_id, which are
   // only for the model_recruitment campaign flow (lib/campaignFlow.ts).
   lead_source: string | null;
+  // Обязательное фото места при перекрытии/шраме (см. NextStep
+  // ask_old_tattoo_photo/_followup) — не путать с reference_asked, который
+  // про стилевой референс, а не про документирование конкретного места.
+  old_photo_asked: YesNo;
+  old_photo_followup_asked: YesNo;
 }
 
 export interface MessageSignals {
@@ -261,6 +266,13 @@ export type NextStep =
   | 'ask_size'
   | 'ask_existing_tattoo_or_skin'
   | 'ask_skin_notes_detail'
+  // Перекрытие или шрам на месте будущей тату — фото места ОБЯЗАТЕЛЬНО
+  // (Anna, 2026-11-20), в отличие от общего ask_reference_photo ниже,
+  // который остаётся необязательным для всех остальных случаев. Твёрдая
+  // просьба один раз, мягкий повтор один раз (ask_old_tattoo_photo_followup),
+  // после — не блокируем дальше (см. getNextStep).
+  | 'ask_old_tattoo_photo'
+  | 'ask_old_tattoo_photo_followup'
   | 'ask_reference_photo'
   // Diagnosis is complete, price is not shown yet. Fires exactly ONCE per
   // project, before the first quote_price: pricing principle (how price is
@@ -652,6 +664,21 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
     !card.skin_notes;
   if (needsSkinDetail) return 'ask_skin_notes_detail';
 
+  // Перекрытие/шрам — фото места ОБЯЗАТЕЛЬНО, не как общий необязательный
+  // референс ниже. Твёрдая просьба, один мягкий повтор, затем не блокируем
+  // дальше — мастер увидит отсутствие фото сам в карточке/диалоге.
+  // photos_count (не has_photo_this_message) — тот же приём, что и у
+  // hasLegacyReference ниже: решение по уже СОХРАНЁННОМУ состоянию, а
+  // фото из этого самого сообщения отдаётся на откуп Responder'у (см.
+  // responder.txt: "если фото уже есть в этом сообщении — просто иди дальше").
+  const needsOldPhotoProof =
+    (card.existing_tattoo === 'cover' || card.existing_tattoo === 'scar_work') &&
+    card.photos_count === 0;
+  if (needsOldPhotoProof) {
+    if (card.old_photo_asked !== 'yes') return 'ask_old_tattoo_photo';
+    if (card.old_photo_followup_asked !== 'yes') return 'ask_old_tattoo_photo_followup';
+  }
+
   // Migration compatibility: old cards may have reference_asked=null even
   // though photos_count>0 already proves a reference/photo existed. Treat that
   // legacy null state as satisfied. A real NEW PROJECT sets reference_asked='no'
@@ -733,6 +760,8 @@ export interface CardPatch {
   decline_followup_asked?: YesNo;
   decline_reason_asked?: YesNo;
   reference_asked?: YesNo;
+  old_photo_asked?: YesNo;
+  old_photo_followup_asked?: YesNo;
   value_shown?: YesNo;
   service_fit?: ServiceFit;
   consultation_needed?: YesNo;
@@ -826,6 +855,10 @@ export function getCardPatchForStep(
       return { ...patch, social_asked: 'yes' };
     case 'ask_reference_photo':
       return { ...patch, reference_asked: 'yes' };
+    case 'ask_old_tattoo_photo':
+      return { ...patch, old_photo_asked: 'yes' };
+    case 'ask_old_tattoo_photo_followup':
+      return { ...patch, old_photo_followup_asked: 'yes' };
     // Ценность и цена теперь одним сообщением: если цена уже посчитана, она
     // названа в этой же реплике, поэтому quote_price её не повторяет.
     case 'offer_value_before_price':
