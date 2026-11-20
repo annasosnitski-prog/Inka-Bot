@@ -4,3 +4,4 @@ node_modules
 .vercel
 .test-build
 .eval-build
+next-env.d.ts
