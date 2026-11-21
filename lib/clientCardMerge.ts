@@ -81,6 +81,10 @@ export function mergeClientCard(
       // been asked/supplied. This distinguishes it from legacy cards where
       // reference_asked=null but photos_count>0 already proves an old photo.
       reference_asked: 'no',
+      // Same reasoning: a mandatory old-tattoo/scar photo ask belongs to
+      // THIS project's existing_tattoo, not whatever the previous one needed.
+      old_photo_asked: null,
+      old_photo_followup_asked: null,
       // Same reasoning as reference_asked above: the value-before-price beat
       // belongs to THIS project, not the previous one.
       value_shown: 'no',

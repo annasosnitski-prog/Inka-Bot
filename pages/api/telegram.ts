@@ -1175,6 +1175,8 @@ function recordToClientCard(
     second_project_flagged: fields.second_project_flagged ?? null,
     campaign_id: fields.campaign_id ?? null,
     lead_source: fields.lead_source ?? null,
+    old_photo_asked: fields.old_photo_asked ?? null,
+    old_photo_followup_asked: fields.old_photo_followup_asked ?? null,
     ...(() => {
       const { collected, handoff_sent, last_id, return_pending } = parseCampaignData(fields.campaign_data);
       return {
@@ -1252,6 +1254,8 @@ function clientCardToAirtableFields(
     second_project_flagged: card.second_project_flagged,
     campaign_id: card.campaign_id,
     campaign_data: serializeCampaignData(card),
+    old_photo_asked: card.old_photo_asked,
+    old_photo_followup_asked: card.old_photo_followup_asked,
     // Only sent on Платон's deploy — see the lead_source assignment above
     // for why (field doesn't exist in Anya's Airtable base).
     ...(getMasterProfile().id === 'platon' ? { lead_source: card.lead_source } : {}),
