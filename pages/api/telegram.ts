@@ -923,7 +923,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // 9. RESPONDER — написать живой ответ клиенту.
     // Для фото без текста даём responder-у хотя бы назначение изображения,
     // если Extractor его уверенно определил.
-    const responderLastMessage =
+    const responderLastMessageBase =
       messageText ??
       (extracted.photo_purpose === 'payment_proof'
         ? '[клиент прислал подтверждение оплаты]'
@@ -932,6 +932,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           : hasPhoto
             ? '[клиент прислал фото без подписи]'
             : null);
+
+    // На фото старой тату/шрама модель могла заметить то, что видно глазом
+    // (см. extractor.txt, skin_visual_hint) — не факт, а подсказка, которую
+    // Responder должен проговорить и переспросить, а не молча принять.
+    const responderLastMessage = extracted.skin_visual_hint
+      ? `${responderLastMessageBase ?? ''}\n[на фото видно: ${extracted.skin_visual_hint}]`.trim()
+      : responderLastMessageBase;
 
     const replyText = await runResponder({
       nextStep,

@@ -100,6 +100,12 @@ export interface ExtractorOutput {
   // Что модель ВИДИТ на референсе этого сообщения (без оценки пригодности).
   reference_color?: 'none' | 'accent' | 'equal' | 'dominant' | null;
   reference_is_realistic?: boolean | null;
+  // What the model visibly sees on a photo of the OLD tattoo/scar (color,
+  // how sharp the line still is) when existing_tattoo is already
+  // cover/modification/scar_work. Never a substitute for skin_notes — it's
+  // an unconfirmed hint the Responder restates to the client to confirm,
+  // not a fact the code treats as settled.
+  skin_visual_hint?: string | null;
   service_fit: ServiceFit;
   service_fit_reason: string | null;
   // Only meaningful alongside service_fit === 'needs_clarification' this
@@ -277,6 +283,10 @@ export function normalizeExtractorOutput(raw: ExtractorOutput): ExtractorOutput 
     : null;
   normalized.reference_is_realistic =
     typeof normalized.reference_is_realistic === 'boolean' ? normalized.reference_is_realistic : null;
+  normalized.skin_visual_hint =
+    typeof normalized.skin_visual_hint === 'string' && normalized.skin_visual_hint.trim()
+      ? normalized.skin_visual_hint.trim()
+      : null;
   normalized.service_fit_needs_master_judgment =
     normalized.service_fit_needs_master_judgment === true && normalized.service_fit === 'needs_clarification';
   normalized.is_new_project_request = normalized.is_new_project_request === true;
