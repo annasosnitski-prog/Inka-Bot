@@ -667,13 +667,18 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   // Перекрытие/шрам — фото места ОБЯЗАТЕЛЬНО, не как общий необязательный
   // референс ниже. Твёрдая просьба, один мягкий повтор, затем не блокируем
   // дальше — мастер увидит отсутствие фото сам в карточке/диалоге.
-  // photos_count (не has_photo_this_message) — тот же приём, что и у
-  // hasLegacyReference ниже: решение по уже СОХРАНЁННОМУ состоянию, а
-  // фото из этого самого сообщения отдаётся на откуп Responder'у (см.
-  // responder.txt: "если фото уже есть в этом сообщении — просто иди дальше").
+  // card.photos_count — сохранённое состояние ДО этого сообщения (счётчик
+  // в Airtable увеличивается уже после выбора NextStep, см. pages/api/
+  // telegram.ts). has_photo_this_message добавлен отдельно: без него
+  // первый же ответ клиента с фото (после старта "мягкого повтора" —
+  // old_photo_asked уже 'yes') всё равно уходил в ask_old_tattoo_photo_
+  // followup, а тот шаг (в отличие от ask_old_tattoo_photo и ask_reference_
+  // photo) не умеет сказать "фото уже есть — иди дальше" и переспрашивал
+  // в лоб то, что клиент только что прислал (баг, живой пример 2026-11-22).
   const needsOldPhotoProof =
     (card.existing_tattoo === 'cover' || card.existing_tattoo === 'scar_work') &&
-    card.photos_count === 0;
+    card.photos_count === 0 &&
+    !card.has_photo_this_message;
   if (needsOldPhotoProof) {
     if (card.old_photo_asked !== 'yes') return 'ask_old_tattoo_photo';
     if (card.old_photo_followup_asked !== 'yes') return 'ask_old_tattoo_photo_followup';
