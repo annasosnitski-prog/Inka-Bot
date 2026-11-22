@@ -45,7 +45,7 @@ export default function Home({ isPlaton }: Props) {
       ctaProjectLink: `https://t.me/${BOT_USERNAME}?start=he_project`,
       ctaCoverup: 'בדיקת כיסוי קעקוע ישן (Cover-Up)',
       ctaCoverupLink: `https://t.me/${BOT_USERNAME}?start=he_coverup`,
-      altText: `אין לך טלגרם? אפשר לראות עבודות ולשלוח הודעה ישירה דרך <a href="${INSTAGRAM_URL}" target="_blank" rel="noopener" onclick="trackConversion('IG_LABEL')">Instagram</a>`,
+      altText: `אין לך טלגרם? אפשר לראות עבודות ולשלוח הודעה ישירה דרך <a href="${INSTAGRAM_URL}" target="_blank" rel="noopener">Instagram</a>`,
       stepsTitle: 'איך מתקדמים מכאן?',
       step1: '1. בוחרים את סוג הפרויקט ועוברים לשיחה קצרה עם העוזר הדיגיטלי בטלגרם.',
       step2: '2. מצרפים תיאור, מיקום בגוף או תמונה של הקעקוע הקיים (במקרה של כיסוי).',
@@ -61,7 +61,7 @@ export default function Home({ isPlaton }: Props) {
       ctaProjectLink: `https://t.me/${BOT_USERNAME}?start=en_project`,
       ctaCoverup: 'Evaluate a Tattoo Cover-Up in Bot',
       ctaCoverupLink: `https://t.me/${BOT_USERNAME}?start=en_coverup`,
-      altText: `No Telegram? View portfolio & message directly on <a href="${INSTAGRAM_URL}" target="_blank" rel="noopener" onclick="trackConversion('IG_LABEL')">Instagram</a>`,
+      altText: `No Telegram? View portfolio & message directly on <a href="${INSTAGRAM_URL}" target="_blank" rel="noopener">Instagram</a>`,
       stepsTitle: 'How it works',
       step1: '1. Choose your project type to open a quick guided chat in Telegram.',
       step2: '2. Share your idea, placement, or a photo of the existing tattoo for cover-up.',
@@ -78,20 +78,27 @@ export default function Home({ isPlaton }: Props) {
           content="Private tattoo studio in Haifa. Large-scale Blackwork, Blackout, Abstract & complex Cover-Up projects. Full-day custom sessions."
         />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        {/* Google Tag Manager — container GTM-WTZK4P2W (Anna, 2026-11-20).
-            Конверсии настраиваются внутри GTM, trackConversion() ниже шлёт
-            события через window.gtag, который этот сниппет направляет в
-            dataLayer. */}
-        <script async src="https://www.googletagmanager.com/gtm.js?id=GTM-WTZK4P2W" />
+        {/* Google Ads conversion ("Переход в бота Platon" — Anna, 2026-11-22):
+            загружаем настоящий gtag.js для AW-18586351280 напрямую, а не
+            полагаемся на тег внутри GTM-контейнера — в опубликованной версии
+            GTM-WTZK4P2W такого тега/триггера нет (проверено по живому
+            gtm.js), и настроить его там некому без доступа в кабинет. Этот
+            способ работает независимо от GTM и ничего там не требует. */}
+        <script async src="https://www.googletagmanager.com/gtag/js?id=AW-18586351280" />
         <script
           dangerouslySetInnerHTML={{
             __html: `
               window.dataLayer = window.dataLayer || [];
               function gtag(){dataLayer.push(arguments);}
               gtag('js', new Date());
+              gtag('config', 'AW-18586351280');
             `,
           }}
         />
+        {/* Google Tag Manager — container GTM-WTZK4P2W (Anna, 2026-11-20).
+            Оставлен как есть: аккаунт AW-18586351280 к нему уже привязан
+            отдельно, но конверсия выше идёт напрямую через gtag.js. */}
+        <script async src="https://www.googletagmanager.com/gtm.js?id=GTM-WTZK4P2W" />
       </Head>
       {/* GTM noscript fallback — стандартная часть установки, идёт сразу после <body>. */}
       <noscript>
@@ -160,9 +167,12 @@ export default function Home({ isPlaton }: Props) {
       <script
         dangerouslySetInnerHTML={{
           __html: `
-            function trackConversion(label) {
+            // Один action в Google Ads ("Переход в бота Platon") — срабатывает
+            // при клике на любую из двух кнопок перехода в Telegram-бот.
+            // Ссылка на Instagram (запасной канал, не бот) эту конверсию не шлёт.
+            function trackBotConversion() {
               if (typeof gtag === 'function') {
-                gtag('event', 'conversion', { 'send_to': 'AW-XXXXXXXXX/' + label });
+                gtag('event', 'conversion', { 'send_to': 'AW-18586351280/UplHCLGHmbwdELDt1J5F' });
               }
             }
           `,
@@ -203,7 +213,7 @@ export default function Home({ isPlaton }: Props) {
                 target="_blank"
                 rel="noopener"
                 className="btn-primary"
-                onClick={() => (window as any).trackConversion?.('PROJECT_LABEL')}
+                onClick={() => (window as any).trackBotConversion?.()}
               >
                 {copy.he.ctaProject}
               </a>
@@ -213,7 +223,7 @@ export default function Home({ isPlaton }: Props) {
                 target="_blank"
                 rel="noopener"
                 className="btn-secondary"
-                onClick={() => (window as any).trackConversion?.('COVERUP_LABEL')}
+                onClick={() => (window as any).trackBotConversion?.()}
               >
                 {copy.he.ctaCoverup}
               </a>
