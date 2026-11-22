@@ -89,7 +89,7 @@ const NOTICES: Record<'ru' | 'he' | 'en', Record<NoticeKind, string>> = {
   },
 };
 function failureNotice(kind: NoticeKind, clientText: string): string {
-  const lang = /[\u0590-\u05FF]/.test(clientText) ? 'he' : /[а-яё]/i.test(clientText) ? 'ru' : 'en';
+  const lang = /[֐-׿]/.test(clientText) ? 'he' : /[а-яё]/i.test(clientText) ? 'ru' : 'en';
   return NOTICES[lang][kind];
 }
 
@@ -396,6 +396,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ? { title: lastCampaignForExtractor.title, offer: lastCampaignForExtractor.offer }
         : null,
     });
+
+    // Референс тату вне обязательного кампейн-поля (выше уже пересылается для него, см. выше) раньше
+    // мастеру вообще не передавался и нигде не сохранялся — dialog_history
+    // держит только текст (lib/dialogLog.ts), а Telegram после обработки сообщения
+    // сам файл уже не вернёт. Без сохранения в Airtable — просто пересылка
+    // самого сообщения мастеру, как и для кампейн-поля выше.
+    let referencePhotoForwardFailed = false;
+    if (
+      extracted.photo_purpose === 'reference' &&
+      hasPhoto &&
+      chatId &&
+      message.message_id &&
+      !campaignRoutingBefore?.pendingField
+    ) {
+      try {
+        referencePhotoForwardFailed = !(await forwardTelegramMessage(MASTER_TELEGRAM_ID, chatId, message.message_id));
+      } catch (referencePhotoForwardErr) {
+        referencePhotoForwardFailed = true;
+        console.error('Reference photo forward failed:', referencePhotoForwardErr);
+      }
+    }
 
     // CAMPAIGN MODE: АВТОМАТИЧЕСКОЕ ПЕРЕКЛЮЧЕНИЕ туда-обратно между кампанией
     // и обычной воронкой (см. lib/campaignFlow.ts). Сделано ДО mergeClientCard/
@@ -1052,6 +1073,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // 10. Отправить ответ, если он не пустой.
     if (campaignPhotoForwardFailed) {
+      finalReply = `${finalReply}\n\n${failureNotice('photo', lastMessageForRecord)}`.trim();
+    }
+    if (referencePhotoForwardFailed) {
       finalReply = `${finalReply}\n\n${failureNotice('photo', lastMessageForRecord)}`.trim();
     }
     let replyDelivered = false;
