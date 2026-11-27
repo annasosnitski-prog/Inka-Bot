@@ -11,9 +11,9 @@ const BOT_USERNAME = 'inka_ps_bot'; // подтверждено Анной 2026-
 const INSTAGRAM_URL = 'https://www.instagram.com/platon_tattoo__/';
 
 // Карусель работ. Реальные фото класть в public/gallery/ и менять src ниже
-// (сейчас — SVG-плейсхолдеры). Портрет 4:5, ~800×1000.
-const GALLERY: { src: string; alt: string }[] = [1, 2, 3, 4, 5, 6].map((n) => ({
-  src: `/gallery/work-${n}.svg`,
+// (сейчас — 13 реальных работ). Портрет 4:5, ~800×1000.
+const GALLERY: { src: string; alt: string }[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((n) => ({
+  src: `/gallery/work-${n}.webp`,
   alt: `Platon Sosnitsky tattoo work ${n}`,
 }));
 
