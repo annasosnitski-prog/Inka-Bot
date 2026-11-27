@@ -52,7 +52,7 @@ export default function Home({ isPlaton }: Props) {
       ctaProjectLink: `https://t.me/${BOT_USERNAME}?start=he_project`,
       ctaCoverup: 'בדיקת כיסוי קעקוע ישן (Cover-Up)',
       ctaCoverupLink: `https://t.me/${BOT_USERNAME}?start=he_coverup`,
-      altText: `אין לך טלגרם? אפשר לראות עבודות ולשלוח הודעה ישירה דרך <a href="${INSTAGRAM_URL}" target="_blank" rel="noopener">Instagram</a>`,
+      altText: `<strong>אין לך טלגרם?</strong> אפשר לראות עבודות ולשלוח הודעה ישירה דרך <a href="${INSTAGRAM_URL}" target="_blank" rel="noopener">Instagram</a>`,
       stepsTitle: 'איך מתקדמים מכאן?',
       step1: '1. בוחרים את סוג הפרויקט ועוברים לשיחה קצרה עם העוזר הדיגיטלי בטלגרם.',
       step2: '2. מצרפים תיאור, מיקום בגוף או תמונה של הקעקוע הקיים (במקרה של כיסוי).',
@@ -68,7 +68,7 @@ export default function Home({ isPlaton }: Props) {
       ctaProjectLink: `https://t.me/${BOT_USERNAME}?start=en_project`,
       ctaCoverup: 'Evaluate a Tattoo Cover-Up in Bot',
       ctaCoverupLink: `https://t.me/${BOT_USERNAME}?start=en_coverup`,
-      altText: `No Telegram? View portfolio & message directly on <a href="${INSTAGRAM_URL}" target="_blank" rel="noopener">Instagram</a>`,
+      altText: `<strong>No Telegram?</strong> View portfolio & message directly on <a href="${INSTAGRAM_URL}" target="_blank" rel="noopener">Instagram</a>`,
       stepsTitle: 'How it works',
       step1: '1. Choose your project type to open a quick guided chat in Telegram.',
       step2: '2. Share your idea, placement, or a photo of the existing tattoo for cover-up.',
@@ -158,8 +158,12 @@ export default function Home({ isPlaton }: Props) {
           border-radius: 10px; transition: border-color 0.2s;
         }
         .btn-secondary:hover { border-color: var(--muted); }
-        .alt-contact { text-align: center; font-size: 13px; color: var(--muted); margin-bottom: 36px; }
-        .alt-contact a { color: var(--text); text-decoration: underline; }
+        .alt-contact {
+          text-align: center; font-size: 15px; color: var(--text); margin-bottom: 36px;
+          border: 1px dashed var(--muted); border-radius: 10px; padding: 14px 16px;
+        }
+        .alt-contact strong { display: block; margin-bottom: 4px; }
+        .alt-contact a { color: var(--accent); font-weight: 600; text-decoration: underline; }
         .gallery { position: relative; margin-bottom: 24px; direction: ltr; }
         .gallery-track {
           display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
