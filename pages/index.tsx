@@ -12,7 +12,7 @@ const INSTAGRAM_URL = 'https://www.instagram.com/platon_tattoo__/';
 
 // Карусель работ. Реальные фото класть в public/gallery/ и менять src ниже
 // (сейчас — 13 реальных работ). Портрет 4:5, ~800×1000.
-const GALLERY: { src: string; alt: string }[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((n) => ({
+const GALLERY: { src: string; alt: string }[] = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1].map((n) => ({
   src: `/gallery/work-${n}.webp`,
   alt: `Platon Sosnitsky tattoo work ${n}`,
 }));
@@ -160,7 +160,7 @@ export default function Home({ isPlaton }: Props) {
         .btn-secondary:hover { border-color: var(--muted); }
         .alt-contact { text-align: center; font-size: 13px; color: var(--muted); margin-bottom: 36px; }
         .alt-contact a { color: var(--text); text-decoration: underline; }
-        .gallery { position: relative; margin-bottom: 32px; direction: ltr; }
+        .gallery { position: relative; margin-bottom: 24px; direction: ltr; }
         .gallery-track {
           display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
           scrollbar-width: none; -webkit-overflow-scrolling: touch;
@@ -231,6 +231,22 @@ export default function Home({ isPlaton }: Props) {
               <span className="tag">Complex Cover-Up</span>
             </div>
 
+            <div className="gallery" id="gallery" aria-roledescription="carousel" aria-label="Tattoo works">
+              <div className="gallery-track" id="gallery-track">
+                {GALLERY.map((g, i) => (
+                  <div className="gallery-item" key={g.src}>
+                    <img src={g.src} alt={g.alt} loading={i === 0 ? 'eager' : 'lazy'} decoding="async" width={800} height={1000} />
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="gallery-nav prev" aria-label="Previous" onClick={() => (window as any).__galleryGo?.(-1)}>
+                ‹
+              </button>
+              <button type="button" className="gallery-nav next" aria-label="Next" onClick={() => (window as any).__galleryGo?.(1)}>
+                ›
+              </button>
+            </div>
+
             <div className="cta-group">
               <a
                 id="cta-project"
@@ -259,22 +275,6 @@ export default function Home({ isPlaton }: Props) {
               className="alt-contact"
               dangerouslySetInnerHTML={{ __html: copy.he.altText }}
             />
-
-            <div className="gallery" id="gallery" aria-roledescription="carousel" aria-label="Tattoo works">
-              <div className="gallery-track" id="gallery-track">
-                {GALLERY.map((g, i) => (
-                  <div className="gallery-item" key={g.src}>
-                    <img src={g.src} alt={g.alt} loading={i === 0 ? 'eager' : 'lazy'} decoding="async" width={800} height={1000} />
-                  </div>
-                ))}
-              </div>
-              <button type="button" className="gallery-nav prev" aria-label="Previous" onClick={() => (window as any).__galleryGo?.(-1)}>
-                ‹
-              </button>
-              <button type="button" className="gallery-nav next" aria-label="Next" onClick={() => (window as any).__galleryGo?.(1)}>
-                ›
-              </button>
-            </div>
 
             <div className="steps">
               <div id="steps-title" className="steps-title">
@@ -327,8 +327,25 @@ export default function Home({ isPlaton }: Props) {
             window.__setLang = setLang;
             window.__galleryGo = function (d) {
               var t = document.getElementById('gallery-track');
-              if (t) t.scrollBy({ left: d * t.clientWidth * 0.75, behavior: 'smooth' });
+              if (!t) return;
+              var step = t.firstElementChild.offsetWidth + 10;
+              var end = t.scrollLeft + t.clientWidth >= t.scrollWidth - 4;
+              if (d > 0 && end) t.scrollTo({ left: 0, behavior: 'smooth' });
+              else t.scrollBy({ left: d * step, behavior: 'smooth' });
             };
+            (function () {
+              var g = document.getElementById('gallery');
+              if (!g || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+              var paused = false, timer;
+              function pause() { paused = true; clearTimeout(timer); }
+              function resume() { paused = false; clearTimeout(timer); timer = setTimeout(tick, 4000); }
+              function tick() { if (!paused && !document.hidden) window.__galleryGo(1); timer = setTimeout(tick, 3000); }
+              g.addEventListener('pointerenter', pause);
+              g.addEventListener('pointerleave', resume);
+              g.addEventListener('touchstart', pause, { passive: true });
+              g.addEventListener('touchend', resume, { passive: true });
+              timer = setTimeout(tick, 3000);
+            })();
             if (new URLSearchParams(window.location.search).get('lang') === 'en') {
               setLang('en');
             }
