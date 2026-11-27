@@ -1313,6 +1313,8 @@ function buildMasterNotification(
       return `🆕 ${who} написал про вторую тату при активной записи. Текущая бронь не изменена. Новый запрос: ${lastMessage}`;
     case 'reschedule_requested_ping_master':
       return `🔄 ${who} просит перенести запись — напиши насчёт нового времени.`;
+    case 'handle_out_of_scope_block':
+      return `🚫 ${who} заблокирован ботом: повторные нецелевые, неподходящие или некорректные сообщения. Последнее: "${lastMessage}". Бот больше не отвечает этому клиенту.`;
     case 'all_done':
       return `⏸ ${who} после озвученной цены не готов(а) записываться сейчас. Его слова: "${lastMessage}"`;
     case 'master_contact_requested':

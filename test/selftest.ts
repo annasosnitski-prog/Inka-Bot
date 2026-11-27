@@ -526,6 +526,19 @@ eq('неправильная раскладка → wrong_keyboard_layout',
 eq('раскладка не перебивает блокировку',
   step({ lead_status: 'blocked' }, { is_wrong_layout: true }), 'silence_blocked');
 eq('заблокирован → silence_blocked', step({ lead_status: 'blocked' }), 'silence_blocked');
+// стоп-лимит отказов по стилю/размеру/зоне (счётчик в spam_count)
+eq('1-й отказ по услуге → handle_service_not_offered',
+  step({ spam_count: 0 }, { service_fit: 'not_offered' }), 'handle_service_not_offered');
+eq('2-й отказ по услуге → всё ещё отказ',
+  step({ spam_count: 1, service_fit: 'not_offered' }, { service_fit: 'not_offered' }), 'handle_service_not_offered');
+eq('3-я попытка после двух отказов → блок',
+  step({ spam_count: 2, service_fit: 'not_offered' }, { service_fit: 'not_offered' }), 'handle_out_of_scope_block');
+eq('вежливое «спасибо» после отказа без свежего сигнала не блокируется',
+  step({ spam_count: 2, service_fit: 'not_offered' }), 'service_gate_followup_chat');
+eq('отказ по услуге увеличивает spam_count (до 2)',
+  getCardPatchForStep('handle_service_not_offered', baseCard({ spam_count: 0 }), sig({ service_fit: 'not_offered' })).spam_count, 1);
+eq('счётчик отказов не превышает 2',
+  getCardPatchForStep('handle_service_not_offered', baseCard({ spam_count: 2 }), sig({ service_fit: 'not_offered' })).spam_count, 2);
 eq('админ → admin_mode', step({}, { is_admin_sender: true }), 'admin_mode');
 eq('админ в режиме /client → обычная воронка (не admin_mode)',
   step({ force_client_mode: 'yes', phone: '05011' }, { is_admin_sender: true }), 'show_tattoo_slots');

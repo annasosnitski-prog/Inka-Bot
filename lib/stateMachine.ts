@@ -511,7 +511,14 @@ export function getNextStep(card: ClientCard, signals: MessageSignals): NextStep
   // "needs_clarification", freshServiceFit null) instead of reaching
   // slots_shown/slots_shown_clarifying below.
   if (effectiveServiceFit === 'not_offered') {
-    return freshServiceFit != null ? 'handle_service_not_offered' : 'service_gate_followup_chat';
+    if (freshServiceFit == null) return 'service_gate_followup_chat';
+    // Stop-limit: every fresh refusal (style/size/zone) is counted in
+    // spam_count (see getCardPatchForStep). After two refusals a third
+    // attempt to push an unsupported request ends the dialog the same way
+    // as persistent off-topic messages: final polite close, then silence,
+    // and the master is notified (see buildMasterNotification).
+    if (card.spam_count >= 2) return 'handle_out_of_scope_block';
+    return 'handle_service_not_offered';
   }
   if (!signals.client_picked_slot_id && effectiveServiceFit === 'needs_clarification') {
     if (freshServiceFit == null) return 'service_gate_followup_chat';
@@ -843,6 +850,10 @@ export function getCardPatchForStep(
       return { ...patch, spam_count: 2 };
     case 'handle_out_of_scope_block':
       return { ...patch, spam_count: 3, lead_status: 'blocked' };
+    case 'handle_service_not_offered': {
+      const next = Math.min((card.spam_count ?? 0) + 1, 2);
+      return { ...patch, spam_count: next as 0 | 1 | 2 };
+    }
     case 'reschedule_requested_ping_master':
       return { ...patch, lead_status: 'waiting_slots_pinged' };
     case 'slot_preference_clarify':
