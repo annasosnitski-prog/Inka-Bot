@@ -1306,7 +1306,9 @@ function buildMasterNotification(
     case 'confirm_slot_awaiting_payment':
       return `🎨 Новая бронь ТАТУ — ${who}. Слот закреплён, клиент ждёт реквизиты для предоплаты ${getDepositAmount()}₪.`;
     case 'confirm_consultation_booked':
-      return `🗓 Новая КОНСУЛЬТАЦИЯ — ${who}. Слот забронирован.`;
+      return getMasterProfile().consultationMode === 'in_person'
+        ? `🗓 Новая КОНСУЛЬТАЦИЯ — ${who}. Слот забронирован. Бот адрес клиенту не называл: свяжись с клиентом сам, подтверди консультацию и сообщи точный адрес.`
+        : `🗓 Новая КОНСУЛЬТАЦИЯ — ${who}. Слот забронирован. Напиши клиенту в выбранный им канал в назначенное время.`;
     case 'payment_screenshot_received':
       return `💰 ${who} прислал скрин предоплаты — проверь сумму и подтверди оплату (скрин переслан ниже).`;
     case 'new_project_after_booking':
