@@ -10,6 +10,13 @@ import Head from 'next/head';
 const BOT_USERNAME = 'inka_ps_bot'; // подтверждено Анной 2026-11-20
 const INSTAGRAM_URL = 'https://www.instagram.com/platon_tattoo__/';
 
+// Карусель работ. Реальные фото класть в public/gallery/ и менять src ниже
+// (сейчас — SVG-плейсхолдеры). Портрет 4:5, ~800×1000.
+const GALLERY: { src: string; alt: string }[] = [1, 2, 3, 4, 5, 6].map((n) => ({
+  src: `/gallery/work-${n}.svg`,
+  alt: `Platon Sosnitsky tattoo work ${n}`,
+}));
+
 type Props = { isPlaton: boolean };
 
 export const getServerSideProps: GetServerSideProps<Props> = async () => {
@@ -153,6 +160,24 @@ export default function Home({ isPlaton }: Props) {
         .btn-secondary:hover { border-color: var(--muted); }
         .alt-contact { text-align: center; font-size: 13px; color: var(--muted); margin-bottom: 36px; }
         .alt-contact a { color: var(--text); text-decoration: underline; }
+        .gallery { position: relative; margin-bottom: 32px; direction: ltr; }
+        .gallery-track {
+          display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
+          scrollbar-width: none; -webkit-overflow-scrolling: touch;
+        }
+        .gallery-track::-webkit-scrollbar { display: none; }
+        .gallery-item {
+          flex: 0 0 72%; scroll-snap-align: center; aspect-ratio: 4 / 5; border-radius: 12px;
+          overflow: hidden; background: var(--card); border: 1px solid var(--border);
+        }
+        .gallery-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .gallery-nav {
+          position: absolute; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; border-radius: 50%;
+          border: 1px solid var(--border); background: rgba(12,12,13,0.7); color: var(--text); font-size: 18px; cursor: pointer;
+        }
+        .gallery-nav.prev { left: 6px; }
+        .gallery-nav.next { right: 6px; }
+        @media (hover: none) { .gallery-nav { display: none; } }
         .steps { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 32px; }
         .steps-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
         .step-item { font-size: 14px; color: var(--muted); margin-bottom: 8px; }
@@ -235,6 +260,22 @@ export default function Home({ isPlaton }: Props) {
               dangerouslySetInnerHTML={{ __html: copy.he.altText }}
             />
 
+            <div className="gallery" id="gallery" aria-roledescription="carousel" aria-label="Tattoo works">
+              <div className="gallery-track" id="gallery-track">
+                {GALLERY.map((g, i) => (
+                  <div className="gallery-item" key={g.src}>
+                    <img src={g.src} alt={g.alt} loading={i === 0 ? 'eager' : 'lazy'} decoding="async" width={800} height={1000} />
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="gallery-nav prev" aria-label="Previous" onClick={() => (window as any).__galleryGo?.(-1)}>
+                ‹
+              </button>
+              <button type="button" className="gallery-nav next" aria-label="Next" onClick={() => (window as any).__galleryGo?.(1)}>
+                ›
+              </button>
+            </div>
+
             <div className="steps">
               <div id="steps-title" className="steps-title">
                 {copy.he.stepsTitle}
@@ -284,6 +325,10 @@ export default function Home({ isPlaton }: Props) {
               document.getElementById('btn-en').classList.toggle('active', l === 'en');
             }
             window.__setLang = setLang;
+            window.__galleryGo = function (d) {
+              var t = document.getElementById('gallery-track');
+              if (t) t.scrollBy({ left: d * t.clientWidth * 0.75, behavior: 'smooth' });
+            };
             if (new URLSearchParams(window.location.search).get('lang') === 'en') {
               setLang('en');
             }
