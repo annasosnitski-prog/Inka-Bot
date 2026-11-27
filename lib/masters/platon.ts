@@ -22,6 +22,11 @@ export const platon: MasterProfile = {
   excludesColorRealism: true,
   totalEstimateDisclosureLimit: 6000,
   campaigns: [],
+  referral: {
+    envVar: 'REFERRAL_BOT_URL',
+    scope: () =>
+      (cache.referral ??= fs.readFileSync(path.join(process.cwd(), 'lib', 'masters', 'platon', 'referral.txt'), 'utf-8')),
+  },
   pricingRules: () =>
     (cache.pricing ??= fs.readFileSync(path.join(process.cwd(), 'lib', 'masters', 'platon', 'pricing.txt'), 'utf-8')),
   serviceScope: () =>

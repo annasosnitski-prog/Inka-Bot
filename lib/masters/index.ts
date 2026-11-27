@@ -40,6 +40,25 @@ function masterLinks(p: MasterProfile): string {
 const SOCIAL_AFTER_BOOKING =
   'В конце, если client_card.social_asked не "yes" и social_link пуст, одним коротким предложением и необязательно попроси инстаграм или фейсбук, чтобы мастеру было видно, с кем будет встреча ("и если пользуешься — скинь инстаграм, не обязательно 🙂"). Не настаивай.';
 
+// Блок переадресации: только если у профиля есть referral И в env задана
+// ссылка. Иначе — прямой запрет, как раньше.
+export function referralBlock(p: MasterProfile, env: Record<string, string | undefined> = process.env): string {
+  const url = p.referral ? (env[p.referral.envVar] ?? '').trim() : '';
+  if (!p.referral || !url) return 'Переадресации на другого бота нет: действует правило выше, никого не предлагай.';
+  return [
+    'ПЕРЕАДРЕСАЦИЯ (единственное исключение из правила "никого не предлагай").',
+    'Если клиент хочет то, что этот мастер не делает (service_fit = "not_offered"), и это',
+    'относится к ТЕМАМ ПЕРЕАДРЕСАЦИИ ниже — после вежливой границы одной фразой предложи',
+    `бота-помощницу другого тату-мастера Инку и дай ровно эту ссылку: ${url}`,
+    'Ничего про Инку не выдумывай (цены, сроки, имя мастера, обещания) — только что там',
+    'можно спросить про такую работу. Ссылку давай один раз; повторяй только если клиент сам спросил.',
+    'Если тема НЕ из списка ниже (или клиент хочет вообще не тату) — вежливый отказ без ссылки.',
+    'Не переадресуй, если запрос подходит этому мастеру (allowed / needs_clarification).',
+    '',
+    p.referral.scope().trim(),
+  ].join('\n');
+}
+
 export function applyProfilePlaceholders(text: string, p: MasterProfile = getMasterProfile()): string {
   const isMale = p.gender === 'male';
   // Блоки профиля подставляются первыми: внутри них тоже бывают
@@ -57,6 +76,7 @@ export function applyProfilePlaceholders(text: string, p: MasterProfile = getMas
         : 'Канал связи НЕ спрашивай: связь остаётся в телеграме. '
     )
     .replace(/\{\{SOCIAL_AFTER_BOOKING\}\}/g, SOCIAL_AFTER_BOOKING)
+    .replace(/\{\{REFERRAL_RULES\}\}/g, () => referralBlock(p))
     .replace(/\{\{MASTER_LINKS\}\}/g, () => masterLinks(p))
     .replace(/\{\{MASTER_NAME_GEN\}\}/g, p.nameGenitive)
     .replace(/\{\{MASTER_NAME_DAT\}\}/g, p.nameDative)
