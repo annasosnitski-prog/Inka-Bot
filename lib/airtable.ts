@@ -126,6 +126,32 @@ export async function findClientsByName(query: string): Promise<ClientRecord[]> 
   return data.records ?? [];
 }
 
+// Клиенты для команды мастера /клиенты: свежие первыми; если задан cutoffMs —
+// только с updated_at позже него. Сортировка на стороне Airtable, постранично,
+// останавливаемся на первой записи старше границы (максимум 300 записей).
+export async function listClientsUpdatedSince(cutoffMs: number | null): Promise<ClientRecord[]> {
+  const out: ClientRecord[] = [];
+  let offset = '';
+  for (let page = 0; page < 3; page++) {
+    const url =
+      `${AIRTABLE_API_URL}?pageSize=100&sort%5B0%5D%5Bfield%5D=updated_at&sort%5B0%5D%5Bdirection%5D=desc` +
+      (offset ? `&offset=${encodeURIComponent(offset)}` : '');
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` } });
+    if (!res.ok) throw new Error(`Airtable list failed: ${res.status} ${await res.text()}`);
+    const data = await res.json();
+    for (const r of data.records ?? []) {
+      if (cutoffMs !== null) {
+        const t = r.fields?.updated_at ? new Date(r.fields.updated_at).getTime() : NaN;
+        if (!Number.isFinite(t) || t < cutoffMs) return out;
+      }
+      out.push(r);
+    }
+    if (!data.offset) break;
+    offset = data.offset;
+  }
+  return out;
+}
+
 // Клиенты с тату-бронью, за которую ещё не пришла предоплата и по которой
 // мастеру ещё не отправлялось напоминание — источник для cron-джобы
 // /api/payment-reminders (шаг 6 #4). Именно deposit_status = "waiting_prepayment"

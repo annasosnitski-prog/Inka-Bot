@@ -300,7 +300,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             null,
         });
         if (chatId && adminResult.reply) {
-          await sendTelegramMessage(chatId, adminResult.reply);
+          if (adminResult.html) await sendTelegramHtml(chatId, adminResult.reply);
+          else await sendTelegramMessage(chatId, adminResult.reply);
         }
       } catch (adminErr) {
         console.error('Admin handler error:', adminErr);

@@ -10,6 +10,8 @@
 //   /счёт  [имя|пересылка]  — сводка по клиенту: идея, цена, предоплата
 //   /портрет [имя|пересылка] — психологический портрет + подготовка (LLM)
 //   /история [имя|пересылка] — вся переписка клиент↔Инка текстом
+//   /ссылка <имя|@username|telegram_id> — ссылки «написать клиенту»
+//   /клиенты [все|7д|неделя|месяц] — список клиентов со ссылками
 //   /расписание [сегодня|неделя|месяц] — календарь Ани из Google
 //   /добавить <тег> <день> <время> — открыть новый слот в календаре
 //   /закрой <тату|приём> <дата> <время> [имя] — заблокировать время
@@ -26,6 +28,7 @@ import path from 'path';
 import {
   findClientByTelegramId,
   findClientsByName,
+  listClientsUpdatedSince,
   findAllClientRecordsByTelegramId,
   upsertClient,
   type ClientRecord,
@@ -44,7 +47,8 @@ import {
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from './addSlotParser';
 import { callOpenAIChat, type ChatContentPart } from './openai';
 import { getDepositAmount, applyProfilePlaceholders, getMasterProfile, type MasterProfile } from './masters';
-import { getTelegramFileDataUrl } from './telegramApi';
+import { getTelegramFileDataUrl, escapeHtml } from './telegramApi';
+import { parseClientsPeriod, formatClientLinkLine, formatClientsList, periodCutoffMs } from './adminClients';
 
 export interface AdminMessage {
   text: string | null;
@@ -56,6 +60,7 @@ export interface AdminMessage {
 
 export interface AdminResult {
   reply: string;
+  html?: boolean; // reply — HTML (кликабельные ссылки), нужно слать через sendTelegramHtml
 }
 
 // ----------------------------------------------------------
@@ -65,6 +70,8 @@ export interface AdminResult {
 const INVOICE_CMDS = ['/счёт', '/счет', '/invoice', 'счёт', 'счет'];
 const PORTRAIT_CMDS = ['/портрет', '/portrait', 'портрет'];
 const HISTORY_CMDS = ['/история', '/history', 'история'];
+const LINK_CMDS = ['/ссылка', '/link', 'ссылка'];
+const CLIENTS_CMDS = ['/клиенты', '/clients', 'клиенты'];
 const SCHEDULE_CMDS = ['/расписание', '/schedule', 'расписание'];
 const ADD_SLOT_CMDS = ['/добавить', '/добавь', '/add', 'добавить', 'добавь'];
 const CLOSE_SLOT_CMDS = ['/закрой', '/закрыть', 'закрой', 'закрыть', '/close', 'close'];
@@ -152,6 +159,12 @@ export async function runAdmin(msg: AdminMessage): Promise<AdminResult> {
   }
   if (HISTORY_CMDS.includes(firstWord)) {
     return { reply: await handleHistory(msg, rest) };
+  }
+  if (LINK_CMDS.includes(firstWord)) {
+    return { reply: await handleLink(msg, rest), html: true };
+  }
+  if (CLIENTS_CMDS.includes(firstWord)) {
+    return { reply: await handleClients(rest), html: true };
   }
   if (SCHEDULE_CMDS.includes(firstWord)) {
     return { reply: await handleSchedule(rest) };
@@ -252,6 +265,32 @@ function ambiguousList(records: ClientRecord[]): string {
     return `• ${name}${uname}${details ? ` — ${details}` : ''}`;
   });
   return 'нашла несколько:\n' + lines.join('\n') + '\nуточни имя точнее или перешли сообщение клиента.';
+}
+
+// ----------------------------------------------------------
+// /ссылка и /клиенты — ссылки «написать клиенту» (ответ в HTML)
+// ----------------------------------------------------------
+
+async function handleLink(msg: AdminMessage, arg: string): Promise<string> {
+  const q = arg.trim();
+  // Число — telegram_id напрямую (резолвер ищет только по имени/@username).
+  const t: TargetResult = /^\d{5,}$/.test(q)
+    ? await (async (): Promise<TargetResult> => {
+        const recs = await findAllClientRecordsByTelegramId(q);
+        return recs.length === 0 ? { kind: 'none' } : { kind: 'found', record: recs[0] };
+      })()
+    : await resolveTarget(msg, q);
+  if (t.kind === 'no_query') return 'чью ссылку дать? напиши: /ссылка Имя (или @username, или telegram_id)';
+  if (t.kind === 'none') return 'не нашла такого клиента в базе.';
+  if (t.kind === 'ambiguous') return escapeHtml(ambiguousList(t.records));
+  return formatClientLinkLine(t.record.fields);
+}
+
+async function handleClients(arg: string): Promise<string> {
+  const days = parseClientsPeriod(arg);
+  if (days === undefined) return 'не поняла период. примеры: /клиенты, /клиенты 7д, /клиенты неделя, /клиенты месяц';
+  const records = await listClientsUpdatedSince(periodCutoffMs(days));
+  return formatClientsList(records, days);
 }
 
 // ----------------------------------------------------------
