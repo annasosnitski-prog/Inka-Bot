@@ -24,7 +24,7 @@ import { getMasterTelegramId } from '../../lib/masterTelegramId';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { timingSafeEqual } from 'crypto';
 import { findSilentQuotedLeads, updateClient } from '../../lib/airtable';
-import { sendTelegramMessage } from '../../lib/telegramApi';
+import { sendTelegramHtml, escapeHtml, clientContactLinks } from '../../lib/telegramApi';
 import { shouldSendWarmLeadReminder } from '../../lib/reminderWindows';
 
 // telegram_id мастера — свой для каждого деплоя (см. MASTER_NAME в lib/admin.ts
@@ -67,17 +67,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const hoursSilent = (now - updatedAt) / (1000 * 60 * 60);
       if (!shouldSendWarmLeadReminder(hoursSilent, SILENCE_WINDOW_HOURS)) continue;
 
-      const who = f.name
-        ? `${f.name}${f.username ? ` (@${f.username})` : ''}`
-        : f.username
-        ? `@${f.username}`
-        : 'клиент';
+      const who = escapeHtml(
+        f.name
+          ? `${f.name}${f.username ? ` (@${f.username})` : ''}`
+          : f.username
+          ? `@${f.username}`
+          : 'клиент'
+      );
+      const tgId = Math.trunc(Number(f.telegram_id));
+      const links = Number.isFinite(tgId) && tgId > 0 ? `\nНаписать: ${clientContactLinks(tgId, f.username ?? '', '')}` : '';
       const priceLine = f.price_quoted ? ` (цена: ${f.price_quoted}₪)` : '';
 
-      const text = `🌙 ${who} узнал цену${priceLine} и молчит уже ~${Math.round(hoursSilent)}ч, не ответив на "хочешь записаться?" — может, стоит написать лично.`;
+      const text = `🌙 ${who} узнал цену${priceLine} и молчит уже ~${Math.round(hoursSilent)}ч, не ответив на "хочешь записаться?" — может, стоит написать лично.${links}`;
 
       try {
-        if (!(await sendTelegramMessage(MASTER_TELEGRAM_ID, text))) throw new Error('Telegram send failed');
+        if (!(await sendTelegramHtml(MASTER_TELEGRAM_ID, text))) throw new Error('Telegram send failed');
         await updateClient(record.id, { warm_lead_reminder_sent: 'yes' });
         reminded++;
       } catch (sendErr) {

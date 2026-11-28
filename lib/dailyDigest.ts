@@ -20,6 +20,8 @@ export const UNFINISHED_LEAD_STATUSES = [
   'waiting_slots_pinged',
 ] as const;
 
+import { escapeHtml, clientContactLinks } from './telegramApi';
+
 export const DIGEST_LOCAL_HOUR = 10;
 // Берём диалоги с активностью за последние сутки: у каждого диалога тогда
 // ровно одна сводка, без повторов день за днём.
@@ -62,15 +64,20 @@ export function buildUnfinishedDialogsDigest(
     const hours = (now.getTime() - t) / 3_600_000;
     if (hours < 0 || hours > DIGEST_WINDOW_HOURS) continue;
 
-    const who = f.name
-      ? `${f.name}${f.username ? ` (@${f.username})` : ''}`
-      : f.username
-      ? `@${f.username}`
-      : 'клиент';
+    const who = escapeHtml(
+      f.name
+        ? `${f.name}${f.username ? ` (@${f.username})` : ''}`
+        : f.username
+        ? `@${f.username}`
+        : 'клиент'
+    );
     const status = STATUS_LABELS[f.lead_status ?? 'new'] ?? 'в диалоге';
     const price = f.price_quoted ? `, цена ${f.price_quoted}₪` : '';
     const phone = f.phone ? `, тел. ${f.phone}` : '';
-    rows.push({ hours, line: `• ${who} — ${status}${price}${phone}, молчит ~${Math.round(hours)}ч` });
+    // telegram_id в Airtable — число (в таблице «1234,0»); берём целое.
+    const tgId = Math.trunc(Number(f.telegram_id));
+    const links = Number.isFinite(tgId) && tgId > 0 ? `\n   Написать: ${clientContactLinks(tgId, f.username ?? '', '')}` : '';
+    rows.push({ hours, line: `• ${who} — ${status}${price}${phone}, молчит ~${Math.round(hours)}ч${links}` });
   }
   if (rows.length === 0) return null;
   rows.sort((a, b) => a.hours - b.hours);
