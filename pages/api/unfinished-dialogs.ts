@@ -11,7 +11,7 @@ import { timingSafeEqual } from 'crypto';
 import { getMasterTelegramId } from '../../lib/masterTelegramId';
 import { getMasterProfile } from '../../lib/masters';
 import { findUnfinishedDialogs, findRecentBookings } from '../../lib/airtable';
-import { sendTelegramMessage } from '../../lib/telegramApi';
+import { sendTelegramMessage, sendTelegramHtml } from '../../lib/telegramApi';
 import { buildUnfinishedDialogsDigest, buildNewBookingsDigest, isDigestHour } from '../../lib/dailyDigest';
 
 function safeEqual(a: string, b: string): boolean {
@@ -50,7 +50,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let unfinishedSent = false;
     let bookingsSent = false;
     if (unfinishedText) {
-      if (!(await sendTelegramMessage(getMasterTelegramId(), unfinishedText))) {
+      if (!(await sendTelegramHtml(getMasterTelegramId(), unfinishedText))) {
         throw new Error('Telegram send failed (unfinished dialogs)');
       }
       unfinishedSent = true;
