@@ -39,6 +39,7 @@ import {
   MASTER_CLOSED_MARKER,
   type AvailableSlot,
 } from '../lib/calendar';
+import { parseClientsPeriod, formatClientsList, formatClientLinkLine } from '../lib/adminClients';
 import { formatInvoice, isScheduleRequest, isSlotCommandLine } from '../lib/admin';
 import { formatDialogHistory, type DialogEntry } from '../lib/dialogLog';
 import { parseAddSlotCommand, parseCloseCommand, parseDeleteCommand } from '../lib/addSlotParser';
@@ -1008,6 +1009,35 @@ eq(
   null
 );
 eq('пустой список → и primary, и secondary null', resolveActiveProjects([]).primary, null);
+
+
+console.log('\n▶ Команды мастера /ссылка и /клиенты');
+eq('период: пусто → все', parseClientsPeriod(''), null);
+eq('период: все', parseClientsPeriod('все'), null);
+eq('период: 7д', parseClientsPeriod('7д'), 7);
+eq('период: 14 дней', parseClientsPeriod('14 дней'), 14);
+eq('период: неделя', parseClientsPeriod('неделя'), 7);
+eq('период: месяц', parseClientsPeriod('месяц'), 30);
+eq('период: мусор → undefined', parseClientsPeriod('когда-нибудь'), undefined);
+const linkLine = formatClientLinkLine({ name: 'Мария <b>', username: 'masha', telegram_id: 123456789.0 });
+ok('ссылка: tg://user?id целым без «,0»', linkLine.includes('tg://user?id=123456789"'));
+ok('ссылка: t.me/username', linkLine.includes('https://t.me/masha'));
+ok('имя экранировано', linkLine.includes('Мария &lt;b&gt;'));
+ok('нет telegram_id → пометка', formatClientLinkLine({ name: 'X' }).includes('нет telegram_id'));
+const list = formatClientsList(
+  [
+    { fields: { name: 'А', telegram_id: 1000001 } },
+    { fields: { name: 'А (2-й проект)', telegram_id: 1000001 } },
+    { fields: { name: 'Б', telegram_id: 1000002 } },
+  ],
+  7
+);
+ok('список: дубль telegram_id схлопнут', list.includes('(2):') && !list.includes('2-й проект'));
+ok('список: пустой', formatClientsList([], null).includes('никого'));
+ok(
+  'список: длинный режется до лимита',
+  formatClientsList(Array.from({ length: 60 }, (_, i) => ({ fields: { name: `К${i}`, username: 'u'.repeat(20), telegram_id: 2000000 + i } })), null).length < 4096
+);
 
 // ================= ИТОГ =================
 console.log(`\n${'='.repeat(40)}`);
