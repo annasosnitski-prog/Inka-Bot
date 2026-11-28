@@ -1,7 +1,7 @@
 // Профили мастеров: выбор по env, изоляция (бот одного мастера не говорит
 // чужими ценами/ссылками/родом), сборка промптов без оставшихся {{...}},
 // разделение price_factors на "для клиента" и "внутреннее".
-import { getMasterProfile } from '../lib/masters';
+import { getMasterProfile, referralBlock } from '../lib/masters';
 import { anya } from '../lib/masters/anya';
 import { platon } from '../lib/masters/platon';
 import { buildExtractorPrompt, normalizeExtractorOutput, applyColorRealismRule, type ExtractorOutput } from '../lib/extractor';
@@ -61,6 +61,20 @@ withEnv({ MASTER_PROFILE: 'nobody', PRICING_PROFILE: undefined }, () => {
   }
   ok('неизвестный профиль → ошибка, а не тихий откат на Аню', threw);
 });
+
+console.log('\n▶ переадресация лидов');
+{
+  const URL = 'https://t.me/example_referral_bot';
+  const withLink = referralBlock(platon, { REFERRAL_BOT_URL: URL });
+  ok('Платон + env: ссылка из env и темы в блоке', withLink.includes(URL) && withLink.includes('ТЕМЫ ПЕРЕАДРЕСАЦИИ'));
+  const noLink = referralBlock(platon, {});
+  ok('Платон без env: ссылки и тем нет, отказ', !noLink.includes('t.me') && !noLink.includes('ТЕМЫ ПЕРЕАДРЕСАЦИИ'));
+  ok('Аня: переадресации нет даже при env', !referralBlock(anya, { REFERRAL_BOT_URL: URL }).includes(URL));
+  withEnv({ REFERRAL_BOT_URL: URL }, () => {
+    ok('промпт Платона содержит ссылку', buildResponderPrompt(platon).includes(URL));
+    ok('промпт Ани без ссылки', !buildResponderPrompt(anya).includes(URL));
+  });
+}
 
 console.log('\n▶ сборка промптов');
 const ANYA_MARKERS = ['ink_anya', 'inkanya', 'INKANYA', 'Аня', 'Ани ', 'Ане ', 'Аней'];

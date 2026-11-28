@@ -293,6 +293,7 @@ Airtable **по записям** (через `record.id`), а не по одно
 | `CRON_SECRET` | авторизация вызовов cron-эндпоинтов |
 | `MASTER_PROFILE` | какой мастер у деплоя (`anya` по умолчанию, `platon`); старое имя `PRICING_PROFILE` тоже читается |
 | `MASTER_TELEGRAM_ID`, `GOOGLE_CALENDAR_ID` | id мастера и календаря этого деплоя |
+| `REFERRAL_BOT_URL` | только Платон: ссылка на бота Инки для переадресации лидов (`lib/masters/platon/referral.txt` — какие темы); не задана — обычный отказ без ссылки |
 | `PAYMENT_BIT`, `PAYMENT_BANK` | реквизиты предоплаты (сумма — в профиле мастера) |
 | `PING_MASTER_ON_ALL_MESSAGES` | опционально: пинговать мастеру вообще каждое сообщение клиента (отладка) |
 
