@@ -52,7 +52,7 @@ export default function Home({ isPlaton }: Props) {
       ctaProjectLink: `https://t.me/${BOT_USERNAME}?start=he_project`,
       ctaCoverup: 'בדיקת כיסוי קעקוע ישן (Cover-Up)',
       ctaCoverupLink: `https://t.me/${BOT_USERNAME}?start=he_coverup`,
-      altText: `אין לך טלגרם? אפשר לראות עבודות ולשלוח הודעה ישירה דרך <a href="${INSTAGRAM_URL}" target="_blank" rel="noopener">Instagram</a>`,
+      ctaInsta: 'אין טלגרם? כתבו לנו באינסטגרם',
       stepsTitle: 'איך מתקדמים מכאן?',
       step1: '1. בוחרים את סוג הפרויקט ועוברים לשיחה קצרה עם העוזר הדיגיטלי בטלגרם.',
       step2: '2. מצרפים תיאור, מיקום בגוף או תמונה של הקעקוע הקיים (במקרה של כיסוי).',
@@ -68,7 +68,7 @@ export default function Home({ isPlaton }: Props) {
       ctaProjectLink: `https://t.me/${BOT_USERNAME}?start=en_project`,
       ctaCoverup: 'Evaluate a Tattoo Cover-Up in Bot',
       ctaCoverupLink: `https://t.me/${BOT_USERNAME}?start=en_coverup`,
-      altText: `No Telegram? View portfolio & message directly on <a href="${INSTAGRAM_URL}" target="_blank" rel="noopener">Instagram</a>`,
+      ctaInsta: 'No Telegram? Message us on Instagram',
       stepsTitle: 'How it works',
       step1: '1. Choose your project type to open a quick guided chat in Telegram.',
       step2: '2. Share your idea, placement, or a photo of the existing tattoo for cover-up.',
@@ -158,8 +158,12 @@ export default function Home({ isPlaton }: Props) {
           border-radius: 10px; transition: border-color 0.2s;
         }
         .btn-secondary:hover { border-color: var(--muted); }
-        .alt-contact { text-align: center; font-size: 13px; color: var(--muted); margin-bottom: 36px; }
-        .alt-contact a { color: var(--text); text-decoration: underline; }
+        .btn-insta {
+          display: flex; align-items: center; justify-content: center; gap: 10px; background: transparent; color: var(--text);
+          border: 1.5px solid var(--muted); text-decoration: none; font-weight: 600; font-size: 15px; padding: 14px 20px;
+          border-radius: 10px; transition: border-color 0.2s, background 0.2s; margin-bottom: 36px;
+        }
+        .btn-insta:hover { border-color: var(--accent); background: var(--card); }
         .gallery { position: relative; margin-bottom: 24px; direction: ltr; }
         .gallery-track {
           display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
@@ -269,12 +273,15 @@ export default function Home({ isPlaton }: Props) {
                 {copy.he.ctaCoverup}
               </a>
             </div>
-
-            <p
-              id="alt-text"
-              className="alt-contact"
-              dangerouslySetInnerHTML={{ __html: copy.he.altText }}
-            />
+            {/* Запасной канал для тех, у кого нет Telegram. Конверсию Google Ads НЕ шлёт — это не переход в бота. */}
+            <a id="cta-insta" href={INSTAGRAM_URL} target="_blank" rel="noopener" className="btn-insta">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+                <rect x="3" y="3" width="18" height="18" rx="5" />
+                <circle cx="12" cy="12" r="4" />
+                <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+              </svg>
+              <span id="cta-insta-label">{copy.he.ctaInsta}</span>
+            </a>
 
             <div className="steps">
               <div id="steps-title" className="steps-title">
@@ -316,7 +323,7 @@ export default function Home({ isPlaton }: Props) {
               var cBtn = document.getElementById('cta-coverup');
               cBtn.textContent = c.ctaCoverup;
               cBtn.href = c.ctaCoverupLink;
-              document.getElementById('alt-text').innerHTML = c.altText;
+              document.getElementById('cta-insta-label').textContent = c.ctaInsta;
               document.getElementById('steps-title').textContent = c.stepsTitle;
               document.getElementById('step-1').textContent = c.step1;
               document.getElementById('step-2').textContent = c.step2;
